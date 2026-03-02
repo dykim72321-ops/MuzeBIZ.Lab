@@ -1,6 +1,6 @@
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth
+from playwright_stealth import Stealth
 from datetime import datetime
 from db_manager import DBManager
 from news_manager import NewsManager
@@ -9,6 +9,8 @@ import ta
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 import random
+import re
+from typing import List, Dict
 
 
 class FinvizHunter:
@@ -189,7 +191,7 @@ class FinvizHunter:
                 browser = await p.chromium.launch(headless=True)
                 context = await browser.new_context(user_agent=self.user_agent)
                 page = await context.new_page()
-                await stealth(page)
+                await Stealth().apply_stealth_async(page)
 
                 print(f"🌐 Navigating to {mode['url']}")
                 await page.goto(
@@ -258,7 +260,6 @@ class FinvizHunter:
                 # I/O 블로킹 방지를 위해 to_thread 사용
                 df = await asyncio.to_thread(tk.history, period="1mo")
                 if df is None or df.empty:
-
                     continue
 
                 price = df["Close"].iloc[-1]
@@ -341,9 +342,194 @@ class FinvizHunter:
 
             await asyncio.sleep(1)  # Be polite
 
-        print("\n🎉 Hybrid Mission Complete.")
+
+class SearchAggregator:
+    def __init__(self):
+        self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        self.base_url = "https://www.findchips.com/search/"
+
+    async def search_market_intel(self, mpn: str) -> List[Dict]:
+        """
+        FindChips를 통해 전 세계 유통사의 실시간 재고 및 가격 정보를 통합 수집
+        """
+        print(f"📡 [AGGREGATOR] Hunting Global Intel for MPN: {mpn} via FindChips...")
+        results = []
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(user_agent=self.user_agent)
+                page = await context.new_page()
+
+                url = f"{self.base_url}{mpn}"
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+
+                # 유통사별 섹션 렌더링 대기
+                try:
+                    await page.wait_for_selector(".distributor-results", timeout=15000)
+                except Exception as e:
+                    print(f"⚠️ [AGGREGATOR] wait_for_selector timeout: {e}")
+
+                # 유통사별 섹션 파싱
+                distributors = await page.query_selector_all(".distributor-results")
+                print(
+                    f"🔍 [AGGREGATOR] Found {len(distributors)} potential distributor sections"
+                )
+
+                for dist in distributors:
+                    try:
+                        name_el = await dist.query_selector(".distributor-name")
+                        if not name_el:
+                            name_el = await dist.query_selector(".distributor-title")
+                        if not name_el:
+                            name_el = await dist.query_selector(".distributor-header a")
+
+                        # 텍스트 추출 시도
+                        dist_name_raw = (
+                            (await name_el.inner_text()).strip() if name_el else ""
+                        )
+
+                        # 텍스트가 비어있다면 로고 이미지의 alt 속성 확인 (FindChips는 로고 사용 빈번)
+                        if not dist_name_raw:
+                            img_el = await dist.query_selector(
+                                ".distributor-header img"
+                            )
+                            if img_el:
+                                dist_name_raw = (
+                                    await img_el.get_attribute("alt")
+                                    or await img_el.get_attribute("title")
+                                    or ""
+                                )
+
+                        dist_name = dist_name_raw.strip() if dist_name_raw else "Other"
+
+                        # 주요 유통사 가독성 개선
+                        common_dists = [
+                            "Mouser",
+                            "Digi-Key",
+                            "Arrow",
+                            "Future",
+                            "Farnell",
+                            "Avnet",
+                            "Newark",
+                            "RS Components",
+                            "TME",
+                            "LCSC",
+                        ]
+                        match_name = next(
+                            (d for d in common_dists if d.lower() in dist_name.lower()),
+                            dist_name,
+                        )
+
+                        # 부품 정보 행 파싱 (data-mpn 속성이 동적으로 늦게 주입될 수 있으므로 td.td-stock 유무로 판단)
+                        rows = await dist.query_selector_all("tr")
+                        row = None
+                        for r in rows:
+                            if await r.query_selector("td.td-stock"):
+                                row = r
+                                break
+
+                        if not row:
+                            continue
+
+                        stock_el = await row.query_selector("td.td-stock")
+                        price_el = await row.query_selector("td.td-price")
+                        mfr_el = await row.query_selector("td.td-mfg")
+
+                        stock_text = (
+                            (await stock_el.inner_text()).strip() if stock_el else "0"
+                        )
+                        price_text = (
+                            (await price_el.inner_text()).strip() if price_el else "0"
+                        )
+                        mfr_text = (
+                            (await mfr_el.inner_text()).strip() if mfr_el else "N/A"
+                        )
+
+                        # 데이터 정제
+                        stock_num = re.sub(r"[^0-9]", "", stock_text)
+                        stock = int(stock_num) if stock_num else 0
+
+                        # 다중 가격 텍스트 안전 파싱 (예: \n으로 구분된 여러 가격 파편 중 첫 번째 유효 숫자 추출)
+                        price_match = re.search(
+                            r"[\d,]+(?:\.\d+)?",
+                            price_text.replace("₩", "").replace("$", ""),
+                        )
+                        if price_match:
+                            try:
+                                price = float(price_match.group().replace(",", ""))
+                            except:
+                                price = 0.0
+                        else:
+                            price = 0.0
+
+                        if stock > 0 or price > 0:
+                            results.append(
+                                {
+                                    "distributor": match_name,
+                                    "mpn": mpn,
+                                    "manufacturer": mfr_text,
+                                    "stock": stock,
+                                    "price": price,
+                                    "risk_level": (
+                                        "Low"
+                                        if stock > 100
+                                        else ("Medium" if stock > 0 else "High")
+                                    ),
+                                    "source_type": "Market Aggregator",
+                                }
+                            )
+                        else:
+                            print(
+                                f"[DEBUG SKIP] {match_name} - stock_txt: '{stock_text}' -> {stock}, price_txt: '{price_text}' -> {price}"
+                            )
+                    except:
+                        continue
+
+                await browser.close()
+
+                # 중복 유통사 제거 및 최적 데이터 선별
+                unique_results = {}
+                for r in results:
+                    d_key = r["distributor"]
+                    if (
+                        d_key not in unique_results
+                        or r["stock"] > unique_results[d_key]["stock"]
+                    ):
+                        unique_results[d_key] = r
+
+                final_list = list(unique_results.values())
+                print(
+                    f"✅ [AGGREGATOR] Successfully aggregated {len(final_list)} distributors for {mpn}"
+                )
+                return final_list
+
+        except Exception as e:
+            print(f"❌ [AGGREGATOR] Critical Failure: {e}")
+            return []
+
+
+class MouserHunter:
+    def __init__(self):
+        self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        self.base_url = "https://www.mouser.kr/Search/Refine?Keyword="
+
+    async def search_mpn(self, mpn: str) -> List[Dict]:
+        aggregator = SearchAggregator()
+        return await aggregator.search_market_intel(mpn)
 
 
 if __name__ == "__main__":
-    hunter = FinvizHunter()
-    asyncio.run(hunter.scrape())
+
+    async def test():
+        aggregator = SearchAggregator()
+        res = await aggregator.search_market_intel("STM32F103")
+        print(f"Test Results: {res}")
+
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        asyncio.run(test())
+    else:
+        hunter = FinvizHunter()
+        asyncio.run(hunter.scrape())

@@ -287,7 +287,9 @@ export async function getTopStocks(historical: boolean = false): Promise<Stock[]
         relevantMetrics: {
           sentimentScore: discoveryInfo?.sentiment_score || 0,
           institutionalOwnership: discoveryInfo?.institutional_ownership || 0,
-        }
+        },
+        stock_analysis_cache: discoveryInfo?.stock_analysis_cache,
+        rawAiSummary: discoveryInfo?.ai_summary
       };
     });
 

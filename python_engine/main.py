@@ -16,7 +16,7 @@ import re
 from cachetools import TTLCache
 import os
 from dotenv import load_dotenv
-from scraper import FinvizHunter
+from scraper import FinvizHunter, MouserHunter
 from db_manager import DBManager
 import asyncio
 from datetime import datetime
@@ -174,7 +174,7 @@ class SourcingEngine:
 
     async def aggregate_intel(self, q: str):
         """
-        Aggregates results from local inventory and external sources (Mocked for demo)
+        Aggregates results from local inventory and real external sources (Mouser)
         """
         standard_parts = []
         
@@ -205,37 +205,36 @@ class SourcingEngine:
                 standard_parts.append(part)
             except Exception: pass
 
-        # 2. Add Mock External Data to populate Market Intel charts
-        mock_external = [
-            {"dist": "Mouser", "stock": 1200, "price": 4.5, "risk": "Low"},
-            {"dist": "Digi-Key", "stock": 850, "price": 4.65, "risk": "Low"},
-            {"dist": "Future Electronics", "stock": 3000, "price": 4.2, "risk": "Medium"},
-            {"dist": "Broker XYZ", "stock": 500, "price": 8.9, "risk": "High"}
-        ]
-
-        for mock in mock_external:
-            try:
-                price = mock['price']
-                part = StandardPart(
-                    id=f"ext-{mock['dist'].lower()}-{uuid.uuid4().hex[:6]}",
-                    mpn=q.upper(),
-                    manufacturer="Texas Instruments",
-                    distributor=mock['dist'],
-                    source_type="Global Aggregator",
-                    stock=mock['stock'],
-                    price=price,
-                    price_history=self._generate_price_history(price),
-                    currency="USD",
-                    delivery="3-5 Days",
-                    condition="New",
-                    date_code="2023+",
-                    is_eol=mock['risk'] == 'High',
-                    risk_level=mock['risk'],
-                    updated_at=datetime.now(),
-                    datasheet="https://www.ti.com/lit/ds/symlink/sample.pdf"
-                )
-                standard_parts.append(part)
-            except Exception: pass
+        # 2. Search Real External Data (Mouser)
+        try:
+            mouser = MouserHunter()
+            external_results = await mouser.search_mpn(q)
+            
+            for ext in external_results:
+                try:
+                    price = ext['price']
+                    part = StandardPart(
+                        id=f"ext-mouser-{uuid.uuid4().hex[:6]}",
+                        mpn=ext['mpn'],
+                        manufacturer=ext['manufacturer'],
+                        distributor=ext['distributor'],
+                        source_type=ext['source_type'],
+                        stock=ext['stock'],
+                        price=price,
+                        price_history=self._generate_price_history(price),
+                        currency="USD",
+                        delivery="3-5 Days",
+                        condition="New",
+                        date_code="2023+",
+                        is_eol=ext['risk_level'] == 'High',
+                        risk_level=ext['risk_level'],
+                        updated_at=datetime.now(),
+                        datasheet="" # PDD/Search table doesn't always have datasheet link directly accessible without extra clicks
+                    )
+                    standard_parts.append(part)
+                except Exception: pass
+        except Exception as e:
+            print(f"⚠️ External Intel Aggregation Error: {e}")
 
         return sorted(standard_parts, key=lambda x: x.price if x.price > 0 else float('inf'))
 
