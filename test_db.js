@@ -1,13 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url = process.env.VITE_SUPABASE_URL
-const key = process.env.VITE_SUPABASE_ANON_KEY
+const supabaseUrl = process.env.VITE_SUPABASE_URL
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY
 
-if (url && key) {
-  const supabase = createClient(url, key)
-  supabase.from('stock_analysis_cache').select('analysis').limit(1).then(res => {
-    console.log(JSON.stringify(res.data, null, 2))
-  })
-} else {
-  console.log("No env vars")
+const supabase = createClient(supabaseUrl, supabaseKey)
+
+async function test() {
+  const { data, error } = await supabase.from('watchlist').select('*').limit(1)
+  console.log("Data:", data)
+  console.log("Error:", error)
 }
+test()

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Trash2, Activity, TrendingUp, TrendingDown, Clock, Search,
-  LayoutGrid, List
+  Trash2, Activity, TrendingUp, TrendingDown, Search,
+  LayoutGrid, List, Zap, ShieldCheck
 } from 'lucide-react';
+import { ResponsiveContainer, AreaChart, Area, YAxis, ReferenceLine } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { getWatchlist, removeFromWatchlist, type WatchlistItem } from '../services/watchlistService';
@@ -52,64 +53,62 @@ export const WatchlistPage = () => {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700">
+    <div className="max-w-[1600px] mx-auto px-6 py-8 space-y-8 animate-in fade-in duration-500 bg-slate-50 min-h-screen">
       {/* Header Section */}
-      <section className="relative overflow-hidden p-8 rounded-[2rem] bg-indigo-500/5 border border-white/5">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-[80px] rounded-full -mr-20 -mt-20" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="flex h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-              <p className="text-[10px] text-slate-500 font-mono font-bold tracking-widest uppercase text-indigo-400">Tactical Watchlist</p>
-            </div>
-            <h1 className="text-4xl font-black text-white tracking-tighter mb-2">My Monitoring Orbit</h1>
-            <p className="text-slate-400 text-sm font-medium">실시간 펄스 정찰 중인 종목 리스트입니다.</p>
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-[#0176d3] rounded-lg shadow-md">
+            <Zap className="w-6 h-6 text-white" />
           </div>
-          
-          <div className="flex items-center gap-3">
-            <div className="relative group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-              <input 
-                type="text"
-                placeholder="Ticker search..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="bg-slate-900/50 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 outline-none w-48 transition-all"
-              />
-            </div>
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-1 flex">
-              <button 
-                onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white/10 text-white' : 'text-slate-500'}`}
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white/10 text-white' : 'text-slate-500'}`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-            </div>
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">Tactical Watchlist</p>
+            <h1 className="text-2xl font-black text-slate-900 leading-tight">My Monitoring Orbit</h1>
           </div>
         </div>
-      </section>
+          
+        <div className="flex items-center gap-3">
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#0176d3] transition-colors" />
+            <input 
+              type="text"
+              placeholder="Ticker search..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-slate-200 rounded-md text-sm text-slate-900 focus:border-[#0176d3] focus:ring-1 focus:ring-[#0176d3] outline-none w-48 transition-all bg-white shadow-sm"
+            />
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-md p-1 flex">
+            <button 
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-[#0176d3]' : 'text-slate-500 hover:bg-slate-100'}`}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-[#0176d3]' : 'text-slate-500 hover:bg-slate-100'}`}
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </header>
 
       {/* Main Grid */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-40 gap-4 opacity-50">
-          <div className="w-12 h-12 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+        <div className="flex flex-col items-center justify-center py-40 gap-4 opacity-70">
+          <div className="w-12 h-12 border-2 border-[#0176d3]/20 border-t-[#0176d3] rounded-full animate-spin" />
           <p className="font-mono text-xs text-slate-500 tracking-widest">SYNCHRONIZING ORBIT...</p>
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="text-center py-40 bg-slate-900/10 rounded-[2rem] border border-dashed border-white/5">
-          <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Activity className="w-6 h-6 text-slate-600" />
+        <div className="text-center py-40 bg-white rounded-xl border border-dashed border-slate-300 shadow-sm">
+          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100">
+            <Activity className="w-6 h-6 text-slate-400" />
           </div>
-          <p className="text-slate-500 font-medium">관심 종목 리스트가 비어있습니다.</p>
+          <p className="text-slate-600 font-medium">관심 종목 리스트가 비어있습니다.</p>
           <button 
             onClick={() => navigate('/scanner')}
-            className="mt-6 text-indigo-400 font-bold hover:underline flex items-center gap-2 mx-auto text-sm"
+            className="mt-6 text-[#0176d3] font-bold hover:underline flex items-center gap-2 mx-auto text-sm"
           >
             새로운 기회 탐색하기 <TrendingUp className="w-3.5 h-3.5" />
           </button>
@@ -133,24 +132,24 @@ export const WatchlistPage = () => {
                   exit={{ opacity: 0, scale: 0.9 }}
                   className={viewMode === 'grid' ? "" : "w-full"}
                 >
-                  <Card className={`group relative overflow-hidden transition-all hover:border-indigo-500/40 ${
+                  <Card className={`group relative overflow-hidden transition-all bg-white border border-slate-200 shadow-sm hover:border-[#0176d3]/40 hover:shadow-md ${
                     viewMode === 'grid' ? 'p-6' : 'p-4 flex items-center justify-between'
                   }`}>
-                    {/* Background Glow */}
-                    <div className={`absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity bg-gradient-to-br ${
+                    {/* Background Glow (Subtle for Light Mode) */}
+                    <div className={`absolute inset-0 opacity-0 group-hover:opacity-[0.03] transition-opacity bg-gradient-to-br ${
                       isPositive ? 'from-emerald-500' : 'from-rose-500'
-                    } to-transparent`} />
+                    } to-transparent pointer-events-none`} />
 
                     <div className={`flex flex-1 ${viewMode === 'grid' ? 'flex-col' : 'items-center gap-6'}`}>
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm border ${
-                            isPositive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                            isPositive ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'
                           }`}>
                             {item.ticker[0]}
                           </div>
                           <div>
-                            <h3 className="font-black text-xl text-white tracking-tighter">{item.ticker}</h3>
+                            <h3 className="font-black text-xl text-slate-900 tracking-tighter">{item.ticker}</h3>
                             <p className="text-[10px] text-slate-500 font-bold uppercase truncate max-w-[100px]">
                               {stock?.name || 'Loading...'}
                             </p>
@@ -158,44 +157,107 @@ export const WatchlistPage = () => {
                         </div>
                         
                         {viewMode === 'grid' && (
-                          <button 
-                            onClick={() => handleRemove(item.ticker)}
-                            className="p-2 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {stock?.dnaScore && (
+                              <div className="flex items-center gap-1 bg-[#0176d3]/10 text-[#0176d3] px-2 py-1 rounded text-[10px] font-black tracking-widest border border-[#0176d3]/20">
+                                <ShieldCheck className="w-3 h-3" />
+                                {stock.dnaScore}% 정확도
+                              </div>
+                            )}
+                            <button 
+                              onClick={() => handleRemove(item.ticker)}
+                              className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         )}
                       </div>
 
                       <div className={`flex items-end justify-between ${viewMode === 'grid' ? '' : 'flex-1'}`}>
                         <div>
-                          <p className="text-[10px] text-slate-600 font-black uppercase tracking-widest mb-1">Market Price</p>
-                          <p className="text-2xl font-black text-white font-mono">
-                            {stock ? `$${stock.price.toFixed(2)}` : '---'}
+                          <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Entry Price</p>
+                          <p className="text-xl font-black text-slate-400 font-mono line-through opacity-70">
+                            {item.entryPrice ? `$${item.entryPrice.toFixed(2)}` : 'N/A'}
                           </p>
                         </div>
                         <div className="text-right">
-                          <div className={`flex items-center gap-1.5 font-black font-mono text-sm ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                            {stock ? `${isPositive ? '+' : ''}${stock.changePercent.toFixed(2)}%` : '0.00%'}
-                          </div>
-                          <p className="text-[10px] text-slate-600 font-bold uppercase tracking-tighter flex items-center gap-1 justify-end mt-1">
-                            <Clock className="w-3 h-3" /> {new Date(item.addedAt).toLocaleDateString()}
+                          <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Current</p>
+                          <p className={`text-2xl font-black font-mono ${isPositive ? 'text-emerald-500 drop-shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.4)]'}`}>
+                            {stock ? `$${stock.price.toFixed(2)}` : '---'}
                           </p>
                         </div>
                       </div>
+
+                      {/* Performance Chart */}
+                      {item.entryPrice && stock && viewMode === 'grid' && (
+                        <div className="h-20 w-full mt-4 relative">
+                          {(() => {
+                            const returnPct = ((stock.price / item.entryPrice) - 1) * 100;
+                            const isProfit = returnPct >= 0;
+                            const color = isProfit ? '#10b981' : '#f43f5e';
+                            
+                            // Mocking intermediate points for visualization since we don't have full history
+                            const data = [
+                              { name: 'Entry', val: 0 },
+                              { name: 'Mid1', val: returnPct * 0.3 },
+                              { name: 'Mid2', val: returnPct * 0.7 },
+                              { name: 'Current', val: returnPct }
+                            ];
+
+                            return (
+                              <>
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <AreaChart data={data}>
+                                    <defs>
+                                      <linearGradient id={`color-${item.ticker}`} x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
+                                        <stop offset="95%" stopColor={color} stopOpacity={0}/>
+                                      </linearGradient>
+                                    </defs>
+                                    <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide />
+                                    <ReferenceLine y={0} stroke="rgba(0,0,0,0.1)" strokeDasharray="3 3" />
+                                    <Area 
+                                      type="monotone" 
+                                      dataKey="val" 
+                                      stroke={color} 
+                                      strokeWidth={3}
+                                      fillOpacity={1}
+                                      fill={`url(#color-${item.ticker})`}
+                                      isAnimationActive={true}
+                                      animationDuration={1500}
+                                    />
+                                  </AreaChart>
+                                </ResponsiveContainer>
+                                <div className="absolute top-0 left-0 bg-white/80 px-2 py-1 rounded-md backdrop-blur-md border border-slate-200 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono">
+                                  {isProfit ? <TrendingUp className="w-3 h-3 text-emerald-400" /> : <TrendingDown className="w-3 h-3 text-rose-400" />}
+                                  <span className={isProfit ? 'text-emerald-400' : 'text-rose-400'}>
+                                    {isProfit ? '+' : ''}{returnPct.toFixed(2)}%
+                                  </span>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
                       
                       {viewMode === 'list' && (
                         <div className="flex items-center gap-4 ml-8">
+                           {stock?.dnaScore && (
+                              <div className="flex items-center gap-1 bg-[#0176d3]/10 text-[#0176d3] px-2 py-1 rounded-md text-[10px] font-black tracking-widest border border-[#0176d3]/20 whitespace-nowrap">
+                                <ShieldCheck className="w-3 h-3" />
+                                {stock.dnaScore}% 정확도
+                              </div>
+                            )}
                            <button 
                             onClick={() => navigate(`/analysis/${item.ticker}`)}
-                            className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl text-xs font-bold text-slate-300 transition-all"
+                            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-xs font-bold text-slate-700 transition-all"
                           >
                             Analyze
                           </button>
                           <button 
                             onClick={() => handleRemove(item.ticker)}
-                            className="p-2 text-slate-600 hover:text-rose-500 transition-all"
+                            className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-all"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

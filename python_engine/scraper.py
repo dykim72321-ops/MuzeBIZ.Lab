@@ -462,6 +462,7 @@ class SearchAggregator:
                         stock_el = await row.query_selector("td.td-stock")
                         price_el = await row.query_selector("td.td-price")
                         mfr_el = await row.query_selector("td.td-mfg")
+                        part_el = await row.query_selector("td.td-part a, td.td-part")
 
                         stock_text = (
                             (await stock_el.inner_text()).strip() if stock_el else "0"
@@ -472,6 +473,12 @@ class SearchAggregator:
                         mfr_text = (
                             (await mfr_el.inner_text()).strip() if mfr_el else "N/A"
                         )
+                        actual_mpn = (
+                            (await part_el.inner_text()).strip() if part_el else mpn
+                        )
+                        # Remove extra newlines or spaces from actual_mpn just in case
+                        if actual_mpn:
+                            actual_mpn = actual_mpn.split('\n')[0].strip()
 
                         # 데이터 정제
                         stock_num = re.sub(r"[^0-9]", "", stock_text)
@@ -490,11 +497,24 @@ class SearchAggregator:
                         else:
                             price = 0.0
 
+                        # Buy link 추출 시도 (FindChips의 구매/리디렉트 링크)
+                        buy_link_el = await row.query_selector("a[href*='/buy/'], td.td-buy a, td.td-price a, a.btn-buy")
+                        buy_url = ""
+                        if buy_link_el:
+                            href = await buy_link_el.get_attribute("href")
+                            if href:
+                                if href.startswith("/"):
+                                    buy_url = "https://www.findchips.com" + (href if not href.startswith("//") else href[1:])
+                                    # Handle double slash if href started with /
+                                    buy_url = buy_url.replace("findchips.com//", "findchips.com/")
+                                else:
+                                    buy_url = href
+
                         if stock > 0 or price > 0:
                             results.append(
                                 {
                                     "distributor": match_name,
-                                    "mpn": mpn,
+                                    "mpn": actual_mpn,
                                     "manufacturer": mfr_text,
                                     "stock": stock,
                                     "price": price,
@@ -504,6 +524,7 @@ class SearchAggregator:
                                         else ("Medium" if stock > 0 else "High")
                                     ),
                                     "source_type": "Market Aggregator",
+                                    "product_url": buy_url
                                 }
                             )
                         else:

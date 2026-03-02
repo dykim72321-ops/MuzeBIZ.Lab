@@ -39,7 +39,6 @@ interface StockTerminalModalProps {
             volume_surge_multiplier: number;
         };
     };
-    onSimulation?: () => Promise<void>;
     onAddToWatchlist?: () => Promise<void>;
 }
 
@@ -47,10 +46,8 @@ export const StockTerminalModal = ({
     isOpen, 
     onClose, 
     data,
-    onSimulation,
     onAddToWatchlist
 }: StockTerminalModalProps) => {
-    const [isSimulating, setIsSimulating] = useState(false);
     const [isAddingWatchlist, setIsAddingWatchlist] = useState(false);
 
 
@@ -243,20 +240,6 @@ export const StockTerminalModal = ({
 
                                 {/* Action Footer */}
                                 <div className="pt-6 flex flex-col sm:flex-row gap-4">
-                                    <button 
-                                        onClick={async () => {
-                                            if (onSimulation) {
-                                                setIsSimulating(true);
-                                                await onSimulation();
-                                                setIsSimulating(false);
-                                            }
-                                        }}
-                                        disabled={isSimulating}
-                                        className="flex-1 bg-white text-black font-black py-4 rounded-2xl hover:bg-indigo-50 transition-colors uppercase tracking-widest text-xs shadow-lg shadow-white/5 disabled:opacity-50 flex items-center justify-center gap-2"
-                                    >
-                                        {isSimulating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                                        시뮬레이션 투자하기
-                                    </button>
                                     <button 
                                         onClick={async () => {
                                             if (onAddToWatchlist) {

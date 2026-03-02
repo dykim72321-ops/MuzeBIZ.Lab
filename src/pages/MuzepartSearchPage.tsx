@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
-  LineChart, Line, XAxis, YAxis, CartesianGrid, AreaChart, Area
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
+  XAxis, YAxis, CartesianGrid, AreaChart, Area
 } from 'recharts';
 import './MuzepartSearchPage.css';
 
@@ -38,14 +38,7 @@ interface ComponentPart {
   product_url?: string;
 }
 
-interface MarketStats {
-  market_temperature: string;
-  global_stock_index: number;
-  active_brokers: number;
-  price_drift: number;
-  last_sync: string;
-  recent_logs: string[];
-}
+
 
 type JourneyPhase = 'IDLE' | 'SCOUTING' | 'RESULTS';
 
@@ -95,7 +88,6 @@ const getBrandIcon = (mfr: string) => {
 };
 
 const SearchPlatform: React.FC = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [phase, setPhase] = useState<JourneyPhase>('IDLE');
   const [query, setQuery] = useState('');
@@ -105,7 +97,7 @@ const SearchPlatform: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState<ComponentPart | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [marketStats, setMarketStats] = useState<MarketStats | null>(null);
+
   const [trackingId, setTrackingId] = useState<string | null>(null);
   const [isBackendConnected, setIsBackendConnected] = useState<boolean>(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -125,8 +117,8 @@ const SearchPlatform: React.FC = () => {
   const itemsPerPage = 10;
 
   // --- New: Market Intel State ---
-  type IntelTab = 'INVENTORY' | 'RISK' | 'VOLATILITY';
-  const [activeIntelTab, setActiveIntelTab] = useState<IntelTab>('INVENTORY');
+
+
 
   // --- Derived: Market Intel Data ---
   const intelData = useMemo(() => {
@@ -249,7 +241,6 @@ const SearchPlatform: React.FC = () => {
         const data = await res.json();
         setIsBackendConnected(true);
         setConnectionError(null);
-        setMarketStats(data);
         if (data.recent_logs) {
           setLogs(prev => [...prev.slice(-10), ...data.recent_logs]);
         }
@@ -528,14 +519,16 @@ const SearchPlatform: React.FC = () => {
               return (
                 <tr key={`${part.id}-${part.distributor}`}>
                   <td className="dist-cell">
-                    <span className={`distributor-badge ${badgeClass}`}>{part.distributor}</span>
+                    <span className={`distributor-badge ${badgeClass}`} title={part.distributor}>
+                      {part.distributor}
+                    </span>
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       {getBrandIcon(part.manufacturer)}
                       <div>
-                        <div className="mpn-cell" onClick={() => navigate(`/part/${part.mpn}`)}>{part.mpn}</div>
-                        <div className="mfr-cell">{part.manufacturer}</div>
+                        <div className="mpn-cell-text" title="Part Number">{part.mpn}</div>
+                        <div className="mfr-cell" title="Manufacturer">{part.manufacturer}</div>
                       </div>
                     </div>
                   </td>
@@ -553,6 +546,7 @@ const SearchPlatform: React.FC = () => {
                       <button 
                         className="btn-table-action"
                         onClick={() => window.open(part.datasheet, '_blank')}
+                        title="View PDF Datasheet"
                       >📄</button>
                     )}
                     
@@ -561,11 +555,13 @@ const SearchPlatform: React.FC = () => {
                         className="sfdc-button"
                         onClick={() => window.open(getDistributorUrl(part), '_blank')}
                         style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        title="Check price and availability on Distributor site"
                       >🔗 Check Site</button>
                     ) : (
                       <button 
                         className="btn-table-action"
                         onClick={() => window.open(getDistributorUrl(part), '_blank')}
+                        title={`Buy ${part.mpn} at ${part.distributor}`}
                       >🛒</button>
                     )}
                     
@@ -840,42 +836,110 @@ const SearchPlatform: React.FC = () => {
         </div>
       </header>
 
-      {/* Quick Stats Strip */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 sfdc-card flex items-center gap-5">
-          <div className="p-3.5 rounded-lg shadow-sm bg-[#0176d3] text-white">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" /></svg>
+      {/* Market Intel Visualization Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Global Inventory Card */}
+        <div className="sfdc-card p-5">
+          <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-500 rounded-lg text-white shadow-sm">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" /></svg>
+              </div>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Global Inventory</h3>
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">마켓 상태</p>
-            <h3 className="text-lg font-black text-slate-900">{marketStats?.market_temperature || 'SCANNING...'}</h3>
+          <div className="h-[200px] flex items-center justify-center">
+            {!intelData ? (
+              <p className="text-xs text-slate-400 font-medium">검색 후 업데이트됩니다.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={intelData.inventoryData}
+                    innerRadius={45}
+                    outerRadius={65}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {intelData.inventoryData.map((_, index) => (
+                      <Cell key={`cell-${index}`} fill={['#0176d3', '#4bc076', '#f2cf5b', '#ef6e64', '#9050e9'][index % 5]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
-        <div className="p-5 sfdc-card flex items-center gap-5">
-          <div className="p-3.5 rounded-lg shadow-sm bg-[#4bc076] text-white">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+
+        {/* EOL Risk Map Card */}
+        <div className="sfdc-card p-5">
+          <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-500 rounded-lg text-white shadow-sm">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+              </div>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">EOL Risk Map</h3>
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">글로벌 재고 인덱스</p>
-            <h3 className="text-lg font-black text-slate-900 tabular-nums">{marketStats?.global_stock_index?.toLocaleString() || '—'}</h3>
+          <div className="h-[200px] flex flex-col justify-center gap-4 px-2">
+            {!intelData ? (
+              <p className="text-xs text-slate-400 font-medium text-center">검색 후 업데이트됩니다.</p>
+            ) : (
+              intelData.riskData.map((item) => (
+                <div key={item.name} className="space-y-1">
+                  <div className="flex justify-between text-[11px] font-black text-slate-600 uppercase tracking-tight">
+                    <span>{item.name} Risk</span>
+                    <span>{item.value} Parts</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-50">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-1000 ${
+                        item.name === 'High' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]' : 
+                        item.name === 'Medium' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : 
+                        'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]'
+                      }`}
+                      style={{ width: `${(item.value / results.length) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
-        <div className="p-5 sfdc-card flex items-center gap-5">
-          <div className="p-3.5 rounded-lg shadow-sm bg-[#f2cf5b] text-white">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+
+        {/* Price Volatility Card */}
+        <div className="sfdc-card p-5">
+          <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-rose-500 rounded-lg text-white shadow-sm">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+              </div>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Price Volatility</h3>
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">활성 브로커</p>
-            <h3 className="text-lg font-black text-slate-900 tabular-nums">{marketStats?.active_brokers || '—'} Active</h3>
-          </div>
-        </div>
-        <div className="p-5 sfdc-card flex items-center gap-5">
-          <div className="p-3.5 rounded-lg shadow-sm bg-[#ef6e64] text-white">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
-          </div>
-          <div>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">가격 드리프트</p>
-            <h3 className="text-lg font-black text-slate-900 tabular-nums">{marketStats?.price_drift || 0}%</h3>
+          <div className="h-[200px]">
+            {!intelData ? (
+              <div className="h-full flex items-center justify-center">
+                <p className="text-xs text-slate-400 font-medium">검색 후 업데이트됩니다.</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={intelData.combinedHistory}>
+                  <defs>
+                    <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef6e64" stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor="#ef6e64" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="time" hide />
+                  <YAxis hide domain={['auto', 'auto']} />
+                  <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                  <Area type="monotone" dataKey="price" stroke="#ef6e64" fillOpacity={1} fill="url(#colorPrice)" strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
@@ -905,107 +969,6 @@ const SearchPlatform: React.FC = () => {
             </div>
           </div>
 
-          <div className="sfdc-card">
-            <div className="sfdc-card-header">
-              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-tight">Market Intel</h3>
-            </div>
-            <div className="p-4 space-y-4">
-              <div className="flex flex-col gap-1">
-                <button 
-                  onClick={() => setActiveIntelTab('INVENTORY')}
-                  className={`px-3 py-2 rounded-md text-sm font-bold text-left transition-colors ${activeIntelTab === 'INVENTORY' ? 'text-[#0176d3] bg-blue-50 border border-blue-100' : 'text-slate-600 hover:bg-slate-50'}`}
-                >
-                  Global Inventory
-                </button>
-                <button 
-                  onClick={() => setActiveIntelTab('RISK')}
-                  className={`px-3 py-2 rounded-md text-sm font-bold text-left transition-colors ${activeIntelTab === 'RISK' ? 'text-[#0176d3] bg-blue-50 border border-blue-100' : 'text-slate-600 hover:bg-slate-50'}`}
-                >
-                  EOL Risk Map
-                </button>
-                <button 
-                  onClick={() => setActiveIntelTab('VOLATILITY')}
-                  className={`px-3 py-2 rounded-md text-sm font-bold text-left transition-colors ${activeIntelTab === 'VOLATILITY' ? 'text-[#0176d3] bg-blue-50 border border-blue-100' : 'text-slate-600 hover:bg-slate-50'}`}
-                >
-                  Price Volatility
-                </button>
-              </div>
-
-              {/* Chart Display Area */}
-              <div className="pt-4 border-t border-slate-100 min-h-[200px] flex items-center justify-center">
-                {!intelData ? (
-                  <div className="text-center p-4">
-                    <p className="text-xs text-slate-400 font-medium">인텔 분석을 위해<br/>먼저 검색을 실행하세요.</p>
-                  </div>
-                ) : (
-                  <div className="w-full h-[180px]">
-                    {activeIntelTab === 'INVENTORY' && (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={intelData.inventoryData}
-                            innerRadius={40}
-                            outerRadius={60}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {intelData.inventoryData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={['#0176d3', '#4bc076', '#f2cf5b', '#ef6e64', '#9050e9'][index % 5]} />
-                            ))}
-                          </Pie>
-                          <Tooltip 
-                            contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    )}
-
-                    {activeIntelTab === 'RISK' && (
-                      <div className="space-y-3 px-2">
-                        <div className="text-center mb-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase">Risk Distribution</span>
-                        </div>
-                        {intelData.riskData.map((item) => (
-                          <div key={item.name} className="space-y-1">
-                            <div className="flex justify-between text-[10px] font-bold">
-                              <span>{item.name}</span>
-                              <span>{item.value} Parts</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full rounded-full ${item.name === 'High' ? 'bg-rose-500' : item.name === 'Medium' ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                                style={{ width: `${(item.value / results.length) * 100}%` }}
-                              ></div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {activeIntelTab === 'VOLATILITY' && (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={intelData.combinedHistory}>
-                          <defs>
-                            <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#0176d3" stopOpacity={0.3}/>
-                              <stop offset="95%" stopColor="#0176d3" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                          <XAxis dataKey="time" hide />
-                          <YAxis hide domain={['auto', 'auto']} />
-                          <Tooltip 
-                            contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                          />
-                          <Area type="monotone" dataKey="price" stroke="#0176d3" fillOpacity={1} fill="url(#colorPrice)" strokeWidth={2} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Main Results Panel */}

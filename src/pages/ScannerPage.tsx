@@ -13,8 +13,10 @@ import { motion } from 'framer-motion';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { addToWatchlist } from '../services/watchlistService';
 import { addToPortfolio } from '../services/portfolioService';
+import { useNavigate } from 'react-router-dom';
 
 export const ScannerPage = () => {
+  const navigate = useNavigate();
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -150,11 +152,18 @@ export const ScannerPage = () => {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 py-2 px-4 bg-slate-50 rounded-lg border border-slate-200 text-xs">
+          <div className="hidden md:flex items-center gap-2 py-2 px-4 bg-slate-50 rounded-lg border border-slate-200 text-xs">
             <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="font-bold text-slate-500">AI Market Pulse</span>
             <span className="font-black text-slate-800">Bullish Sector Rotation</span>
           </div>
+          <button
+            onClick={() => navigate('/watchlist')}
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-sm border border-slate-200 transition-colors"
+          >
+            My Monitoring Orbit
+            <ArrowUpRight className="w-4 h-4" />
+          </button>
           <button
             onClick={fetchStocks}
             className="sfdc-button-primary flex items-center gap-2"
@@ -459,13 +468,9 @@ export const ScannerPage = () => {
           isOpen={!!terminalData}
           onClose={() => setTerminalData(null)}
           data={terminalData}
-          onSimulation={async () => {
-            const res = await addToPortfolio(terminalData.ticker, terminalData.price || 0);
-            alert(res.message);
-          }}
           onAddToWatchlist={async () => {
             await addToWatchlist(terminalData.ticker, undefined, 'WATCHING', terminalData.price);
-            alert(`${terminalData.ticker}가 관심 종목에 추가되었습니다.`);
+            navigate('/watchlist');
           }}
         />
       )}

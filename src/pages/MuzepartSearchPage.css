@@ -381,38 +381,135 @@ body {
 
 /* Distributor Badges */
 .distributor-badge {
-  display: inline-block;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  margin-bottom: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start; /* Left align for long names */
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px; /* slightly rounded corners instead of pure pill */
+  font-size: 0.7rem;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  white-space: normal; /* allow wrapping if absolutely necessary */
+  word-break: break-word; /* prevent overflowing the cell */
+  max-width: 180px; /* give it a bit more width */
+  line-height: 1.2;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.distributor-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.08);
 }
 
 .dist-mouser {
   background: #eff6ff;
-  color: #2563eb;
+  color: #1e40af; /* darker blue for better readability */
   border: 1px solid #bfdbfe;
 }
 
 .dist-digikey {
   background: #fef2f2;
-  color: #dc2626;
+  color: #b91c1c; /* darker red */
   border: 1px solid #fecaca;
 }
 
 .dist-eol {
   background: #fff7ed;
-  color: #ea580c;
+  color: #c2410c; /* darker orange */
   border: 1px solid #fed7aa;
 }
 
 .dist-general {
-  background: #f1f5f9;
-  color: #475569;
+  background: #f8fafc;
+  color: #475569; /* deeper gray */
+  border: 1px solid #cbd5e1;
+}
+
+/* Data Table Polish */
+.results-table-container {
+  background: white;
+  border-radius: 1rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
   border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.results-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed; /* fix table layout */
+  width: 100%;
+}
+
+/* Set specific column widths */
+.results-table th:nth-child(1) { width: 22%; } /* Distributor */
+.results-table th:nth-child(2) { width: 33%; } /* MPN / MFR */
+.results-table th:nth-child(3) { width: 12%; } /* Stock */
+.results-table th:nth-child(4) { width: 15%; } /* Price */
+.results-table th:nth-child(5) { width: 10%; } /* Lead Time */
+.results-table th:nth-child(6) { width: 8%; }  /* Actions */
+
+.results-table tr {
+  transition: background-color 0.15s ease;
+}
+
+.results-table tbody tr:hover {
+  background-color: #f8fafc !important; /* subtler hover */
+}
+
+.results-table th {
+  background: #f1f5f9; /* slightly darker header bg */
+  padding: 1rem 1.2rem;
+  font-weight: 800;
+  color: #334155;
+  border-bottom: 2px solid #cbd5e1;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.results-table td {
+  padding: 1.25rem 1.2rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+/* Removed link styling from MPN */
+.mpn-cell-text {
+  font-weight: 900;
+  color: #0f172a;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.2rem;
+}
+
+.mfr-cell {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.stock-cell.in-stock {
+  color: #10b981;
+  font-weight: 800;
+}
+
+.stock-cell.low-stock {
+  color: #f59e0b;
+  font-weight: 800;
+}
+
+.stock-cell.out-of-stock {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.price-cell {
+  font-weight: 800;
+  color: #0f172a;
 }
 
 /* Data Table */
@@ -545,6 +642,7 @@ body {
 .glow-text {
   text-shadow: 0 0 15px rgba(56, 189, 248, 0.6);
   background: linear-gradient(90deg, #fff, var(--neon-accent));
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -668,6 +766,7 @@ body {
   line-height: 1.1;
   margin-bottom: 1.5rem;
   background: linear-gradient(to bottom, #fff 40%, rgba(255, 255, 255, 0.6));
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
