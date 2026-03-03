@@ -205,6 +205,7 @@ export async function fetchStockQuote(ticker: string): Promise<Stock | null> {
         relativeVolume: data.relativeVolume,
       },
       newsHeadlines: data.newsHeadlines || [],
+      history: data.history || [], // 🆕 Received from Edge Function (CORS-safe)
     };
 
     // Log source information
@@ -236,6 +237,20 @@ export async function fetchMultipleStocks(tickers: string[]): Promise<Stock[]> {
   }
   return results;
 }
+
+export async function fetchStockHistory(ticker: string, resolution: string = 'D', days: number = 30): Promise<{ date: string; price: number }[]> {
+  // Check cache first
+  const cached = cache.get(ticker);
+  if (cached && cached.data.history && cached.data.history.length > 0) {
+    return cached.data.history;
+  }
+
+  // If not in cache, fetch quote (which now includes history via Edge Function proxy)
+  const stock = await fetchStockQuote(ticker);
+  return stock?.history || [];
+}
+
+
 
 export async function getTopStocks(historical: boolean = false): Promise<Stock[]> {
   try {

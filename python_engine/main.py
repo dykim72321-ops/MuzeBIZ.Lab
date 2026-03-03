@@ -174,15 +174,9 @@ class SourcingEngine:
         self.exchange_rate = 1450.0
 
     def _generate_price_history(self, current_price: float):
+        """Returns actual current price only — no mock/fake history."""
         if current_price > 0:
-            # Generate a 5-point mock history for visualization
-            return [
-                round(current_price * 0.92, 2),
-                round(current_price * 1.05, 2),
-                round(current_price * 0.98, 2),
-                round(current_price * 1.10, 2),
-                round(current_price, 2),
-            ]
+            return [round(current_price, 2)]
         return []
 
     async def aggregate_intel(self, q: str):

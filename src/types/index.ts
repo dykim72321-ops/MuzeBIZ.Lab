@@ -42,6 +42,7 @@ export interface Stock {
   newsHeadlines?: string[]; // 🆕 Google News headlines
   stock_analysis_cache?: { analysis: any }[]; // 🆕 AI Analysis Cache for deep-dives
   rawAiSummary?: string; // Fallback text from daily_discovery
+  history?: HistoricalDataPoint[];
 }
 
 export interface HistoricalDataPoint {

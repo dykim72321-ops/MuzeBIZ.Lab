@@ -4,7 +4,7 @@ import {
   Trash2, Activity, TrendingUp, TrendingDown, Search,
   LayoutGrid, List, Zap, ShieldCheck
 } from 'lucide-react';
-import { ResponsiveContainer, AreaChart, Area, YAxis, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, YAxis, ReferenceLine, Tooltip as RechartsTooltip } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { getWatchlist, removeFromWatchlist, type WatchlistItem } from '../services/watchlistService';
@@ -28,7 +28,19 @@ export const WatchlistPage = () => {
       if (items.length > 0) {
         const tickers = items.map(i => i.ticker);
         const stockData = await fetchMultipleStocks(tickers);
-        setStocks(stockData);
+        
+        // Fetch history data concurrently for all stocks
+        const historyPromises = tickers.map(ticker => import('../services/stockService').then(m => m.fetchStockHistory(ticker)));
+        const historyResults = await Promise.all(historyPromises);
+        
+        // Map history back to stocks
+        const enrichedStocks = stockData.map((stock, idx) => ({
+            ...stock,
+            history: historyResults[idx]
+        }));
+        
+        console.log('DEBUG: Enriched Stocks with History:', enrichedStocks.map(s => ({ t: s.ticker, hL: s.history?.length })));
+        setStocks(enrichedStocks);
       }
     } catch (err) {
       console.error('Failed to load watchlist:', err);
@@ -205,51 +217,84 @@ export const WatchlistPage = () => {
 
                       {/* Performance Chart */}
                       {item.buyPrice && stock && viewMode === 'grid' && (
-                        <div className="h-20 w-full mt-4 relative">
+                        <div className="h-20 w-full mt-4 relative group/chart">
                           {(() => {
-                            const returnPct = ((stock.price / item.buyPrice) - 1) * 100;
-                            const isProfit = returnPct >= 0;
+                            const currentReturnPct = ((stock.price / item.buyPrice) - 1) * 100;
+                            const isProfit = currentReturnPct >= 0;
                             const color = isProfit ? '#10b981' : '#f43f5e';
                             
-                            // Mocking intermediate points for visualization since we don't have full history
-                            const data = [
-                              { name: 'Entry', val: 0 },
-                              { name: 'Mid1', val: returnPct * 0.3 },
-                              { name: 'Mid2', val: returnPct * 0.7 },
-                              { name: 'Current', val: returnPct }
-                            ];
+                            // Use actual history data if available, otherwise fallback to empty to avoid crash
+                            // We calculate the historical return % based on the original buy price
+                            let chartData: any[] = [];
+                            
+                            if (stock.history && stock.history.length > 0) {
+                              chartData = stock.history.map(point => {
+                                const ret = ((point.price / item.buyPrice!) - 1) * 100;
+                                return {
+                                  name: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                                  val: ret,
+                                  price: point.price
+                                };
+                              });
+                            } else {
+                               // Fallback if no history yet
+                               chartData = [
+                                { name: 'Entry', val: 0, price: item.buyPrice },
+                                { name: 'Current', val: currentReturnPct, price: stock.price }
+                               ];
+                            }
 
                             return (
-                              <>
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <AreaChart data={data}>
+                              <div className="w-full h-full min-h-[80px]">
+                                <ResponsiveContainer width="100%" height={80}>
+                                  <AreaChart data={chartData} margin={{ top: 5, right: 0, left: 0, bottom: 5 }}>
                                     <defs>
                                       <linearGradient id={`color-${item.ticker}`} x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
                                         <stop offset="95%" stopColor={color} stopOpacity={0}/>
                                       </linearGradient>
                                     </defs>
-                                    <YAxis domain={['dataMin - 2', 'dataMax + 2']} hide />
+                                    <YAxis domain={['dataMin', 'dataMax']} hide />
                                     <ReferenceLine y={0} stroke="rgba(0,0,0,0.1)" strokeDasharray="3 3" />
                                     <Area 
                                       type="monotone" 
                                       dataKey="val" 
                                       stroke={color} 
-                                      strokeWidth={3}
+                                      strokeWidth={2}
                                       fillOpacity={1}
                                       fill={`url(#color-${item.ticker})`}
                                       isAnimationActive={true}
                                       animationDuration={1500}
                                     />
+                                    {/* Optional Tooltip for hovering over the chart to see historical points */}
+                                    <RechartsTooltip
+                                        content={({ active, payload }: any) => {
+                                            if (active && payload && payload.length) {
+                                              const data = payload[0].payload;
+                                              const pColor = data.val >= 0 ? 'text-emerald-500' : 'text-rose-500';
+                                              return (
+                                                  <div className="bg-white border border-slate-200 p-2 rounded shadow-xl text-[10px] font-mono z-50 pointer-events-none">
+                                                      <p className="font-bold text-slate-500 mb-0.5">{data.name}</p>
+                                                      <p className="font-black text-slate-900">${data.price.toFixed(2)}</p>
+                                                      <p className={`font-bold ${pColor}`}>
+                                                          {data.val >= 0 ? '+' : ''}{data.val.toFixed(2)}%
+                                                      </p>
+                                                  </div>
+                                              );
+                                            }
+                                            return null;
+                                        }}
+                                        cursor={{ stroke: 'rgba(0,0,0,0.1)', strokeWidth: 1, strokeDasharray: '3 3' }}
+                                    />
                                   </AreaChart>
                                 </ResponsiveContainer>
-                                <div className="absolute top-0 left-0 bg-white/80 px-2 py-1 rounded-md backdrop-blur-md border border-slate-200 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono">
+                                <div className="absolute top-0 left-0 bg-white/90 px-2 py-1 rounded-md backdrop-blur-sm border border-slate-200 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono transition-opacity group-hover/chart:opacity-0">
                                   {isProfit ? <TrendingUp className="w-3 h-3 text-emerald-400" /> : <TrendingDown className="w-3 h-3 text-rose-400" />}
                                   <span className={isProfit ? 'text-emerald-400' : 'text-rose-400'}>
-                                    {isProfit ? '+' : ''}{returnPct.toFixed(2)}%
+                                    {isProfit ? '+' : ''}{currentReturnPct.toFixed(2)}%
                                   </span>
                                 </div>
-                              </>
+                              </div>
                             );
                           })()}
                         </div>

@@ -124,6 +124,38 @@ async function fetchYahooAnalyst(ticker: string) {
   }
 }
 
+// 2b. Yahoo: Historical data (bypass CORS)
+async function fetchYahooHistory(ticker: string) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+      }
+    });
+    if (!res.ok) {
+       console.warn(`[Yahoo History] ${ticker} failed with status: ${res.status}`);
+       return null;
+    }
+
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+    if (!result || !result.timestamp) return null;
+
+    const timestamps = result.timestamp;
+    const closes = result.indicators?.quote?.[0]?.close || [];
+
+    return timestamps.map((ts: number, i: number) => ({
+      date: new Date(ts * 1000).toISOString(),
+      price: closes[i]
+    })).filter((p: any) => p.price !== null && p.price !== undefined);
+  } catch (e) {
+    console.warn(`[Yahoo History] Failed for ${ticker}:`, e);
+    return null;
+  }
+}
+
+
 // 4. Google News RSS: Recent headlines for sentiment context
 async function fetchGoogleNews(ticker: string) {
   try {
@@ -212,11 +244,12 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-    // Parallel fetch: Finnhub (price) + Yahoo (analyst) + Google News
-    const [finnhubData, yahooData, newsData] = await Promise.all([
+    // Parallel fetch: Finnhub (price) + Yahoo (analyst) + Google News + Yahoo History
+    const [finnhubData, yahooData, newsData, historyData] = await Promise.all([
       fetchFinnhubPrice(ticker),
       fetchYahooAnalyst(ticker),
-      fetchGoogleNews(ticker)
+      fetchGoogleNews(ticker),
+      fetchYahooHistory(ticker)
     ]);
 
     // Only fetch Alpha Vantage if specifically requested (for AI analysis)
@@ -281,6 +314,8 @@ serve(async (req) => {
       upsidePotential,
       // 🆕 News Headlines
       newsHeadlines: newsData?.headlines || [],
+      // 🆕 Historical Data (CORS bypassed)
+      history: historyData || [],
       // Financials (Alpha Vantage - only if requested)
       peRatio: financialData?.overview?.PERatio || null,
       revenueGrowth: financialData?.overview?.QuarterlyRevenueGrowthYOY || null,

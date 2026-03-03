@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
-  XAxis, YAxis, CartesianGrid, AreaChart, Area
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LabelList,
+  XAxis, YAxis, CartesianGrid, BarChart, Bar
 } from 'recharts';
 import './MuzepartSearchPage.css';
 
@@ -124,7 +124,7 @@ const SearchPlatform: React.FC = () => {
   const intelData = useMemo(() => {
     if (results.length === 0) return null;
 
-    // 1. Inventory Distribution (Pie Chart)
+    // 1. Inventory Distribution (Pie Chart) — REAL DATA
     const distMap: Record<string, number> = {};
     results.forEach(r => {
       if (r.stock > 0) {
@@ -133,7 +133,7 @@ const SearchPlatform: React.FC = () => {
     });
     const inventoryData = Object.entries(distMap).map(([name, value]) => ({ name, value }));
 
-    // 2. Risk Distribution
+    // 2. Supply Risk Distribution — REAL DATA (based on actual stock levels)
     const riskCounts = { High: 0, Medium: 0, Low: 0 };
     results.forEach(r => {
       const level = r.risk_level as keyof typeof riskCounts;
@@ -141,17 +141,31 @@ const SearchPlatform: React.FC = () => {
     });
     const riskData = Object.entries(riskCounts).map(([name, value]) => ({ name, value }));
 
-    // 3. Price Volatility (Aggregate history if multiple, or just take first for demo)
-    // For now, let's take the first result's history as a representative or average them
-    let combinedHistory: { time: string, price: number }[] = [];
-    if (results[0]?.price_history) {
-        combinedHistory = results[0].price_history.map((p, i) => ({
-            time: `T-${results[0].price_history.length - 1 - i}`,
-            price: p
-        }));
-    }
+    // 3. Real Price Comparison — actual prices from all distributors
+    const priceData = results
+      .filter(r => r.price > 0)
+      .map(r => ({
+        name: r.distributor.length > 12 ? r.distributor.substring(0, 12) + '…' : r.distributor,
+        price: r.price,
+        fullName: r.distributor,
+        currency: r.currency
+      }))
+      .sort((a, b) => a.price - b.price)
+      .slice(0, 10);
 
-    return { inventoryData, riskData, combinedHistory };
+    const prices = results.filter(r => r.price > 0).map(r => r.price);
+    const priceStats = prices.length > 0 ? {
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+      avg: prices.reduce((a, b) => a + b, 0) / prices.length,
+      spread: prices.length > 1
+        ? ((Math.max(...prices) - Math.min(...prices)) / (prices.reduce((a, b) => a + b, 0) / prices.length) * 100)
+        : 0,
+      count: prices.length,
+      currency: results.find(r => r.price > 0)?.currency || 'USD'
+    } : null;
+
+    return { inventoryData, riskData, priceData, priceStats };
   }, [results]);
 
   // --- Derived: Filtered & Sorted Results ---
@@ -298,7 +312,7 @@ const SearchPlatform: React.FC = () => {
         ...item, 
         basePrice: item.price, 
         is_qc_enabled: false,
-        price_history: item.price_history || [item.price * 0.98, item.price * 1.02, item.price] 
+        price_history: item.price_history || [item.price]
       })));
       resetFilters(); 
       if (!history.includes(targetQuery)) setHistory(prev => [targetQuery, ...prev].slice(0, 5));
@@ -876,20 +890,34 @@ const SearchPlatform: React.FC = () => {
               <p className="text-xs text-slate-400 font-medium">검색 후 업데이트됩니다.</p>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={intelData.inventoryData}
-                    innerRadius={45}
-                    outerRadius={65}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {intelData.inventoryData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={['#0176d3', '#4bc076', '#f2cf5b', '#ef6e64', '#9050e9'][index % 5]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                </PieChart>
+                  <PieChart>
+                    <Pie
+                      data={intelData.inventoryData}
+                      cx="35%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={70}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {intelData.inventoryData.map((_entry: any, index: number) => (
+                        <Cell key={`cell-${index}`} fill={['#0176d3', '#4bc076', '#f2cf5b', '#ef6e64', '#9050e9', '#3b82f6', '#8b5cf6', '#ec4899', '#f97316'][index % 9]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                    <Legend 
+                      layout="vertical" 
+                      verticalAlign="middle" 
+                      align="right" 
+                      wrapperStyle={{ 
+                        fontSize: '9px', 
+                        lineHeight: '12px',
+                        maxHeight: '160px',
+                        overflowY: 'auto',
+                        width: '55%'
+                      }} 
+                    />
+                  </PieChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -897,48 +925,68 @@ const SearchPlatform: React.FC = () => {
 
         {/* EOL Risk Map Card */}
         <div className="sfdc-card p-5">
-          <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-emerald-500 rounded-lg text-white shadow-sm">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+            <div className="flex flex-col">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-500 rounded-lg text-white shadow-sm">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                </div>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">수급 리스크 지표 (Supply Risk)</h3>
               </div>
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">EOL Risk Map</h3>
+              <p className="text-[10px] text-slate-500 font-medium ml-11 mt-1">글로벌 실시간 재고량을 기준으로 단종/품절 위험도를 평가합니다.</p>
             </div>
           </div>
           <div className="h-[200px] flex flex-col justify-center gap-4 px-2">
             {!intelData ? (
-              <p className="text-xs text-slate-400 font-medium text-center">검색 후 업데이트됩니다.</p>
+              <p className="text-xs text-center text-slate-400 font-medium">검색 후 업데이트됩니다.</p>
             ) : (
-              intelData.riskData.map((item) => (
-                <div key={item.name} className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-black text-slate-600 uppercase tracking-tight">
-                    <span>{item.name} Risk</span>
-                    <span>{item.value} Parts</span>
+              <>
+                <div className="relative">
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span className="text-rose-500">재고 부족 (High Risk)</span>
+                    <span className="text-slate-500">{intelData.riskData.find(d => d.name === 'High')?.value || 0} 개 판매처</span>
                   </div>
-                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-50">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-1000 ${
-                        item.name === 'High' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]' : 
-                        item.name === 'Medium' ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : 
-                        'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]'
-                      }`}
-                      style={{ width: `${(item.value / results.length) * 100}%` }}
-                    ></div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-rose-500 rounded-full" style={{ width: `${((intelData.riskData.find(d => d.name === 'High')?.value || 0) / Math.max(1, results.length)) * 100}%` }} />
                   </div>
+                  <p className="text-[9px] text-slate-400 mt-1">재고 0개 (품절 또는 EOL 의심)</p>
                 </div>
-              ))
+                <div className="relative">
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span className="text-amber-500">재고 한정 (Medium Risk)</span>
+                    <span className="text-slate-500">{intelData.riskData.find(d => d.name === 'Medium')?.value || 0} 개 판매처</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-400 rounded-full" style={{ width: `${((intelData.riskData.find(d => d.name === 'Medium')?.value || 0) / Math.max(1, results.length)) * 100}%` }} />
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-1">재고 1~100개 (수급 주의)</p>
+                </div>
+                <div className="relative">
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span className="text-emerald-500">재고 안정 (Low Risk)</span>
+                    <span className="text-slate-500">{intelData.riskData.find(d => d.name === 'Low')?.value || 0} 개 판매처</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${((intelData.riskData.find(d => d.name === 'Low')?.value || 0) / Math.max(1, results.length)) * 100}%` }} />
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-1">재고 100개 초과 (수급 원활)</p>
+                </div>
+              </>
             )}
           </div>
         </div>
 
-        {/* Price Volatility Card */}
+        {/* Price Comparison Card — REAL DATA */}
         <div className="sfdc-card p-5">
-          <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-rose-500 rounded-lg text-white shadow-sm">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+          <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+            <div className="flex flex-col">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-rose-500 rounded-lg text-white shadow-sm">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                </div>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">유통사별 단가 비교 (Price Comparison)</h3>
               </div>
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Price Volatility</h3>
+              <p className="text-[10px] text-slate-500 font-medium ml-11 mt-1">글로벌 탑 티어 유통사들의 현재 판매 단가 비교 차트입니다.</p>
             </div>
           </div>
           <div className="h-[200px]">
@@ -946,22 +994,47 @@ const SearchPlatform: React.FC = () => {
               <div className="h-full flex items-center justify-center">
                 <p className="text-xs text-slate-400 font-medium">검색 후 업데이트됩니다.</p>
               </div>
+            ) : !intelData.priceData || intelData.priceData.length === 0 ? (
+              <div className="h-full flex items-center justify-center">
+                <p className="text-xs text-slate-400 font-medium">가격 정보가 없습니다.</p>
+              </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={intelData.combinedHistory}>
-                  <defs>
-                    <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef6e64" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#ef6e64" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="time" hide />
-                  <YAxis hide domain={['auto', 'auto']} />
-                  <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                  <Area type="monotone" dataKey="price" stroke="#ef6e64" fillOpacity={1} fill="url(#colorPrice)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
+              <div className="h-full flex flex-col">
+                <div className="flex-1 min-h-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={intelData.priceData} margin={{ top: 15, right: 5, bottom: 20, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b' }} angle={-30} textAnchor="end" interval={0} />
+                      <YAxis 
+                        tick={{ fontSize: 9, fill: '#64748b' }} 
+                        width={40} 
+                        tickFormatter={(val: number) => val >= 1000 ? `${(val/1000).toFixed(1)}k` : val.toString()}
+                      />
+                      <Tooltip
+                        contentStyle={{ fontSize: '11px', borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                        formatter={(value: any, _name: any, props: any) => [
+                          `${Number(value).toLocaleString()} ${props.payload?.currency || 'USD'}`, '단가 (Unit Price)'
+                        ]}
+                        labelFormatter={(label: any) => {
+                          const item = intelData.priceData.find((d: any) => d.name === label);
+                          return item?.fullName || String(label);
+                        }}
+                      />
+                      <Bar dataKey="price" fill="#0176d3" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {intelData.priceStats && (
+                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 px-1 pt-1 border-t border-slate-100">
+                    <span>Min: <span className="text-emerald-600">{intelData.priceStats.min.toLocaleString()}</span></span>
+                    <span>Avg: <span className="text-slate-700">{intelData.priceStats.avg.toFixed(2)}</span></span>
+                    <span>Max: <span className="text-rose-500">{intelData.priceStats.max.toLocaleString()}</span></span>
+                    {intelData.priceStats.spread > 0 && (
+                      <span className="text-amber-600">Spread: {intelData.priceStats.spread.toFixed(1)}%</span>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
