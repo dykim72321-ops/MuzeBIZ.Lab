@@ -38,8 +38,8 @@ export const WatchlistPage = () => {
         for (const ticker of tickers) {
             const h = await fetchStockHistory(ticker);
             historyResults.push(h);
-            // Wait 1500ms between requests to stay under rate limits (Yahoo is sensitive)
-            if (tickers.length > 1) await new Promise(r => setTimeout(r, 1500));
+            // Wait 2500ms between requests to stay under rate limits (Yahoo/Finnhub are sensitive)
+            if (tickers.length > 1) await new Promise(r => setTimeout(r, 2500));
         }
 
         // Map history back to stocks
