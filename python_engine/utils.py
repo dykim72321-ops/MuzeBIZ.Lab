@@ -38,14 +38,35 @@ class PartNormalizer:
     def format_price(price_str: str) -> float:
         """
         Extracts a float value from various price string formats.
+        Handles multi-tier prices by taking the first one.
+        Example: '1 $299.06 5 $290.00' -> 299.06
         """
-        if not price_str:
+        if not price_str or "quote" in price_str.lower() or "call" in price_str.lower():
             return 0.0
         try:
-            # Remove currency symbols and commas
-            cleaned = re.sub(r'[^\d.]', '', price_str)
-            return float(cleaned)
-        except (ValueError, TypeError):
+            # 1. Clean up common separators and currencies
+            # Remove commas and spaces between numbers to prevent merging them
+            p = price_str.replace(",", "").strip()
+            
+            # 2. Extract all sequences that look like prices (numbers with optional decimal)
+            # We look for symbols that typically prefix a price or just the pattern
+            matches = re.findall(r'(\d+\.?\d*)', p)
+            
+            # 3. Handle tiers (FindChips uses: Qty Price Qty Price)
+            # Usually the first number is Qty, second is Price.
+            if len(matches) >= 2:
+                # If the first match is a small integer (likely Qty 1), the second is the real price
+                # If only one match, it might just be the price.
+                potential_price = float(matches[1]) if len(matches) >= 2 else float(matches[0])
+                
+                # Sanity check: if the first match is very large compared to the second, maybe first is the price?
+                # But in component sourcing, MOQ 1 is common.
+                return potential_price
+            elif len(matches) == 1:
+                return float(matches[0])
+                
+            return 0.0
+        except (ValueError, TypeError, IndexError):
             return 0.0
 
     @staticmethod
@@ -53,17 +74,11 @@ class PartNormalizer:
         """
         Standardizes distributor names for consistency in the UI and merging.
         """
+        if not name: return "Other"
         n = name.lower()
         if 'mouser' in n: return "Mouser"
         if 'digi' in n: return "Digi-Key"
         if 'arrow' in n: return "Arrow"
         if 'future' in n: return "Future"
         if 'avnet' in n: return "Avnet"
-        if 'farnell' in n: return "Farnell / Newark"
-        if 'newark' in n: return "Farnell / Newark"
-        if 'lcsc' in n: return "LCSC"
-        if 'tme' in n: return "TME"
-        if 'element14' in n: return "Element14"
-        if 'rochester' in n: return "Rochester"
-        if 'win source' in n or 'winsource' in n: return "WinSource"
-        return name.title()
+        if 'abacus' in n: return "Avnet" # Avnet Abacus

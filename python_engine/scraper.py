@@ -390,73 +390,82 @@ class SearchAggregator:
                 context = await browser.new_context(user_agent=self.user_agent)
                 page = await context.new_page()
 
-                # Search query normalization
                 search_q = mpn.strip()
                 url = f"{self.base_url}{search_q}"
                 
                 try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    await page.goto(url, wait_until="networkidle", timeout=60000)
                 except Exception as e:
-                    print(f"❌ [AGGREGATOR] Navigation failed: {e}")
-                    await browser.close()
-                    return []
+                    print(f"❌ [AGGREGATOR] Navigation timeout or error: {e}")
+                    # Try once more with domcontentloaded if networkidle fails
+                    try:
+                        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    except:
+                        await browser.close()
+                        return []
 
-                # 유통사별 섹션 렌더링 대기
-                try:
-                    await page.wait_for_selector(".distributor-results", timeout=15000)
-                except Exception as e:
-                    print(f"⚠️ [AGGREGATOR] No distributor results found for {mpn}")
-                    await browser.close()
-                    return []
+                # Fuzzy matches can be slow to inject tables
+                await page.wait_for_timeout(2000)
 
                 # 유통사별 섹션 파싱
                 distributors = await page.query_selector_all(".distributor-results")
+                print(f"🔍 [AGGREGATOR] Scanned {len(distributors)} distributor sections on page")
                 
                 for dist in distributors:
                     try:
-                        # 1. Distributor Name Extraction
+                        # 1. Distributor Name Extraction (Robust Fallback)
+                        dist_name_raw = ""
+                        # Try standard selectors
                         name_el = await dist.query_selector(".distributor-name, .distributor-title, .distributor-header a")
-                        dist_name_raw = (await name_el.inner_text()).strip() if name_el else ""
-
+                        if name_el:
+                            dist_name_raw = (await name_el.inner_text()).strip()
+                        
+                        # Try logo alt text
                         if not dist_name_raw:
                             img_el = await dist.query_selector(".distributor-header img")
                             if img_el:
                                 dist_name_raw = await img_el.get_attribute("alt") or await img_el.get_attribute("title") or ""
+                        
+                        # Try data attributes on children (often used in FindChips RFQ buttons)
+                        if not dist_name_raw:
+                            btn_el = await dist.query_selector("a[data-onclick*='recordUserClick']")
+                            if btn_el:
+                                click_data = await btn_el.get_attribute("data-onclick")
+                                match = re.search(r"'([^']+)'", click_data.split(",")[1]) if "," in click_data else None
+                                if match: dist_name_raw = match.group(1)
 
-                        dist_name = PartNormalizer.normalize_distributor(dist_name_raw)
+                        dist_name = PartNormalizer.normalize_distributor(dist_name_raw or "Other Distributor")
 
                         # 2. Part Row Extraction
-                        # We look for the first row that actually has stock/price info
-                        rows = await dist.query_selector_all("tr:has(td.td-stock)")
-                        if not rows:
-                            rows = await dist.query_selector_all("tr") # Fallback to any row if selector fails
-
+                        rows = await dist.query_selector_all("tr")
                         for row in rows:
                             try:
-                                stock_el = await row.query_selector("td.td-stock")
-                                price_el = await row.query_selector("td.td-price")
-                                mfr_el = await row.query_selector("td.td-mfg")
-                                part_el = await row.query_selector("td.td-part a, td.td-part")
+                                # Look for identifying cells
+                                stock_el = await row.query_selector("td.td-stock, .stock-info")
+                                price_el = await row.query_selector("td.td-price, .price-list")
+                                part_el = await row.query_selector("td.td-part, .td-part a")
 
-                                if not stock_el or not price_el:
+                                # Skip header rows or empty rows
+                                if not stock_el and not part_el:
                                     continue
 
-                                stock_text = (await stock_el.inner_text()).strip()
-                                price_text = (await price_el.inner_text()).strip()
-                                mfr_text = (await mfr_el.inner_text()).strip() if mfr_el else "N/A"
-                                actual_mpn = (await part_el.inner_text()).strip() if part_el else mpn
+                                stock_text = (await stock_el.inner_text()).strip() if stock_el else "0"
+                                price_text = (await price_el.inner_text()).strip() if price_el else "0"
+                                actual_mpn_raw = (await part_el.inner_text()).strip() if part_el else mpn
                                 
-                                if actual_mpn:
-                                    actual_mpn = actual_mpn.split("\n")[0].strip()
+                                # Clean up MPN (strip 'DISTI #' etc)
+                                actual_mpn = actual_mpn_raw.split("DISTI")[0].split("\n")[0].strip()
+                                
+                                # Avoid "Part #" header
+                                if "Part #" in actual_mpn: continue
 
                                 # 3. Data Cleansing
                                 stock_num = re.sub(r"[^0-9]", "", stock_text)
                                 stock = int(stock_num) if stock_num else 0
-
                                 price = PartNormalizer.format_price(price_text)
 
-                                # 4. Buy Link Extraction (Critical for Cart Fix)
-                                buy_link_el = await row.query_selector("a[href*='/buy/'], td.td-buy a, td.td-price a, a.btn-buy")
+                                # 4. Buy Link
+                                buy_link_el = await row.query_selector("a[href*='/buy/'], a[href*='track'], td.td-price a")
                                 buy_url = ""
                                 if buy_link_el:
                                     href = await buy_link_el.get_attribute("href")
@@ -465,26 +474,25 @@ class SearchAggregator:
                                         elif href.startswith("/"): buy_url = "https://www.findchips.com" + href
                                         else: buy_url = href
 
-                                if stock > 0 or price > 0:
+                                # Include if it's a part match, even if out of stock
+                                if actual_mpn:
                                     results.append({
                                         "distributor": dist_name,
                                         "mpn": actual_mpn,
                                         "normalized_mpn": PartNormalizer.clean_mpn(actual_mpn),
-                                        "manufacturer": mfr_text,
+                                        "manufacturer": "Global Source",
                                         "stock": stock,
                                         "price": price,
-                                        "risk_level": "Low" if stock > 100 else ("Medium" if stock > 0 else "High"),
+                                        "risk_level": "High" if stock == 0 else ("Medium" if stock < 100 else "Low"),
                                         "source_type": "Market Aggregator",
                                         "product_url": buy_url,
                                     })
-                            except:
-                                continue
-                    except:
-                        continue
+                            except: continue
+                    except: continue
 
                 await browser.close()
 
-                # Deduplicate and sort (Keep highest stock for the same distributor+normalized_mpn)
+                # Deduplicate but allow multiple variants from same distributor
                 unique_results = {}
                 for r in results:
                     key = f"{r['distributor']}_{r['normalized_mpn']}"
@@ -492,8 +500,12 @@ class SearchAggregator:
                         unique_results[key] = r
 
                 final_list = list(unique_results.values())
-                print(f"✅ [AGGREGATOR] Found {len(final_list)} unique distributor offers for {mpn}")
+                print(f"✅ [AGGREGATOR] Successfully found {len(final_list)} results for {mpn}")
                 return final_list
+
+        except Exception as e:
+            print(f"❌ [AGGREGATOR] Critical Failure: {e}")
+            return []
 
         except Exception as e:
             print(f"❌ [AGGREGATOR] Critical Failure: {e}")
