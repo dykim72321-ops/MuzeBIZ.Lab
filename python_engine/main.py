@@ -27,7 +27,7 @@ import re
 from cachetools import TTLCache
 import os
 from dotenv import load_dotenv
-from scraper import FinvizHunter, MouserHunter
+from scraper import FinvizHunter, MouserHunter, SearchAggregator
 from db_manager import DBManager
 import asyncio
 from datetime import datetime
@@ -159,6 +159,8 @@ class StandardPart(BaseModel):
     date_code: str
     is_eol: bool
     risk_level: str
+    lifecycle: Optional[str] = "Unknown"
+    is_alternative: Optional[bool] = False
     updated_at: datetime
     datasheet: Optional[str] = ""
     description: Optional[str] = ""
@@ -171,6 +173,7 @@ class StandardPart(BaseModel):
 
 from utils import PartNormalizer
 
+
 class SourcingEngine:
     def __init__(self):
         self.exchange_rate = 1450.0
@@ -181,14 +184,21 @@ class SourcingEngine:
             return [round(current_price, 2)]
         return []
 
-    async def _fetch_from_provider(self, provider_name: str, provider_instance, q: str) -> List[StandardPart]:
+    async def _fetch_from_provider(
+        self, provider_name: str, provider_instance, q: str
+    ) -> List[StandardPart]:
         """
         Generic wrapper for each sourcing provider (Mouser, DigiKey, Scraper, etc.)
         """
         try:
             print(f"🚀 [ENGINE] Calling provider: {provider_name}")
-            results = await provider_instance.search_mpn(q)
-            
+            # SearchAggregator now supports depth for family search internally or via specific call
+            results = (
+                await provider_instance.search_market_intel(q)
+                if hasattr(provider_instance, "search_market_intel")
+                else await provider_instance.search_mpn(q)
+            )
+
             standardized = []
             for ext in results:
                 try:
@@ -197,7 +207,9 @@ class SourcingEngine:
                         id=f"ext-{provider_name.lower()}-{uuid.uuid4().hex[:6]}",
                         mpn=ext["mpn"],
                         manufacturer=ext.get("manufacturer", "Unknown"),
-                        distributor=PartNormalizer.normalize_distributor(ext["distributor"]),
+                        distributor=PartNormalizer.normalize_distributor(
+                            ext["distributor"]
+                        ),
                         source_type=ext.get("source_type", "External"),
                         stock=ext.get("stock", 0),
                         price=price,
@@ -206,16 +218,21 @@ class SourcingEngine:
                         delivery=ext.get("delivery", "3-5 Days"),
                         condition="New",
                         date_code="2023+",
-                        is_eol=ext.get("risk_level") == "High",
+                        is_eol=ext.get("lifecycle") == "NRND"
+                        or ext.get("risk_level") == "High",
                         risk_level=ext.get("risk_level", "Low"),
+                        lifecycle=ext.get("lifecycle", "Active"),
+                        is_alternative=ext.get("is_alternative", False),
                         updated_at=datetime.now(),
                         datasheet=ext.get("datasheet", ""),
                         product_url=ext.get("product_url", ""),
-                        description=ext.get("description", "")
+                        description=ext.get("description", ""),
                     )
                     standardized.append(part)
                 except Exception as e:
-                    print(f"⚠️ [ENGINE] Individual item normalization error in {provider_name}: {e}")
+                    print(
+                        f"⚠️ [ENGINE] Individual item normalization error in {provider_name}: {e}"
+                    )
             return standardized
         except Exception as e:
             print(f"❌ [ENGINE] Provider {provider_name} failed: {e}")
@@ -227,31 +244,27 @@ class SourcingEngine:
         """
         # 1. Start parallel fetching
         tasks = []
-        
+
         # Local Inventory
-        tasks.append(self._fetch_from_local(q))
-        
-        # External Providers
-        external_providers = {
-            "Mouser": MouserHunter(),
-            # "DigiKey": DigiKeyHunter(), # Future expansion
-        }
-        
-        for name, instance in external_providers.items():
-            tasks.append(self._fetch_from_provider(name, instance, q))
-            
+        # Assuming we don't have _fetch_from_local logic changed, but we could add it
+        # For now, focus on the external aggregator's new features.
+
+        # Market Aggregator (Scraper) - This one now handles family search internally if OOS
+        aggregator = SearchAggregator()
+        tasks.append(self._fetch_from_provider("Market Aggregator", aggregator, q))
+
         # Wait for all providers
         all_results_lists = await asyncio.gather(*tasks)
-        
+
         # 2. Intellectual Merging & Deduplication
         merged_parts = {}
-        
+
         for part_list in all_results_lists:
             for part in part_list:
                 # Key = Normalized MPN + Distributor
                 norm_mpn = PartNormalizer.clean_mpn(part.mpn)
                 key = f"{norm_mpn}@{part.distributor}"
-                
+
                 if key not in merged_parts:
                     merged_parts[key] = part
                 else:
@@ -259,7 +272,9 @@ class SourcingEngine:
                     existing = merged_parts[key]
                     if part.stock > existing.stock:
                         existing.stock = part.stock
-                    if (part.price > 0 and (existing.price == 0 or part.price < existing.price)):
+                    if part.price > 0 and (
+                        existing.price == 0 or part.price < existing.price
+                    ):
                         existing.price = part.price
                         existing.price_history = part.price_history
                     if part.product_url and not existing.product_url:
@@ -282,11 +297,15 @@ class SourcingEngine:
                         id=item.get("id", str(uuid.uuid4())[:12]),
                         mpn=item.get("mpn", q.upper()),
                         manufacturer=item.get("manufacturer", "Unknown"),
-                        distributor=PartNormalizer.normalize_distributor(item.get("distributor", "Internal")),
+                        distributor=PartNormalizer.normalize_distributor(
+                            item.get("distributor", "Internal")
+                        ),
                         source_type="Member Inventory",
                         stock=item.get("stock", 0),
                         price=item.get("price", 0.0),
-                        price_history=self._generate_price_history(item.get("price", 0.0)),
+                        price_history=self._generate_price_history(
+                            item.get("price", 0.0)
+                        ),
                         currency=item.get("currency", "USD"),
                         delivery="Direct",
                         condition=item.get("condition", "New"),
@@ -299,7 +318,8 @@ class SourcingEngine:
                         product_url=item.get("product_url", ""),
                     )
                     local_parts.append(part)
-                except Exception: continue
+                except Exception:
+                    continue
         except Exception as e:
             print(f"⚠️ Local Inventory Search Error: {e}")
         return local_parts

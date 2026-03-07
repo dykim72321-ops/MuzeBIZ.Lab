@@ -3845,3 +3845,72 @@ body {
   height: 60vh;
   color: var(--text-muted);
 }
+
+/* Supply Continuity Suite UI */
+.lifecycle-display {
+  display: flex;
+  align-items: center;
+}
+
+.lifecycle-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.lifecycle-badge.active {
+  background: #ecfdf5;
+  color: #059669;
+  border-color: #d1fae5;
+}
+
+.lifecycle-badge.nrnd {
+  background: #fff7ed;
+  color: #ea580c;
+  border-color: #ffedd5;
+}
+
+.lifecycle-badge.eol {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fee2e2;
+}
+
+.mpn-display {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mpn-text {
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.family-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  width: fit-content;
+}
+
+.dist-ext-link {
+  color: #94a3b8;
+  margin-left: 6px;
+  transition: color 0.2s;
+}
+
+.dist-ext-link:hover {
+  color: #3b82f6;
+}

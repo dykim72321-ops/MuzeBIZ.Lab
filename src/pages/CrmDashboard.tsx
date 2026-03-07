@@ -14,14 +14,29 @@ import {
   Bell,
   KanbanSquare,
   TrendingUp,
-  ArrowLeft
+  ArrowLeft,
+  Plus,
+  Search,
+  Trash2,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getCrmProjects, getCallPlans, getProjectTimeline } from '../services/crmService';
+import { 
+  getCrmCompanies, 
+  getCrmProjects, 
+  getCallPlans, 
+  getProjectTimeline, 
+  getCrmContacts,
+  deleteCrmCompany,
+  deleteCrmProject,
+  deleteCrmContact,
+  deleteCallPlan
+} from '../services/crmService';
 import { format, isValid } from 'date-fns';
 import clsx from 'clsx';
 import { SmartCallPlan } from '../components/crm/SmartCallPlan';
 import { OrgProfile } from '../components/crm/OrgProfile';
+import { Building2, List as ListIcon, ChevronLeft } from 'lucide-react';
 
 const safeFormatDate = (dateStr?: string | null) => {
   if (!dateStr) return 'UNKNOWN DATE';
@@ -37,32 +52,78 @@ const safeFormatDate = (dateStr?: string | null) => {
 export function CrmDashboard() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [activeCallStep, setActiveCallStep] = useState('during');
+  const [companies, setCompanies] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [callPlans, setCallPlans] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Hierarchical view state
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectTimeline, setProjectTimeline] = useState<any>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  
+  // Modal state
+  const [modalType, setModalType] = useState<string | null>(null);
+  const [modalData, setModalData] = useState<any>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    const loadData = async () => {
+    const loadInitialData = async () => {
       try {
-        const [projData, callData] = await Promise.all([
-          getCrmProjects(),
-          getCallPlans()
-        ]);
-        setProjects(projData || []);
-        setCallPlans(callData || []);
+        const companyData = await getCrmCompanies();
+        setCompanies(companyData || []);
       } catch (error) {
-        console.error('Failed to load CRM data:', error);
+        console.error('Failed to load companies:', error);
       } finally {
         setLoading(false);
       }
     };
-    loadData();
+    loadInitialData();
   }, []);
+
+  const refreshData = async () => {
+    if (!selectedCompanyId) {
+      const companyData = await getCrmCompanies();
+      setCompanies(companyData || []);
+      return;
+    }
+
+    const [projData, callData, contactData] = await Promise.all([
+      getCrmProjects(),
+      getCallPlans(selectedCompanyId),
+      getCrmContacts(selectedCompanyId)
+    ]);
+
+    const filteredProjs = projData.filter((p: any) => p.company_id === selectedCompanyId);
+    setProjects(filteredProjs || []);
+    setCallPlans(callData || []);
+    setContacts(contactData || []);
+    
+    // Refresh timeline if a project is selected
+    if (selectedProjectId) {
+      const timeline = await getProjectTimeline(selectedProjectId);
+      setProjectTimeline(timeline);
+    }
+  };
+
+  // Use a separate effect to load company-specific data when selected
+  useEffect(() => {
+    if (!selectedCompanyId) {
+      setProjects([]);
+      setCallPlans([]);
+      setContacts([]);
+      return;
+    }
+    refreshData();
+    setActiveTab('dashboard'); // Default to dashboard when company is switched
+    setSelectedProjectId(null); // Reset project view
+  }, [selectedCompanyId]);
+
+  const handleCompanyClick = (companyId: string) => {
+    setSelectedCompanyId(companyId);
+  };
 
   const handleProjectClick = async (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -77,7 +138,48 @@ export function CrmDashboard() {
     }
   };
 
+  const openModal = (type: string, data: any = null) => {
+    setModalType(type);
+    setModalData(data);
+  };
+
+  const closeModal = () => {
+    setModalType(null);
+    setModalData(null);
+  };
+
+  const handleDelete = async (type: 'company' | 'project' | 'contact' | 'call', id: string, name: string) => {
+    if (!window.confirm(`'${name}'을(를) 삭제하시겠습니까? 관련 데이터가 모두 삭제됩니다.`)) return;
+    
+    try {
+      const deleteFn = {
+        company: deleteCrmCompany,
+        project: deleteCrmProject,
+        contact: deleteCrmContact,
+        call: deleteCallPlan
+      }[type];
+      
+      await deleteFn(id);
+      
+      if (type === 'company' && id === selectedCompanyId) {
+        setSelectedCompanyId(null);
+      } else if (type === 'project' && id === selectedProjectId) {
+        setSelectedProjectId(null);
+      }
+      
+      await refreshData();
+    } catch (err: any) {
+      console.error('Delete error:', err);
+      alert(`삭제 실패: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const selectedCompany = companies.find(c => c.id === selectedCompanyId);
   const totalExpectedValue = projects.reduce((acc, p) => acc + (Number(p?.expected_value) || 0), 0);
+
+  const filteredCompanies = companies.filter(c => 
+    c.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   if (loading) {
     return (
@@ -102,10 +204,69 @@ export function CrmDashboard() {
         </div>
         
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          <NavItem icon={<LayoutDashboard size={18}/>} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSelectedProjectId(null); }} />
-          <NavItem icon={<ClipboardList size={18}/>} label="Smart Call Plan" active={activeTab === 'call-plan'} onClick={() => setActiveTab('call-plan')} />
-          <NavItem icon={<Users size={18}/>} label="Organization" active={activeTab === 'org'} onClick={() => setActiveTab('org')} />
-          <NavItem icon={<FileText size={18}/>} label="Minutes" active={activeTab === 'minutes'} onClick={() => setActiveTab('minutes')} />
+          {!selectedCompanyId ? (
+            <>
+              <div className="px-4 mb-4">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input 
+                    type="text" 
+                    placeholder="Search accounts..." 
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2 pl-9 pr-4 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#0176d3]/20"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4 mb-2">Company Directory</p>
+              {filteredCompanies.map(company => (
+                <div 
+                  key={company.id}
+                  onClick={() => handleCompanyClick(company.id)}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-bold transition-all text-slate-500 hover:bg-slate-50 hover:text-slate-800 group cursor-pointer"
+                >
+                  <div className="flex items-center gap-1">
+                    <Building2 size={18} className="text-slate-400 group-hover:text-[#0176d3]" />
+                    <span className="truncate max-w-[100px]">{company.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleDelete('company', company.id, company.name); }}
+                      className="p-1 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-rose-50"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                    <ChevronRight size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-300" />
+                  </div>
+                </div>
+              ))}
+              <button 
+                onClick={() => openModal('company')}
+                className="w-full mt-4 flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-[#0176d3] bg-blue-50/50 border border-dashed border-blue-200 hover:bg-blue-50 transition-all group"
+              >
+                <Plus size={18} /> Add New Company
+              </button>
+            </>
+          ) : (
+            <>
+              <button 
+                onClick={() => setSelectedCompanyId(null)}
+                className="w-full flex items-center gap-3 px-4 py-2 mb-4 rounded-xl text-xs font-black text-[#0176d3] hover:bg-blue-50 transition-all border border-blue-100"
+              >
+                <ChevronLeft size={16} /> Back to Companies
+              </button>
+              
+              <div className="px-4 py-2 mb-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter mb-0.5">Active Account</p>
+                <p className="text-sm font-black text-slate-800 truncate">{selectedCompany?.name}</p>
+              </div>
+
+              <NavItem icon={<LayoutDashboard size={18}/>} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSelectedProjectId(null); }} />
+              <NavItem icon={<ClipboardList size={18}/>} label="Smart Call Plan" active={activeTab === 'call-plan'} onClick={() => setActiveTab('call-plan')} />
+              <NavItem icon={<Users size={18}/>} label="Organization" active={activeTab === 'org'} onClick={() => setActiveTab('org')} />
+              <NavItem icon={<FileText size={18}/>} label="Minutes" active={activeTab === 'minutes'} onClick={() => setActiveTab('minutes')} />
+            </>
+          )}
         </nav>
 
       </aside>
@@ -115,38 +276,49 @@ export function CrmDashboard() {
         {/* Header - Unified with Scanner/Search Hub Style */}
         <header className="mx-8 mt-8 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm shrink-0">
           <div className="flex items-center gap-4">
-            {selectedProjectId ? (
+            {selectedCompanyId ? (
               <div className="flex items-center gap-4">
-                <button 
-                  onClick={() => setSelectedProjectId(null)}
-                  className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 hover:text-[#0176d3] hover:border-[#0176d3] transition-all"
-                >
-                  <ArrowLeft size={20} />
-                </button>
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">Project Intelligence</p>
-                  <h2 className="text-2xl font-black text-slate-900 leading-tight">
-                    {projectTimeline?.project?.title || 'Loading...'}
-                  </h2>
-                </div>
+                {selectedProjectId ? (
+                  <>
+                    <button 
+                      onClick={() => setSelectedProjectId(null)}
+                      className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 hover:text-[#0176d3] hover:border-[#0176d3] transition-all"
+                    >
+                      <ArrowLeft size={20} />
+                    </button>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">Project Intelligence</p>
+                      <h2 className="text-2xl font-black text-slate-900 leading-tight">
+                        {projectTimeline?.project?.title || 'Loading...'}
+                      </h2>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-[#0176d3] rounded-lg shadow-md">
+                      <Building2 className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">
+                        {selectedCompany?.name || 'Company Profile'}
+                      </p>
+                      <h2 className="text-2xl font-black text-slate-900 leading-tight">
+                        {activeTab === 'dashboard' ? "Enterprise Account View" : 
+                         activeTab === 'call-plan' ? "Strategic Discovery" : 
+                         activeTab === 'org' ? "Organization View" : "Document Review"}
+                      </h2>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex items-center gap-4">
-                <div className="p-3 bg-[#0176d3] rounded-lg shadow-md">
-                  <LayoutDashboard className="w-6 h-6 text-white" />
+                <div className="p-3 bg-slate-100 rounded-lg text-slate-400">
+                  <ListIcon className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">
-                    {activeTab === 'dashboard' ? "Design-Win Pipeline" : 
-                     activeTab === 'call-plan' ? "Strategic Discovery" : 
-                     activeTab === 'org' ? "Human Capital" : "Knowledge Base"}
-                  </p>
-                  <h2 className="text-2xl font-black text-slate-900 leading-tight">
-                    {activeTab === 'dashboard' && "전체 프로젝트 현황"}
-                    {activeTab === 'call-plan' && "Discovery Planner"}
-                    {activeTab === 'org' && "조직 관리 및 R&R"}
-                    {activeTab === 'minutes' && "회의록 관리"}
-                  </h2>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-0.5">Portfolio Overview</p>
+                  <h2 className="text-2xl font-black text-slate-900 leading-tight">Account Selection</h2>
                 </div>
               </div>
             )}
@@ -168,7 +340,45 @@ export function CrmDashboard() {
         <div className="flex-1 overflow-y-auto px-8 pb-8">
           <div className="max-w-6xl mx-auto space-y-8">
             <AnimatePresence mode="wait">
-              {activeTab === 'dashboard' && !selectedProjectId && (
+              {!selectedCompanyId && (
+                <motion.div
+                  key="company-selection"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 py-4"
+                >
+                  {companies.map(company => (
+                    <div 
+                      key={company.id}
+                      onClick={() => handleCompanyClick(company.id)}
+                      className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-[#0176d3]/20 transition-all text-left group flex flex-col items-start gap-4 relative overflow-hidden cursor-pointer"
+                    >
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50/50 rounded-bl-full -mr-8 -mt-8 transition-all group-hover:scale-110" />
+                      <div className="p-3 bg-blue-50 text-[#0176d3] rounded-xl self-start group-hover:bg-[#0176d3] group-hover:text-white transition-colors relative">
+                        <Building2 size={24} />
+                      </div>
+                      <div className="relative w-full">
+                        <h3 className="text-lg font-black text-slate-800 mb-1 group-hover:text-[#0176d3] transition-colors">{company.name}</h3>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-tighter">Enter Account Dashboard</p>
+                      </div>
+                      <div className="mt-4 w-full flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-[#0176d3] text-xs font-black opacity-0 group-hover:opacity-100 transform translate-x-[-10px] group-hover:translate-x-0 transition-all">
+                          SELECT ACCOUNT <ChevronRight size={14} />
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleDelete('company', company.id, company.name); }}
+                          className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all z-10"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+
+              {selectedCompanyId && activeTab === 'dashboard' && !selectedProjectId && (
                 <motion.div 
                   key="dashboard-main"
                   initial={{ opacity: 0, y: 10 }}
@@ -190,9 +400,14 @@ export function CrmDashboard() {
                       <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                         <div className="p-6 border-b border-slate-50 flex items-center justify-between">
                           <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
-                             <TrendingUp size={18} className="text-indigo-600" /> Opportunity Pipeline
+                         <TrendingUp size={18} className="text-indigo-600" /> Opportunity Pipeline
                           </h3>
-                          <button className="text-xs font-bold text-indigo-600 hover:underline">View All</button>
+                          <button 
+                            onClick={() => openModal('project', { company_id: selectedCompanyId })}
+                            className="text-xs font-bold text-[#0176d3] bg-blue-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5 hover:bg-[#0176d3] hover:text-white transition-all"
+                          >
+                            <Plus size={14} /> New Opp
+                          </button>
                         </div>
                         <div className="divide-y divide-slate-100">
                           {projects.length > 0 ? projects.map(project => (
@@ -213,7 +428,15 @@ export function CrmDashboard() {
                                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black bg-blue-50 text-[#0176d3] border border-blue-100 uppercase">
                                     {project.stage || 'NEEDS'}
                                   </span>
-                                  <ChevronRight size={16} className="text-slate-200 group-hover:text-[#0176d3] transition-colors" />
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); handleDelete('project', project.id, project.title); }}
+                                      className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                    <ChevronRight size={16} className="text-slate-200 group-hover:text-[#0176d3] transition-colors" />
+                                  </div>
                                 </div>
                               </div>
                           )) : (
@@ -255,7 +478,12 @@ export function CrmDashboard() {
                             <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
                               <ClipboardList size={22} className="text-indigo-600" /> Activity History
                             </h3>
-                            <button className="sfdc-button-primary scale-90">회의록 작성</button>
+                            <button 
+                              onClick={() => openModal('call', { company_id: selectedCompanyId, project_id: selectedProjectId })}
+                              className="sfdc-button-primary scale-90 flex items-center gap-2"
+                            >
+                              <Plus size={16} /> 회의록 작성
+                            </button>
                           </div>
                           
                           <div className="relative pl-8 before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
@@ -272,7 +500,15 @@ export function CrmDashboard() {
                                         <Users size={14} className="text-slate-400" /> {log.crm_contacts?.name}
                                       </span>
                                     </div>
-                                    <ChevronRight size={14} className="text-slate-300 group-hover:text-[#0176d3]" />
+                                    <div className="flex items-center gap-2">
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); handleDelete('call', log.id, safeFormatDate(log.visit_date)); }}
+                                        className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                      <ChevronRight size={14} className="text-slate-300 group-hover:text-[#0176d3]" />
+                                    </div>
                                   </div>
                                   <p className="text-sm text-slate-600 leading-relaxed font-medium">
                                     {log.notes || '기술 미팅 및 샘플 제안 진행.'}
@@ -340,14 +576,23 @@ export function CrmDashboard() {
                   exit={{ opacity: 0, scale: 0.95 }}
                   className="bg-white rounded-3xl border border-slate-200 p-12 shadow-sm text-center"
                 >
-                  <h3 className="text-xl font-black text-slate-800 mb-12">MuzeBIZ.Lab R&R Structure</h3>
+                  <h3 className="text-xl font-black text-slate-800 mb-12">{selectedCompany?.name} Organization Chart</h3>
                   <div className="flex flex-col items-center gap-16">
-                    <OrgProfile name="최지휘" role="Lab Lead" desc="전략 수립 및 AI 모델 총괄" />
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 w-full max-w-4xl">
-                      <OrgProfile name="김영업" role="Field Sales" desc="고객 상담 및 기회 발굴" />
-                      <OrgProfile name="이기술" role="FAE" desc="기술 검증 및 사양 최적화" />
-                      <OrgProfile name="박운영" role="Sales Ops" desc="견적 및 공급망 관리" />
-                    </div>
+                    {contacts.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8 w-full max-w-5xl">
+                        {contacts.map((contact: any) => (
+                          <OrgProfile 
+                            key={contact.id}
+                            name={contact.name} 
+                            role={contact.position || 'Contact'} 
+                            desc={contact.email || 'No email provided'} 
+                            onDelete={() => handleDelete('contact', contact.id, contact.name)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="py-20 text-slate-400 italic">No contacts found for this account.</div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -355,11 +600,224 @@ export function CrmDashboard() {
           </div>
         </div>
       </main>
+
+      {/* 3. CRUD Modals */}
+      <AnimatePresence>
+        {modalType && (
+          <CrmModal 
+            type={modalType} 
+            data={modalData} 
+            onClose={closeModal} 
+            onSuccess={() => { refreshData(); closeModal(); }} 
+            selectedCompanyId={selectedCompanyId}
+            projects={projects}
+            contacts={contacts}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 // --- Internal Sub-components ---
+
+const CrmModal = ({ type, data, onClose, onSuccess, selectedCompanyId, projects, contacts }: any) => {
+  const [formData, setFormData] = useState<any>(data || {});
+  const [saving, setSaving] = useState(false);
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      if (type === 'company') {
+        const { createCrmCompany, updateCrmCompany } = await import('../services/crmService');
+        // Ensure required fields like tech_stack are initialized
+        const payload = { 
+          ...formData, 
+          tech_stack: formData.tech_stack || [],
+          // Map business_area from form if it was set (for backward compatibility during refactor)
+          industry: formData.industry || formData.business_area 
+        };
+        // Remove business_area before sending to DB if we're using industry
+        delete payload.business_area;
+
+        if (formData.id) await updateCrmCompany(formData.id, payload);
+        else await createCrmCompany(payload);
+      } else if (type === 'project') {
+        const { createCrmProject, updateCrmProject } = await import('../services/crmService');
+        const payload = { 
+          ...formData, 
+          company_id: selectedCompanyId,
+          stage: formData.stage || 'NEEDS',
+          expected_value: Number(formData.expected_value) || 0
+        };
+        if (formData.id) await updateCrmProject(formData.id, payload);
+        else await createCrmProject(payload);
+      } else if (type === 'contact') {
+        const { createCrmContact, updateCrmContact } = await import('../services/crmService');
+        const payload = { 
+          ...formData, 
+          company_id: selectedCompanyId,
+          influence_level: formData.influence_level || 'CHAMPION'
+        };
+        if (formData.id) await updateCrmContact(formData.id, payload);
+        else await createCrmContact(payload);
+      } else if (type === 'call') {
+        const { createCallPlan, updateCallPlan } = await import('../services/crmService');
+        const payload = { ...formData, company_id: selectedCompanyId, visit_date: formData.visit_date || new Date().toISOString() };
+        if (formData.id) await updateCallPlan(formData.id, payload);
+        else await createCallPlan(payload);
+      }
+      onSuccess();
+    } catch (err: any) {
+      console.error('CRM Save Error Detail:', err);
+      alert(`저장에 실패했습니다: ${err.message || 'Unknown error'}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const title = {
+    company: formData.id ? '업체 정보 수정' : '새 업체 등록',
+    project: formData.id ? '기회/프로젝트 수정' : '새 영업 기회 등록',
+    contact: formData.id ? '담당자 정보 수정' : '새 담당자 등록',
+    call: formData.id ? '회의록/활동 수정' : '활동 및 회의록 등록'
+  }[type as string] || 'CRM 관리';
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+    >
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+      >
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-lg font-black text-slate-800">{title}</h3>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-all">
+            <X size={20} />
+          </button>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {type === 'company' && (
+            <>
+              <FormField label="업체명" value={formData.name || ''} onChange={(v) => setFormData({...formData, name: v})} required />
+              <FormField label="산업 분야" value={formData.industry || ''} onChange={(v) => setFormData({...formData, industry: v})} placeholder="e.g. Automotive, Cloud, Consumer" />
+            </>
+          )}
+
+          {type === 'project' && (
+            <>
+              <FormField label="프로젝트/기회 명칭" value={formData.title || ''} onChange={(v) => setFormData({...formData, title: v})} required />
+              <div className="grid grid-cols-2 gap-4">
+                <FormSelect 
+                  label="영업 단계" 
+                  value={formData.stage || 'NEEDS'} 
+                  options={['NEEDS', 'DISCOVERY', 'PROPOSAL', 'DESIGN-IN', 'WIN', 'LOSS']} 
+                  onChange={(v) => setFormData({...formData, stage: v})} 
+                />
+                <FormField label="예상 수주액 ($)" type="number" value={formData.expected_value || ''} onChange={(v) => setFormData({...formData, expected_value: v})} />
+              </div>
+            </>
+          )}
+
+          {type === 'contact' && (
+            <>
+              <FormField label="이름" value={formData.name || ''} onChange={(v) => setFormData({...formData, name: v})} required />
+              <FormField label="직책/역할" value={formData.position || ''} onChange={(v) => setFormData({...formData, position: v})} />
+              <FormField label="이메일" type="email" value={formData.email || ''} onChange={(v) => setFormData({...formData, email: v})} />
+            </>
+          )}
+
+          {type === 'call' && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <FormSelect 
+                  label="관련 프로젝트" 
+                  value={formData.project_id || ''} 
+                  options={projects.map((p:any) => ({label: p.title, value: p.id}))} 
+                  onChange={(v) => setFormData({...formData, project_id: v})} 
+                />
+                <FormSelect 
+                  label="미팅 담당자" 
+                  value={formData.contact_id || ''} 
+                  options={contacts.map((c:any) => ({label: c.name, value: c.id}))} 
+                  onChange={(v) => setFormData({...formData, contact_id: v})} 
+                />
+              </div>
+              <FormField label="활동 일자" type="date" value={formData.visit_date ? formData.visit_date.split('T')[0] : new Date().toISOString().split('T')[0]} onChange={(v) => setFormData({...formData, visit_date: v})} />
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">활동 내용 / 회의록</label>
+                <textarea 
+                  rows={4} 
+                  className="w-full bg-slate-50 border border-slate-100 rounded-xl p-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#0176d3]/20"
+                  value={formData.notes || ''}
+                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                  placeholder="미팅에서 논의된 핵심 사항을 기록하세요..."
+                />
+              </div>
+            </>
+          )}
+
+          <div className="pt-4 flex gap-3">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              className="flex-1 py-3 rounded-xl text-sm font-black text-slate-400 hover:bg-slate-50 transition-all"
+            >
+              취소
+            </button>
+            <button 
+              type="submit" 
+              disabled={saving}
+              className="flex-1 py-3 rounded-xl text-sm font-black text-white bg-[#0176d3] shadow-lg shadow-blue-100 hover:bg-blue-600 transition-all disabled:opacity-50"
+            >
+              {saving ? '저장 중...' : '저장하기'}
+            </button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+};
+
+const FormField = ({ label, value, onChange, type = "text", required = false, placeholder = "" }: { label: string, value: string | number, onChange: (v: string) => void, type?: string, required?: boolean, placeholder?: string }) => (
+  <div className="space-y-1">
+    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
+    <input 
+      type={type}
+      required={required}
+      placeholder={placeholder}
+      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-[#0176d3]/20"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  </div>
+);
+
+const FormSelect = ({ label, value, options, onChange }: { label: string, value: string, options: any[], onChange: (v: string) => void }) => (
+  <div className="space-y-1">
+    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
+    <select 
+      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-[#0176d3]/20 appearance-none"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">선택하세요</option>
+      {options.map((opt: any) => (
+        typeof opt === 'string' 
+          ? <option key={opt} value={opt}>{opt}</option>
+          : <option key={opt.value} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
+  </div>
+);
 
 const NavItem = ({ icon, label, active, onClick }: any) => (
   <button 

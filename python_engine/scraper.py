@@ -372,16 +372,20 @@ class FinvizHunter:
 
 from utils import PartNormalizer
 
+
 class SearchAggregator:
     def __init__(self):
         self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
         self.base_url = "https://www.findchips.com/search/"
 
-    async def search_market_intel(self, mpn: str) -> List[Dict]:
+    async def search_market_intel(self, mpn: str, depth: int = 0) -> List[Dict]:
         """
-        FindChips를 통해 전 세계 유통사의 실시간 재고 및 가격 정보를 통합 수집
+        FindChips를 통해 전 세계 유통사의 실시간 재고 및 가격 정보를 통합 수집.
+        재고가 없을 경우 'Family Search' (접두어 기반)를 수행하여 대안 제시.
         """
-        print(f"📡 [AGGREGATOR] Hunting Global Intel for MPN: {mpn} via FindChips...")
+        print(
+            f"📡 [AGGREGATOR] Hunting Global Intel for MPN: {mpn} (Depth: {depth})..."
+        )
         results = []
 
         try:
@@ -392,115 +396,167 @@ class SearchAggregator:
 
                 search_q = mpn.strip()
                 url = f"{self.base_url}{search_q}"
-                
+
                 try:
                     await page.goto(url, wait_until="networkidle", timeout=60000)
                 except Exception as e:
-                    print(f"❌ [AGGREGATOR] Navigation timeout or error: {e}")
-                    # Try once more with domcontentloaded if networkidle fails
+                    print(f"❌ [AGGREGATOR] Navigation timeout: {e}")
                     try:
-                        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        await page.goto(
+                            url, wait_until="domcontentloaded", timeout=30000
+                        )
                     except:
                         await browser.close()
                         return []
 
-                # Fuzzy matches can be slow to inject tables
                 await page.wait_for_timeout(2000)
 
                 # 유통사별 섹션 파싱
                 distributors = await page.query_selector_all(".distributor-results")
-                print(f"🔍 [AGGREGATOR] Scanned {len(distributors)} distributor sections on page")
-                
+
                 for dist in distributors:
                     try:
-                        # 1. Distributor Name Extraction (Robust Fallback)
                         dist_name_raw = ""
-                        # Try standard selectors
-                        name_el = await dist.query_selector(".distributor-name, .distributor-title, .distributor-header a")
+                        name_el = await dist.query_selector(
+                            ".distributor-name, .distributor-title, .distributor-header a"
+                        )
                         if name_el:
                             dist_name_raw = (await name_el.inner_text()).strip()
-                        
-                        # Try logo alt text
+
                         if not dist_name_raw:
-                            img_el = await dist.query_selector(".distributor-header img")
+                            img_el = await dist.query_selector(
+                                ".distributor-header img"
+                            )
                             if img_el:
-                                dist_name_raw = await img_el.get_attribute("alt") or await img_el.get_attribute("title") or ""
-                        
-                        # Try data attributes on children (often used in FindChips RFQ buttons)
-                        if not dist_name_raw:
-                            btn_el = await dist.query_selector("a[data-onclick*='recordUserClick']")
-                            if btn_el:
-                                click_data = await btn_el.get_attribute("data-onclick")
-                                match = re.search(r"'([^']+)'", click_data.split(",")[1]) if "," in click_data else None
-                                if match: dist_name_raw = match.group(1)
+                                dist_name_raw = (
+                                    await img_el.get_attribute("alt")
+                                    or await img_el.get_attribute("title")
+                                    or ""
+                                )
 
-                        dist_name = PartNormalizer.normalize_distributor(dist_name_raw or "Other Distributor")
+                        dist_name = PartNormalizer.normalize_distributor(
+                            dist_name_raw or "Other"
+                        )
 
-                        # 2. Part Row Extraction
                         rows = await dist.query_selector_all("tr")
                         for row in rows:
                             try:
-                                # Look for identifying cells
-                                stock_el = await row.query_selector("td.td-stock, .stock-info")
-                                price_el = await row.query_selector("td.td-price, .price-list")
-                                part_el = await row.query_selector("td.td-part, .td-part a")
+                                stock_el = await row.query_selector(
+                                    "td.td-stock, .stock-info"
+                                )
+                                price_el = await row.query_selector(
+                                    "td.td-price, .price-list"
+                                )
+                                part_el = await row.query_selector(
+                                    "td.td-part, .td-part a"
+                                )
 
-                                # Skip header rows or empty rows
                                 if not stock_el and not part_el:
                                     continue
 
-                                stock_text = (await stock_el.inner_text()).strip() if stock_el else "0"
-                                price_text = (await price_el.inner_text()).strip() if price_el else "0"
-                                actual_mpn_raw = (await part_el.inner_text()).strip() if part_el else mpn
-                                
-                                # Clean up MPN (strip 'DISTI #' etc)
-                                actual_mpn = actual_mpn_raw.split("DISTI")[0].split("\n")[0].strip()
-                                
-                                # Avoid "Part #" header
-                                if "Part #" in actual_mpn: continue
+                                stock_text = (
+                                    (await stock_el.inner_text()).strip()
+                                    if stock_el
+                                    else "0"
+                                )
+                                price_text = (
+                                    (await price_el.inner_text()).strip()
+                                    if price_el
+                                    else "0"
+                                )
+                                actual_mpn_raw = (
+                                    (await part_el.inner_text()).strip()
+                                    if part_el
+                                    else mpn
+                                )
+                                actual_mpn = (
+                                    actual_mpn_raw.split("DISTI")[0]
+                                    .split("\n")[0]
+                                    .strip()
+                                )
 
-                                # 3. Data Cleansing
+                                if "Part #" in actual_mpn:
+                                    continue
+
                                 stock_num = re.sub(r"[^0-9]", "", stock_text)
                                 stock = int(stock_num) if stock_num else 0
                                 price = PartNormalizer.format_price(price_text)
 
-                                # 4. Buy Link
-                                buy_link_el = await row.query_selector("a[href*='/buy/'], a[href*='track'], td.td-price a")
+                                buy_link_el = await row.query_selector(
+                                    "a[href*='/buy/'], a[href*='track'], td.td-price a"
+                                )
                                 buy_url = ""
                                 if buy_link_el:
                                     href = await buy_link_el.get_attribute("href")
                                     if href:
-                                        if href.startswith("//"): buy_url = "https:" + href
-                                        elif href.startswith("/"): buy_url = "https://www.findchips.com" + href
-                                        else: buy_url = href
+                                        if href.startswith("//"):
+                                            buy_url = "https:" + href
+                                        elif href.startswith("/"):
+                                            buy_url = "https://www.findchips.com" + href
+                                        else:
+                                            buy_url = href
 
-                                # Include if it's a part match, even if out of stock
                                 if actual_mpn:
-                                    results.append({
-                                        "distributor": dist_name,
-                                        "mpn": actual_mpn,
-                                        "normalized_mpn": PartNormalizer.clean_mpn(actual_mpn),
-                                        "manufacturer": "Global Source",
-                                        "stock": stock,
-                                        "price": price,
-                                        "risk_level": "High" if stock == 0 else ("Medium" if stock < 100 else "Low"),
-                                        "source_type": "Market Aggregator",
-                                        "product_url": buy_url,
-                                    })
-                            except: continue
-                    except: continue
+                                    results.append(
+                                        {
+                                            "distributor": dist_name,
+                                            "mpn": actual_mpn,
+                                            "normalized_mpn": PartNormalizer.clean_mpn(
+                                                actual_mpn
+                                            ),
+                                            "manufacturer": "Global Source",
+                                            "stock": stock,
+                                            "price": price,
+                                            "risk_level": (
+                                                "High"
+                                                if stock == 0
+                                                else (
+                                                    "Medium" if stock < 100 else "Low"
+                                                )
+                                            ),
+                                            "lifecycle": PartNormalizer.get_lifecycle_status(
+                                                actual_mpn, stock
+                                            ),
+                                            "source_type": "Market Aggregator",
+                                            "product_url": buy_url,
+                                            "is_alternative": depth > 0,
+                                        }
+                                    )
+                            except:
+                                continue
+                    except:
+                        continue
 
                 await browser.close()
 
-                # Deduplicate but allow multiple variants from same distributor
+                # Deduplicate
                 unique_results = {}
                 for r in results:
                     key = f"{r['distributor']}_{r['normalized_mpn']}"
-                    if key not in unique_results or r["stock"] > unique_results[key]["stock"]:
+                    if (
+                        key not in unique_results
+                        or r["stock"] > unique_results[key]["stock"]
+                    ):
                         unique_results[key] = r
 
                 final_list = list(unique_results.values())
-                print(f"✅ [AGGREGATOR] Successfully found {len(final_list)} results for {mpn}")
+
+                # RECURSIVE FALLBACK: If no stock found for exact MPN, search for its family
+                if len(final_list) > 0:
+                    total_stock = sum(r["stock"] for r in final_list)
+                    if total_stock == 0 and depth == 0:
+                        family_mpn = PartNormalizer.get_base_family(mpn)
+                        if family_mpn and family_mpn != mpn:
+                            print(
+                                f"⚠️ [AGGREGATOR] Exact Match '{mpn}' is OOS. Trying Family Search for '{family_mpn}'..."
+                            )
+                            family_results = await self.search_market_intel(
+                                family_mpn, depth=depth + 1
+                            )
+                            # Merge but flag them as alternatives
+                            return final_list + family_results
+
+                print(f"✅ [AGGREGATOR] Returning {len(final_list)} results for {mpn}")
                 return final_list
 
         except Exception as e:
@@ -511,6 +567,11 @@ class SearchAggregator:
             print(f"❌ [AGGREGATOR] Critical Failure: {e}")
             return []
 
+        except Exception as e:
+            print(f"❌ [AGGREGATOR] Critical Failure: {e}")
+            return []
+
+
 class MouserHunter:
     def __init__(self):
         pass
@@ -519,13 +580,16 @@ class MouserHunter:
         aggregator = SearchAggregator()
         return await aggregator.search_market_intel(mpn)
 
+
 if __name__ == "__main__":
+
     async def test():
         aggregator = SearchAggregator()
         res = await aggregator.search_market_intel("TPS54331")
         print(f"Test Results: {res}")
 
     import sys
+
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         asyncio.run(test())
     else:

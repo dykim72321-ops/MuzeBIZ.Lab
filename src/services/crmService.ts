@@ -43,6 +43,12 @@ export const updateCrmCompany = async (id: string, updates: Partial<CrmCompany>)
   return data as CrmCompany;
 };
 
+export const deleteCrmCompany = async (id: string) => {
+  const { error } = await supabase.from('crm_companies').delete().eq('id', id);
+  if (error) throw error;
+  return true;
+};
+
 // --- Contacts ---
 export const getCrmContacts = async (companyId?: string) => {
   let query = supabase.from('crm_contacts').select('*');
@@ -62,6 +68,23 @@ export const createCrmContact = async (contact: Partial<CrmContact>) => {
     .single();
   if (error) throw error;
   return data as CrmContact;
+};
+
+export const updateCrmContact = async (id: string, updates: Partial<CrmContact>) => {
+  const { data, error } = await supabase
+    .from('crm_contacts')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as CrmContact;
+};
+
+export const deleteCrmContact = async (id: string) => {
+  const { error } = await supabase.from('crm_contacts').delete().eq('id', id);
+  if (error) throw error;
+  return true;
 };
 
 // --- Projects ---
@@ -84,12 +107,11 @@ export const createCrmProject = async (project: Partial<CrmProject>) => {
   return data as CrmProject;
 };
 
-export const updateCrmProjectStage = async (id: string, stage: string, velocityUpdate?: any) => {
+export const updateCrmProject = async (id: string, updates: Partial<CrmProject>) => {
   const { data, error } = await supabase
     .from('crm_projects')
     .update({ 
-      stage, 
-      velocity_data: velocityUpdate,
+      ...updates,
       updated_at: new Date().toISOString()
     })
     .eq('id', id)
@@ -97,6 +119,12 @@ export const updateCrmProjectStage = async (id: string, stage: string, velocityU
     .single();
   if (error) throw error;
   return data as CrmProject;
+};
+
+export const deleteCrmProject = async (id: string) => {
+  const { error } = await supabase.from('crm_projects').delete().eq('id', id);
+  if (error) throw error;
+  return true;
 };
 
 // --- Call Plans ---
@@ -128,6 +156,23 @@ export const createCallPlan = async (callPlan: Partial<CallPlan>) => {
     .single();
   if (error) throw error;
   return data as CallPlan;
+};
+
+export const updateCallPlan = async (id: string, updates: Partial<CallPlan>) => {
+  const { data, error } = await supabase
+    .from('crm_call_plans')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as CallPlan;
+};
+
+export const deleteCallPlan = async (id: string) => {
+  const { error } = await supabase.from('crm_call_plans').delete().eq('id', id);
+  if (error) throw error;
+  return true;
 };
 
 // --- Project Intelligence & Timeline ---

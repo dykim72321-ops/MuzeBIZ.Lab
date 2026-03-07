@@ -4,7 +4,7 @@ import {
   ChevronRight,
   Target
 } from 'lucide-react';
-import { getCrmProjects, updateCrmProjectStage } from '../../services/crmService';
+import { getCrmProjects, updateCrmProject } from '../../services/crmService';
 import type { ProjectStage } from '../../types/crm';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
@@ -36,7 +36,7 @@ export const ProjectPipeline = () => {
 
   const handleStageChange = async (projectId: string, newStage: ProjectStage) => {
     try {
-      await updateCrmProjectStage(projectId, newStage);
+      await updateCrmProject(projectId, { stage: newStage });
       fetchProjects();
     } catch (error) {
       console.error('Failed to update stage:', error);

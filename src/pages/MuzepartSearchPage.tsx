@@ -32,6 +32,8 @@ interface ComponentPart {
   date_code: string;
   is_eol: boolean;
   risk_level: string;
+  lifecycle?: string;
+  is_alternative?: boolean;
   is_qc_enabled?: boolean;
   datasheet?: string;
   description?: string;
@@ -567,10 +569,22 @@ const SearchPlatform: React.FC = () => {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       {getBrandIcon(part.manufacturer)}
-                      <div>
-                        <div className="mpn-cell-text" title="Part Number">{part.mpn}</div>
+                      <div className="mpn-display">
+                        <div className="mpn-cell-text" title="Part Number">
+                          {part.mpn}
+                          {part.is_alternative && (
+                            <span className="family-tag" style={{ marginLeft: '8px' }}>Family Match</span>
+                          )}
+                        </div>
                         <div className="mfr-cell" title="Manufacturer">{part.manufacturer}</div>
                       </div>
+                    </div>
+                  </td>
+                   <td className="st-td">
+                    <div className="lifecycle-display">
+                      <span className={`lifecycle-badge ${part.lifecycle?.toLowerCase() || 'active'}`}>
+                        {part.lifecycle || 'Active'}
+                      </span>
                     </div>
                   </td>
                   <td className={`stock-cell ${getStockClass(part.stock)}`}>
@@ -633,11 +647,17 @@ const SearchPlatform: React.FC = () => {
               <div className="card-header">
                 <div>
                   <span className={`distributor-badge ${badgeClass}`}>{part.distributor}</span>
-                  <div className="mpn" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className="mpn" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     {getBrandIcon(part.manufacturer)}
                     {part.mpn}
+                    {part.is_alternative && <span className="family-tag">Family Match</span>}
                   </div>
-                  <div className="manufacturer">{part.manufacturer}</div>
+                  <div className="manufacturer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{part.manufacturer}</span>
+                    <span className={`lifecycle-badge ${part.lifecycle?.toLowerCase() || 'active'}`} style={{ fontSize: '9px', padding: '2px 6px' }}>
+                      {part.lifecycle || 'Active'}
+                    </span>
+                  </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                    <div style={{ fontSize: '0.65rem', color: 'var(--accent)', marginBottom: '0.25rem', fontWeight: 600 }}>📡 JUST NOW</div>
