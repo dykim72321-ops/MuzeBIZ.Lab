@@ -145,16 +145,16 @@ function formatMarketCap(value: number): string {
   return `$${value.toLocaleString()}`;
 }
 
-export async function fetchStockQuote(ticker: string): Promise<Stock | null> {
+export async function fetchStockQuote(ticker: string, historyRange?: string): Promise<Stock | null> {
   const cached = cache.get(ticker);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION && (!historyRange || (cached.data.history && cached.data.history.length > 0))) {
     return cached.data;
   }
 
   try {
     // Use new unified smart-quote endpoint
     const { data, error } = await supabase.functions.invoke('smart-quote', {
-      body: { ticker, includeFinancials: false }
+      body: { ticker, includeFinancials: false, historyRange }
     });
 
     if (error) {
@@ -226,16 +226,46 @@ export async function fetchStockQuote(ticker: string): Promise<Stock | null> {
   }
 }
 
-export async function fetchMultipleStocks(tickers: string[]): Promise<Stock[]> {
-  // Sequential execution to prevent Yahoo rate limiting / race conditions
+const pendingRequests = new Map<string, Promise<Stock | null>>();
+
+export async function fetchMultipleStocksOptimized(tickers: string[], historyRange?: string): Promise<Stock[]> {
+  const CHUNK_SIZE = 5;
   const results: Stock[] = [];
-  for (const ticker of tickers) {
-    const stock = await fetchStockQuote(ticker);
-    if (stock) results.push(stock);
-    // Small delay between requests to be gentle on APIs
-    await new Promise(resolve => setTimeout(resolve, 100));
+  
+  // Deduplicate and filter out empty tickers
+  const uniqueTickers = [...new Set(tickers.filter(Boolean))];
+  
+  for (let i = 0; i < uniqueTickers.length; i += CHUNK_SIZE) {
+    const chunk = uniqueTickers.slice(i, i + CHUNK_SIZE);
+    
+    const chunkPromises = chunk.map(ticker => {
+      // 🆕 Deduplication Logic: If a request for this ticker is already pending, reuse it
+      if (pendingRequests.has(ticker)) {
+        return pendingRequests.get(ticker)!;
+      }
+      
+      const request = fetchStockQuote(ticker, historyRange).finally(() => {
+        pendingRequests.delete(ticker);
+      });
+      
+      pendingRequests.set(ticker, request);
+      return request;
+    });
+    
+    const chunkResults = await Promise.all(chunkPromises);
+    results.push(...chunkResults.filter((s): s is Stock => s !== null));
+    
+    // Minimal delay between chunks to be safe
+    if (i + CHUNK_SIZE < uniqueTickers.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
   }
+  
   return results;
+}
+
+export async function fetchMultipleStocks(tickers: string[]): Promise<Stock[]> {
+    return fetchMultipleStocksOptimized(tickers);
 }
 
 // Helper to handle retries for rate-limited APIs (Yahoo 429)

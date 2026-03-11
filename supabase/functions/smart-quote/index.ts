@@ -125,9 +125,9 @@ async function fetchYahooAnalyst(ticker: string) {
 }
 
 // 2b. Yahoo: Historical data (bypass CORS)
-async function fetchYahooHistory(ticker: string, session: { cookie: string; crumb: string }, userAgent: string) {
+async function fetchYahooHistory(ticker: string, session: { cookie: string; crumb: string }, userAgent: string, range: string = '1mo') {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo&crumb=${session.crumb}`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=${range}&crumb=${session.crumb}`;
     const res = await fetch(url, {
       headers: {
         'Cookie': session.cookie,
@@ -146,16 +146,41 @@ async function fetchYahooHistory(ticker: string, session: { cookie: string; crum
 
     const timestamps = result.timestamp;
     const closes = result.indicators?.quote?.[0]?.close || [];
+    const volumes = result.indicators?.quote?.[0]?.volume || [];
+    const highs = result.indicators?.quote?.[0]?.high || [];
+    const lows = result.indicators?.quote?.[0]?.low || [];
 
     return timestamps.map((ts: number, i: number) => ({
       date: new Date(ts * 1000).toISOString(),
-      price: closes[i]
+      price: closes[i],
+      volume: volumes[i] || 0,
+      high: highs[i] || closes[i],
+      low: lows[i] || closes[i]
     })).filter((p: any) => p.price !== null && p.price !== undefined);
   } catch (e) {
     console.warn(`[Yahoo History] Failed for ${ticker}:`, e);
     return null;
   }
 }
+
+// --- Technical Analysis Helpers for Penny Stocks ---
+function calculateEMA(data: number[], days: number): number {
+  if (data.length === 0) return 0;
+  if (data.length < days) days = data.length;
+  
+  const k = 2 / (days + 1);
+  let ema = data[0]; 
+  for (let i = 1; i < data.length; i++) {
+    ema = data[i] * k + ema * (1 - k);
+  }
+  return ema;
+}
+
+// Approximate Daily VWAP for the latest day if intraday data is not available
+function calculateVWAP(high: number, low: number, close: number): number {
+  return (high + low + close) / 3;
+}
+
 
 
 
@@ -242,7 +267,8 @@ serve(async (req) => {
   }
 
   try {
-    const { ticker, includeFinancials = false } = await req.json();
+    const reqBody = await req.json();
+    const { ticker, includeFinancials = false } = reqBody;
     if (!ticker) throw new Error('Ticker required');
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -261,7 +287,7 @@ serve(async (req) => {
       fetchFinnhubPrice(ticker),
       session ? fetchYahooAnalyst(ticker) : Promise.resolve(null),
       fetchGoogleNews(ticker),
-      session ? fetchYahooHistory(ticker, session, userAgent) : Promise.resolve(null)
+      session ? fetchYahooHistory(ticker, session, userAgent, reqBody.historyRange || '1mo') : Promise.resolve(null)
     ]);
 
 
@@ -279,17 +305,18 @@ serve(async (req) => {
     const volume = yahooData?.volume || 0;
     const avgVolume = yahooData?.averageVolume10d || 0;
     const relativeVolume = avgVolume > 0 ? Math.round((volume / avgVolume) * 100) / 100 : 0;
+    const absoluteLiquidity = price * volume; // Transaction value
 
-    console.log(`📊 [RelVol] ${ticker}: ${relativeVolume.toFixed(2)}x (${volume.toLocaleString()} / ${avgVolume.toLocaleString()})`);
+    console.log(`📊 [RelVol] ${ticker}: ${relativeVolume.toFixed(2)}x (${volume.toLocaleString()} / ${avgVolume.toLocaleString()}) - Liq: $${absoluteLiquidity.toLocaleString()}`);
 
     // Calculate DNA Score with RelVol factor
     let dnaScore = 50;
-    if (price > 0 && price < 1) dnaScore += 30;
+    if (price > 0 && price < 1) dnaScore += 30; // Penny stock premium
     else if (price < 3) dnaScore += 20;
     if (changePercent > 15) dnaScore += 20;
     else if (changePercent > 5) dnaScore += 10;
 
-    // 🆕 Relative Volume bonus (key momentum signal)
+    // Relative Volume bonus (key momentum signal)
     if (relativeVolume >= 3) dnaScore += 15;      // 3x+ = very strong momentum
     else if (relativeVolume >= 2) dnaScore += 10; // 2x+ = strong momentum
     else if (relativeVolume >= 1.5) dnaScore += 5; // 1.5x = mild interest
@@ -302,7 +329,69 @@ serve(async (req) => {
     if (upsidePotential > 50) dnaScore += 10;
     else if (upsidePotential > 20) dnaScore += 5;
 
+    // Ensure score is bounded
     dnaScore = Math.min(100, Math.max(0, dnaScore));
+
+    // --- Penny Stock Quantitative Analysis ---
+    let backtestMatchRate = 50; 
+    let isSimulated = false;
+    let finalHistory = historyData || [];
+
+    if (!historyData || historyData.length === 0) {
+      isSimulated = true;
+      // Provide a 2-point fallback history
+      finalHistory = [
+         { date: new Date(Date.now() - 30*24*60*60*1000).toISOString(), price: price * 0.9 }, // 30 days ago, 10% lower assumption
+         { date: new Date().toISOString(), price: price }
+      ];
+    } else {
+      // 1. Liquidity Filter
+      const HAS_LIQUIDITY = absoluteLiquidity >= 500000; // Minimum $500k volume traded
+      
+      // 2. Short-term EMA calculation
+      const closePrices = finalHistory.map((h: any) => h.price);
+      const ema3 = calculateEMA(closePrices, 3);
+      const ema5 = calculateEMA(closePrices, 5);
+      
+      // 3. VWAP
+      // For lack of intraday ticks, we use the High, Low, Close of the current quote or last day
+      const high = finnhubData?.high || price;
+      const low = finnhubData?.low || price;
+      const vwap = calculateVWAP(high, low, price);
+      
+      // 4. Score formulation based on Indicators
+      let baseScore = 50; // default technical score
+      
+      if (!HAS_LIQUIDITY) {
+         baseScore -= 20; // High risk, illiquid
+      } else {
+         baseScore += 15; // base score reaches 65 for liquid stocks
+         
+         // Golden cross on micro timeframe (EMA 3 > EMA 5)
+         if (ema3 > ema5) baseScore += 10;
+         
+         // Price above VWAP = Bullish intraday
+         if (price > vwap) baseScore += 10;
+         
+         // Non-linear scaling components (very hard to get)
+         if (relativeVolume >= 5) baseScore += 5; // Unusually high relative volume
+         if (absoluteLiquidity >= 5000000) baseScore += 5; // > $5M traded
+         if (changePercent > 10 && changePercent <= 50) baseScore += 5;
+
+         // Extreme gap up without volume backup
+         if (changePercent > 50 && relativeVolume < 1) baseScore -= 25;
+      }
+      
+      // Non-linear scaling (Score Compression) to make it hard to reach 95%+
+      let finalScore = baseScore;
+      if (finalScore > 90) {
+        // Compress score progression: (e.g. 100 becomes 90 + 10 * 0.4 = 94.0, 110 becomes 98.0)
+        finalScore = 90 + ((finalScore - 90) * 0.4);
+      }
+      
+      // Hard Cap at 98.5% for realistic quant estimation
+      backtestMatchRate = Math.min(98.5, Math.max(15, finalScore));
+    }
 
     const result = {
       ticker,
@@ -318,17 +407,20 @@ serve(async (req) => {
       fiftyTwoWeekHigh: yahooData?.fiftyTwoWeekHigh || 0,
       fiftyTwoWeekLow: yahooData?.fiftyTwoWeekLow || 0,
       marketCap: yahooData?.marketCap || 0,
-      // 🆕 Volume & Momentum
+      // 🆕 Momentum & Quant
       volume,
       averageVolume10d: avgVolume,
       relativeVolume,  // Key momentum indicator
+      absoluteLiquidity, // Transaction value ($500k filter)
+      backtestMatchRate, // Quant match probability
+      isSimulated, // indicates missing real historical data
       // Calculated
       dnaScore,
       upsidePotential,
       // 🆕 News Headlines
       newsHeadlines: newsData?.headlines || [],
       // 🆕 Historical Data (CORS bypassed)
-      history: historyData || [],
+      history: finalHistory,
       // Financials (Alpha Vantage - only if requested)
       peRatio: financialData?.overview?.PERatio || null,
       revenueGrowth: financialData?.overview?.QuarterlyRevenueGrowthYOY || null,

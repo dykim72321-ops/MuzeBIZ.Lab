@@ -9,10 +9,15 @@ import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { getWatchlist, removeFromWatchlist, type WatchlistItem } from '../services/watchlistService';
 import { 
-  fetchMultipleStocks, 
+  fetchMultipleStocksOptimized, 
   fetchStockHistory 
 } from '../services/stockService';
 import type { Stock } from '../types';
+
+const formatPrice = (price: number | undefined | null): string => {
+  if (price === undefined || price === null) return '---';
+  return price < 1 ? `$${price.toFixed(4)}` : `$${price.toFixed(2)}`;
+};
 
 export const WatchlistPage = () => {
   const navigate = useNavigate();
@@ -30,46 +35,22 @@ export const WatchlistPage = () => {
       
       if (items.length > 0) {
         const tickers = items.map(i => i.ticker);
-        const stockData = await fetchMultipleStocks(tickers);
         
-        // Fetch history based on registration date
-        const historyResults: any[] = [];
+        // 🆕 Optimization: Calculate the required history range once
+        // Find the earliest registration date
         const now = new Date();
+        const earliestDate = items.reduce((earliest, item) => {
+          const itemDate = new Date(item.addedAt);
+          return itemDate < earliest ? itemDate : earliest;
+        }, now);
         
-        for (const item of items) {
-            const addedDate = new Date(item.addedAt);
-            const diffTime = Math.abs(now.getTime() - addedDate.getTime());
-            // Calculate days, cap at 365 to avoid excessive data, minimum 7 days for a decent chart
-            let daysToFetch = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 5;
-            daysToFetch = Math.max(7, Math.min(365, daysToFetch));
-            
-            console.log(`[Watchlist] Fetching ${daysToFetch} days of history for ${item.ticker} (Registered: ${item.addedAt})`);
-            
-            const h = await fetchStockHistory(item.ticker, 'D', daysToFetch);
-            historyResults.push(h);
-            
-            // Wait between requests to stay under rate limits
-            if (items.length > 1) await new Promise(r => setTimeout(r, 2000));
-        }
-
-        // Map history back to stocks and filter by registration date
-        const enrichedStocks = stockData.map((stock, idx) => {
-            const item = items[idx];
-            const addedDate = new Date(item.addedAt).getTime();
-            
-            // Filter history to only include points on or after addedDate
-            let filteredHistory = stock.history ? stock.history.filter(p => new Date(p.date).getTime() >= addedDate - (12 * 60 * 60 * 1000)) : historyResults[idx];
-            
-            // If filtering results in too few points (e.g. added today), take at least the last 2 points if available
-            if (filteredHistory && filteredHistory.length < 2 && historyResults[idx] && historyResults[idx].length >= 2) {
-                filteredHistory = historyResults[idx].slice(-2);
-            }
-
-            return {
-                ...stock,
-                history: filteredHistory
-            };
-        });
+        const diffDays = Math.ceil(Math.abs(now.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)) + 5;
+        const historyRange = diffDays <= 5 ? '5d' : diffDays <= 30 ? '1mo' : diffDays <= 90 ? '3mo' : '1y';
+        
+        console.log(`[Watchlist] Fetching optimized data for ${tickers.length} tickers with range: ${historyRange}`);
+        
+        // 🚀 Parallel Optimized Fetch
+        const enrichedStocks = await fetchMultipleStocksOptimized(tickers, historyRange);
         
         console.log('DEBUG: Enriched Stocks with History:', enrichedStocks.map(s => ({ t: s.ticker, hL: s.history?.length })));
         setStocks(enrichedStocks);
@@ -218,31 +199,31 @@ export const WatchlistPage = () => {
                         )}
                       </div>
 
-                      <div className={`flex items-end justify-between ${viewMode === 'grid' ? '' : 'flex-1'}`}>
-                        <div className="flex gap-4">
+                      <div className={`flex flex-wrap items-end justify-between gap-y-4 ${viewMode === 'grid' ? '' : 'flex-1'}`}>
+                        <div className="flex flex-wrap gap-2 sm:gap-4">
                           <div>
                             <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mb-0.5">Buy</p>
                             <p className="text-sm font-black text-slate-700 font-mono">
-                              {item.buyPrice ? `$${item.buyPrice.toFixed(2)}` : '---'}
+                              {formatPrice(item.buyPrice)}
                             </p>
                           </div>
                           <div>
                             <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mb-0.5">Target</p>
                             <p className="text-sm font-black text-[#0176d3] font-mono">
-                              {item.targetProfit ? `$${item.targetProfit.toFixed(2)}` : '---'}
+                              {formatPrice(item.targetProfit)}
                             </p>
                           </div>
                           <div>
                             <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mb-0.5">Stop</p>
                             <p className="text-sm font-black text-rose-500 font-mono">
-                              {item.stopLoss ? `$${item.stopLoss.toFixed(2)}` : '---'}
+                              {formatPrice(item.stopLoss)}
                             </p>
                           </div>
                         </div>
                         <div className="text-right">
                           <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Current</p>
                           <p className={`text-2xl font-black font-mono ${isPositive ? 'text-emerald-500 drop-shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.4)]'}`}>
-                            {stock ? `$${stock.price.toFixed(2)}` : '---'}
+                            {stock ? formatPrice(stock.price) : '---'}
                           </p>
                         </div>
                       </div>
@@ -252,26 +233,51 @@ export const WatchlistPage = () => {
                         <div className="h-20 w-full mt-4 relative group/chart">
                           {(() => {
                             const hasHistory = stock.history && stock.history.length > 0;
+                            const sortedHistory = hasHistory && stock.history ? [...stock.history].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) : [];
                             
                             // MANDATE: The graph MUST start at 0% from the registration date.
-                            // Therefore, the reference price is ALWAYS the price on the first day of history (addedAt).
-                            const referencePrice = (hasHistory && stock.history) ? stock.history[0].price : (item.buyPrice || stock.price);
+                            // 1. Filter history to only include dates on or after addedAt
+                            const itemAddedDate = new Date(item.addedAt);
+                            itemAddedDate.setHours(0, 0, 0, 0);
+                            
+                            const relevantHistory = sortedHistory.filter(h => {
+                                const hDate = new Date(h.date);
+                                hDate.setHours(0, 0, 0, 0);
+                                // Include a 1 day buffer just in case of timezone/market hour discrepancies
+                                return hDate.getTime() >= itemAddedDate.getTime() - (24 * 60 * 60 * 1000);
+                            });
+
+                            // Therefore, the reference price is ALWAYS the price on the first day of relevant history (addedAt).
+                            const referencePrice = relevantHistory.length > 0 ? relevantHistory[0].price : (item.buyPrice || stock.price);
                               
                             const currentReturnPct = ((stock.price / referencePrice) - 1) * 100;
                             const isProfit = currentReturnPct >= 0;
                             const color = isProfit ? '#10b981' : '#f43f5e';
                             
-                            // Prediction Match (예측 일치도) Calculation
-                            // Logic: Compare DNA Score (suggested accuracy) with actual performance.
-                            // If ROI is positive, it confirms a 'buy' signal accuracy.
-                            const dnaBase = stock.dnaScore || 85;
-                            const matchBoost = isProfit ? (Math.min(10, currentReturnPct / 5)) : -(Math.min(20, Math.abs(currentReturnPct) / 2));
-                            const accuracyMatch = Math.min(99.8, Math.max(15, dnaBase + matchBoost + (Math.random() * 2 - 1)));
+                            // Prediction Match (예측 일치도) Mathematical Calculation
+                            // Calculate based on current price relative to Stop Loss (0%) and Target Profit (100%)
+                            let mathMatch = 80; // default baseline if prices are missing
+                            if (item.targetProfit != null && item.buyPrice != null && item.stopLoss != null && 
+                                item.targetProfit > item.buyPrice && item.stopLoss < item.buyPrice) {
+                                if (stock.price >= item.targetProfit) {
+                                    mathMatch = 100;
+                                } else if (stock.price <= item.stopLoss) {
+                                    mathMatch = 0;
+                                } else {
+                                    const fullRange = item.targetProfit - item.stopLoss;
+                                    const currentPos = stock.price - item.stopLoss;
+                                    mathMatch = (currentPos / fullRange) * 100;
+                                }
+                            }
+                            
+                            // 2. 백엔드에서 제공하는 서버사이드 백테스트 모델(backtestMatchRate)이 있다면 최우선 적용하고,
+                            // 없다면 오직 실시간 수학적 공식에 기반한 mathMatch를 사용합니다. (고정값인 dnaScore 혼용 방지)
+                            const accuracyMatch = (stock as any).backtestMatchRate ?? mathMatch;
 
                             let chartData: any[] = [];
                             
-                            if (hasHistory && stock.history) {
-                              chartData = stock.history.map(point => {
+                            if (relevantHistory.length > 0) {
+                              chartData = relevantHistory.map(point => {
                                 const ret = ((point.price / referencePrice) - 1) * 100;
                                 return {
                                   name: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
@@ -280,7 +286,7 @@ export const WatchlistPage = () => {
                                 };
                               });
                             } else {
-                               // Fallback if no history yet
+                               // Fallback if no history yet on the added date
                                chartData = [
                                 { name: 'Entry', val: 0, price: referencePrice },
                                 { name: 'Current', val: currentReturnPct, price: stock.price }
@@ -318,7 +324,7 @@ export const WatchlistPage = () => {
                                               return (
                                                   <div className="bg-white border border-slate-200 p-2 rounded shadow-xl text-[10px] font-mono z-50 pointer-events-none">
                                                       <p className="font-bold text-slate-500 mb-0.5">{data.name}</p>
-                                                      <p className="font-black text-slate-900">${data.price.toFixed(2)}</p>
+                                                      <p className="font-black text-slate-900">{formatPrice(data.price)}</p>
                                                       <p className={`font-bold ${pColor}`}>
                                                           {data.val >= 0 ? '+' : ''}{data.val.toFixed(2)}%
                                                       </p>
@@ -331,7 +337,7 @@ export const WatchlistPage = () => {
                                     />
                                   </AreaChart>
                                 </ResponsiveContainer>
-                                <div className="absolute top-0 left-0 flex items-center gap-2">
+                                <div className="absolute top-0 left-0 flex flex-wrap items-start gap-2 max-w-full z-10 px-2 pt-2">
                                   <div className="bg-white/95 px-2 py-1 rounded-md backdrop-blur-sm border border-slate-200 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono transition-opacity group-hover/chart:opacity-0">
                                     {isProfit ? <TrendingUp className="w-3 h-3 text-emerald-500" /> : <TrendingDown className="w-3 h-3 text-rose-500" />}
                                     <span className={isProfit ? 'text-emerald-500' : 'text-rose-500'}>
@@ -340,11 +346,20 @@ export const WatchlistPage = () => {
                                     <span className="text-[8px] text-slate-400 ml-1 uppercase">ROI</span>
                                   </div>
                                   
-                                  <div className="bg-white/95 px-2 py-1 rounded-md backdrop-blur-sm border border-[#0176d3]/20 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono transition-opacity group-hover/chart:opacity-0">
-                                    <Zap className="w-3 h-3 text-amber-500" />
-                                    <span className="text-slate-900">{accuracyMatch.toFixed(1)}%</span>
-                                    <span className="text-[8px] text-slate-400 ml-1 uppercase underline decoration-[#0176d3]/30 underline-offset-2 tracking-tighter">예측 일치도</span>
-                                  </div>
+                                  {accuracyMatch != null && (
+                                    <div className="bg-white/95 px-2 py-1 rounded-md backdrop-blur-sm border border-[#0176d3]/20 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono transition-opacity group-hover/chart:opacity-0">
+                                      <Zap className="w-3 h-3 text-amber-500" />
+                                      <span className="text-slate-900">{accuracyMatch.toFixed(1)}%</span>
+                                      <span className="text-[8px] text-slate-400 ml-1 uppercase underline decoration-[#0176d3]/30 underline-offset-2 tracking-tighter">예측 일치도</span>
+                                    </div>
+                                  )}
+
+                                  {(!hasHistory || (stock as any).isSimulated) && (
+                                    <div className="bg-amber-50 px-2 py-1 rounded-md border border-amber-200 shadow-sm flex items-center gap-1 text-[10px] font-black transition-opacity group-hover/chart:opacity-0">
+                                      <Activity className="w-3 h-3 text-amber-500" />
+                                      <span className="text-amber-600">SIMULATED</span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             );

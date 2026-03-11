@@ -450,19 +450,18 @@ body {
 .results-table {
   border-collapse: separate;
   border-spacing: 0;
-  table-layout: fixed; /* fix table layout */
   width: 100%;
 }
 
 /* Set specific column widths */
 .results-table th:nth-child(1) {
-  width: 22%;
+  width: 15%;
 } /* Distributor */
 .results-table th:nth-child(2) {
-  width: 33%;
+  width: 30%;
 } /* MPN / MFR */
 .results-table th:nth-child(3) {
-  width: 12%;
+  width: 10%;
 } /* Stock */
 .results-table th:nth-child(4) {
   width: 15%;
@@ -471,7 +470,7 @@ body {
   width: 10%;
 } /* Lead Time */
 .results-table th:nth-child(6) {
-  width: 8%;
+  width: 20%;
 } /* Actions */
 
 .results-table tr {
