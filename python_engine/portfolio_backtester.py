@@ -101,7 +101,18 @@ class EngineValidator:
         #   ④ 거래 내역 기록 (승률 산출용)
         # -----------------------------------------------------------------
 
-        # 사전 연산: 변동성 기반 켈리 비중 (벡터)
+        # ── Micro-Cap Hybrid Tuning ──
+        # 1. Adaptive Lookback (종목 가격에 따라 ATR 주기 조절)
+        # 페니 스탁(기준 $5 미만)은 5일, 우량주는 14일
+        is_penny = df["Close"].iloc[0] < 5.0
+        atr_period = 5 if is_penny else 14
+        
+        # 2. ATR 지표 계산
+        df["ATR"] = ta.volatility.AverageTrueRange(
+            high=df["Close"], low=df["Close"], close=df["Close"], window=atr_period
+        ).average_true_range()
+        
+        # 3. 변동성 기반 켈리 비중 (벡터)
         df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
         df["ann_vol"] = df["log_return"].rolling(window=20).std() * np.sqrt(252)
         df["vol_weight"] = self.target_vol / (df["ann_vol"] + 1e-9)
@@ -122,6 +133,7 @@ class EngineValidator:
         buy_arr = df["Strong_Buy"].values
         sell_arr = df["Strong_Sell"].values
         vol_w_arr = df["vol_weight"].values
+        atr_arr = df["ATR"].values
 
         prev_position = 0.0
         prev_weight = 0.0
@@ -147,12 +159,23 @@ class EngineValidator:
                 if cp > highest_price:
                     highest_price = cp
 
-                # ── 청산 로직 A: 트레일링 스탑 (-10% from peak)
-                ts_threshold = highest_price * 0.90
+                # ── 하이브리드 청산 로직 (State Machine) ──
+                current_atr = atr_arr[i] if not np.isnan(atr_arr[i]) else (cp * 0.05)
+                
+                # Asymmetric Trailing Stop (비대칭 트레일링 스탑)
+                # 1. 기본 손절 (Initial Stop): ATR의 1.5배 (흔들기 방지)
+                # 2. 수익 보존 (Trailing Profit): 미실현 수익이 1.5 * ATR을 초과하면 ATR 1.0배로 타이트하게 조절
+                unrealized_pnl = (cp - entry_price)
+                
+                atr_factor = 1.5
+                if unrealized_pnl > (current_atr * 1.5): # 명확한 수익 트리거: 1.5 ATR 초과 수익 발생 시
+                    atr_factor = 1.0
+                
+                ts_threshold = highest_price - (current_atr * atr_factor)
 
-                # 수익보전(Breakeven) 룰: +5% 이상 이익 발생 시 손절선을 +1%로 상향
-                if highest_price > entry_price * 1.05:
-                    ts_threshold = max(ts_threshold, entry_price * 1.01)
+                # 수익보전(Breakeven) 룰: +3% 이상 이익 발생 시 최소 손절선을 +0.5%로 상향 (Micro-Cap 대응)
+                if highest_price > entry_price * 1.03:
+                    ts_threshold = max(ts_threshold, entry_price * 1.005)
 
                 if cp < ts_threshold:
                     # 트레일링 스탑 발동 → 전량 청산
@@ -168,8 +191,8 @@ class EngineValidator:
                     position = 0.0
                     entry_price = 0.0
 
-                elif position == 1.0 and rsi > 60 and not scaled_out:
-                    # ── 청산 로직 C: RSI 60 돌파 → 50% 선제 분할 익절
+                elif position == 1.0 and rsi > 65 and not scaled_out:
+                    # ── 청산 로직 C: RSI 65 돌파 → 50% 선제 분할 익절 (Micro-Cap에서는 약간 더 높게)
                     position = 0.5
                     scaled_out = True
                     # 절반 청산 거래 기록 (부분 실현)

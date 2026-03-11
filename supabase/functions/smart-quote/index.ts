@@ -181,6 +181,31 @@ function calculateVWAP(high: number, low: number, close: number): number {
   return (high + low + close) / 3;
 }
 
+// 🆕 Calculate ATR5 (5-day Average True Range)
+function calculateATR5(historyData: { high: number; low: number; close: number }[]): number {
+  if (!historyData || historyData.length < 5) return 0;
+
+  // Assuming historyData[0] is most recent (Yahoo chart format compatible)
+  // Let's ensure we are taking the last 5 days
+  const recentData = [...historyData].slice(-6); // Get 6 to have 5 TRs with prevClose
+  const trueRanges: number[] = [];
+
+  for (let i = 1; i < recentData.length; i++) {
+    const current = recentData[i];
+    const prev = recentData[i - 1];
+    
+    const tr1 = current.high - current.low;
+    const tr2 = Math.abs(current.high - prev.close);
+    const tr3 = Math.abs(current.low - prev.close);
+    
+    trueRanges.push(Math.max(tr1, tr2, tr3));
+  }
+
+  // Calculate 5-day average
+  const atr5 = trueRanges.slice(-5).reduce((acc, val) => acc + val, 0) / Math.min(5, trueRanges.length);
+  return atr5;
+}
+
 
 
 
@@ -411,6 +436,7 @@ serve(async (req) => {
       volume,
       averageVolume10d: avgVolume,
       relativeVolume,  // Key momentum indicator
+      atr5: calculateATR5(finalHistory), // 🆕 Added ATR5 for frontend DNA Scoring
       absoluteLiquidity, // Transaction value ($500k filter)
       backtestMatchRate, // Quant match probability
       isSimulated, // indicates missing real historical data

@@ -37,6 +37,7 @@ export interface Stock {
     // 🆕 Momentum Indicators (Phase 1)
     averageVolume10d?: number; // 10-day average volume
     relativeVolume?: number; // Current volume / Avg volume (key momentum signal)
+    atr5?: number; // 🆕 5-day Average True Range
   };
   news?: { title: string; url: string; time_published: string }[];
   newsHeadlines?: string[]; // 🆕 Google News headlines

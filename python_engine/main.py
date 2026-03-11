@@ -636,10 +636,31 @@ def calculate_advanced_signals(df: pd.DataFrame):
     df["MACD_Signal"] = macd_indicator.macd_signal()
     df["MACD_Diff"] = macd_indicator.macd_diff()  # Histogram
 
-    # 3. 전략적 합치 (Confluence) 로직
-    # Strong Buy: RSI < 35 AND MACD Golden Cross
+    # 3. ADX 계산 (추세 강도 확인)
+    # ADX > 20이면 추세가 형성된 것으로 간주 (Micro-Cap 하이브리드 기준)
+    adx_indicator = ta.trend.ADXIndicator(
+        high=df["High"], low=df["Low"], close=df["Close"], window=14
+    )
+    df["ADX"] = adx_indicator.adx()
+
+    # 4. RVOL (Relative Volume) 계산
+    # 최근 30일 평균 거래량 대비 당일 거래량 비율 (당일 제외 어제까지의 평균 기준)
+    df["Avg_Vol_30d"] = df["Volume"].shift(1).rolling(window=30).mean()
+    df["RVOL"] = df["Volume"] / (df["Avg_Vol_30d"] + 1e-9)
+
+    # 5. 추격 매수(FOMO) 방지 필터
+    # 당일 시가 대비 종가가 50% 이상 급등한 경우 상투 위험으로 간주
+    df["Is_Extended"] = df["Close"] > (df["Open"] * 1.5)
+
+    # 6. 전략적 합치 (Confluence) 로직
+    # Strong Buy: RSI < 45 AND MACD Golden Cross AND ADX > 20 AND RVOL > 3.0 AND Not Extended
     df["Strong_Buy"] = (
-        (df["RSI"] < 35) & (df["MACD_Diff"] > 0) & (df["MACD_Diff"].shift(1) <= 0)
+        (df["RSI"] < 45) 
+        & (df["MACD_Diff"] > 0) 
+        & (df["MACD_Diff"].shift(1) <= 0)
+        & (df["ADX"] > 20)
+        & (df["RVOL"] > 3.0)
+        & (~df["Is_Extended"])
     )
 
     # Strong Sell: RSI > 65 AND MACD Dead Cross
@@ -685,11 +706,15 @@ def calculate_position_sizing(
     final_weight = vol_weight * optimal_kelly
     final_weight = min(final_weight, 1.0)
 
+    # RVOL 정보 추가 (포지션 사이징 참고용)
+    rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns else 1.0
+
     return {
         "annualized_volatility": round(float(ann_vol), 4),
         "vol_weight": round(float(vol_weight), 4),
         "kelly_f": round(float(kelly_f), 4),
         "recommended_weight": round(float(final_weight) * 100, 2),
+        "rvol": round(float(rvol), 2),
         "is_safe_to_trade": final_weight > 0,
     }
 
@@ -702,27 +727,34 @@ def generate_ai_investment_report(data: dict):
     signal = data.get("signal", "HOLD")
     vol = data.get("volatility_ann", 0.0)
     rec_weight = data.get("recommended_weight", 0.0)
+    rvol = data.get("rvol", 1.0)
+    adx = data.get("adx", 0.0)
 
     report = []
 
-    # 1. 시그널 요약
+    # 1. 시그널 요약 및 RVOL 검증
     if signal == "BUY":
+        rvol_note = f" (보통)" if rvol < 3.0 else f" (🔥 거래량 폭증: {rvol}x)"
         report.append(
-            f"📈 [초강력 매수 시그널] RSI {rsi} 및 MACD 상향 돌파가 확인되었습니다."
+            f"📈 [Micro-Cap 하이브리드 BUY] RSI {rsi} & MACD 골든크로스 확인."
         )
+        report.append(f"   - 추세 강도(ADX): {adx} (안정)")
+        report.append(f"   - 상대 거래량(RVOL): {rvol}{rvol_note}")
+        if data.get("is_extended"):
+            report.append("   - ⚠️ 주의: 당일 급등으로 인한 추격 매수 위험 관찰됨.")
     elif signal == "SELL":
-        report.append(f"📉 [위험 구간] RSI {rsi} 및 MACD 하방 압력 가중.")
+        report.append(f"📉 [매도/위험] RSI {rsi} 과열 및 모멘텀 이탈.")
     else:
-        report.append(f"⚖️ [관망] 뚜렷한 추세가 관찰되지 않습니다 (RSI: {rsi}).")
+        report.append(f"⚖️ [관망] 뚜렷한 추세 신호 없음 (ADX: {adx}, RVOL: {rvol}).")
 
     # 2. 리스크 관리 조언
     report.append(
-        f"현재 타겟의 연율화 변동성은 {vol}% 수준이며, 켈리 공식(Kelly Criterion) 기반 최대 안전 권장 비중은 {rec_weight}%입니다."
+        f"최종 변동성은 {vol}%이며, 비대칭 트레일링 스탑(Asymmetric Stop)을 적용한 권장 비중은 {rec_weight}%입니다."
     )
 
     # 3. 추가 조언 및 면책 조항
     report.append(
-        "※ 본 리포트는 순수 수학적 알고리즘 기반 분석 결과일 뿐, 투자의 절대적 권유가 아님을 명시합니다."
+        "※ 본 데이터는 Micro-Cap 전용 하이브리드 엔진 분석 결과입니다."
     )
 
     return "\n".join(report)
@@ -765,12 +797,15 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
             if not pd.isna(latest["MACD_Diff"])
             else None
         ),
+        "adx": round(float(latest["ADX"]), 2) if "ADX" in latest else 0.0,
+        "rvol": round(float(latest["RVOL"]), 2) if "RVOL" in latest else 1.0,
+        "is_extended": bool(latest["Is_Extended"]) if "Is_Extended" in latest else False,
         "volatility_ann": round(sizing["annualized_volatility"] * 100, 2),
         "vol_weight": sizing["vol_weight"],
         "kelly_f": sizing["kelly_f"],
         "recommended_weight": sizing["recommended_weight"],
         "price": round(float(latest["Close"]), 2),
-        "indicator": "MACD/RSI/VOL Pulse",
+        "indicator": "Micro-Cap Hybrid Pulse",
         "value": round(float(latest["Close"]), 2),
         "signal": signal_type,
         "strength": strength,
