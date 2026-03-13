@@ -22,9 +22,14 @@ export function useDNACalculator({ buyPrice, currentPrice, atr5, buyDate }: DNAC
     const calculatedStop = buyPrice - effectiveATR * 1.2;
     const S = Math.max(calculatedStop, buyPrice * 0.5); 
 
-    // 3. 시간 페널티 계산 (Time Decay)
+    // 3. 시간 페널티 계산 (Time Decay - UTC 기준 안정화)
     const msPerDay = 1000 * 60 * 60 * 24;
-    const daysHeld = Math.max(0, Math.floor((Date.now() - new Date(buyDate).getTime()) / msPerDay));
+    const now = new Date();
+    const utcNow = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const added = new Date(buyDate);
+    const utcAdded = Date.UTC(added.getUTCFullYear(), added.getUTCMonth(), added.getUTCDate());
+    
+    const daysHeld = Math.max(0, Math.floor((utcNow - utcAdded) / msPerDay));
     const timePenalty = Math.min(40, daysHeld * LAMBDA); // 최대 40점 Cap
 
     // 4. 비선형 DNA 스코어 계산

@@ -7,7 +7,7 @@ import {
 import { ResponsiveContainer, AreaChart, Area, YAxis, ReferenceLine, Tooltip as RechartsTooltip } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
-import { getWatchlist, removeFromWatchlist, type WatchlistItem } from '../services/watchlistService';
+import { getWatchlist, removeFromWatchlist, addToWatchlist, type WatchlistItem } from '../services/watchlistService';
 import { 
   fetchMultipleStocksOptimized
 } from '../services/stockService';
@@ -77,6 +77,17 @@ export const WatchlistPage = () => {
     loadData();
   };
 
+  const handleAddTicker = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && e.currentTarget.value) {
+      const val = e.currentTarget.value.trim().toUpperCase();
+      if (val) {
+        await addToWatchlist(val, undefined, 'WATCHING', undefined, undefined, undefined);
+        e.currentTarget.value = '';
+        loadData();
+      }
+    }
+  };
+
   return (
     <div className="max-w-[1600px] mx-auto px-6 py-8 space-y-8 animate-in fade-in duration-500 bg-slate-50 min-h-screen">
       {/* Header Section */}
@@ -126,17 +137,31 @@ export const WatchlistPage = () => {
           <p className="font-mono text-xs text-slate-500 tracking-widest">SYNCHRONIZING ORBIT...</p>
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="text-center py-40 bg-white rounded-xl border border-dashed border-slate-300 shadow-sm">
-          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100">
-            <Activity className="w-6 h-6 text-slate-400" />
+        <div className="text-center py-40 bg-white rounded-xl border border-dashed border-slate-300 shadow-sm px-6">
+          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6 border border-slate-100 shadow-inner">
+            <Activity className="w-8 h-8 text-slate-400" />
           </div>
-          <p className="text-slate-600 font-medium">관심 종목 리스트가 비어있습니다.</p>
-          <button 
-            onClick={() => navigate('/scanner')}
-            className="mt-6 text-[#0176d3] font-bold hover:underline flex items-center gap-2 mx-auto text-sm"
-          >
-            새로운 기회 탐색하기 <TrendingUp className="w-3.5 h-3.5" />
-          </button>
+          <p className="text-xl text-slate-900 font-black tracking-tight mb-2">My Monitoring Orbit is empty</p>
+          <p className="text-sm font-medium text-slate-500 mb-8 max-w-sm mx-auto">
+            시장의 흐름을 추적할 관심 종목이 아직 없습니다. 검색을 통해 직접 추가하거나 퀀트 스캐너에서 유망 종목을 찾아보세요.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div className="relative group w-full sm:w-auto">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-[#0176d3] transition-colors" />
+              <input 
+                type="text" 
+                placeholder="티커 직접 추가 (Enter)" 
+                className="pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:bg-white focus:border-[#0176d3] focus:ring-4 focus:ring-blue-100 outline-none w-full sm:w-64 transition-all shadow-sm"
+                onKeyDown={handleAddTicker}
+              />
+            </div>
+            <button 
+              onClick={() => navigate('/scanner')}
+              className="px-6 py-3 bg-[#0176d3] text-white font-black text-sm rounded-xl shadow-md hover:bg-[#014486] hover:shadow-lg transition-all flex items-center justify-center gap-2 w-full sm:w-auto"
+            >
+              <Zap className="w-4 h-4 fill-current opacity-80" /> 퀀트 아이템 탐색
+            </button>
+          </div>
         </div>
       ) : (
         <div className={viewMode === 'grid' 
@@ -169,7 +194,8 @@ interface WatchlistItemCardProps {
 
 const WatchlistItemCard = ({ item, stock, viewMode, onRemove }: WatchlistItemCardProps) => {
   const navigate = useNavigate();
-  const isPositive = stock && stock.changePercent >= 0;
+  // const isPositive = stock && stock.changePercent >= 0; // Daily change is no longer the primary color driver
+  // Use isProfit instead for the entire card theme
 
   // 🆕 DNA Calculator Integration
   const { dnaScore, targetPrice, stopPrice, timePenalty, daysHeld } = useDNACalculator({
@@ -180,6 +206,11 @@ const WatchlistItemCard = ({ item, stock, viewMode, onRemove }: WatchlistItemCar
   });
 
   if (!stock) return null;
+
+  // 📈 Total Performance Metrics
+  const referencePrice = item.buyPrice || stock.price;
+  const currentReturnPct = ((stock.price / referencePrice) - 1) * 100;
+  const isProfit = currentReturnPct >= 0;
 
   return (
     <motion.div
@@ -194,14 +225,14 @@ const WatchlistItemCard = ({ item, stock, viewMode, onRemove }: WatchlistItemCar
       }`}>
         {/* Background Glow */}
         <div className={`absolute inset-0 opacity-0 group-hover:opacity-[0.03] transition-opacity bg-gradient-to-br ${
-          isPositive ? 'from-emerald-500' : 'from-rose-500'
+          isProfit ? 'from-emerald-500' : 'from-rose-500'
         } to-transparent pointer-events-none`} />
 
         <div className={`flex flex-1 ${viewMode === 'grid' ? 'flex-col' : 'items-center gap-6'}`}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm border ${
-                isPositive ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'
+                isProfit ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'
               }`}>
                 {item.ticker[0]}
               </div>
@@ -274,7 +305,7 @@ const WatchlistItemCard = ({ item, stock, viewMode, onRemove }: WatchlistItemCar
             </div>
             <div className="text-right">
               <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">Current</p>
-              <p className={`text-2xl font-black font-mono ${isPositive ? 'text-emerald-500 drop-shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.4)]'}`}>
+              <p className={`text-2xl font-black font-mono ${isProfit ? 'text-emerald-500 drop-shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.4)]'}`}>
                 {formatPrice(stock.price)}
               </p>
             </div>
@@ -296,28 +327,26 @@ const WatchlistItemCard = ({ item, stock, viewMode, onRemove }: WatchlistItemCar
                     return hDate.getTime() >= itemAddedDate.getTime() - (24 * 60 * 60 * 1000);
                 });
 
-                const referencePrice = relevantHistory.length > 0 ? relevantHistory[0].price : (item.buyPrice || stock.price);
-                const currentReturnPct = ((stock.price / referencePrice) - 1) * 100;
-                const isProfit = currentReturnPct >= 0;
                 const color = isProfit ? '#10b981' : '#f43f5e';
                 
-                let chartData: any[] = [];
-                
-                if (relevantHistory.length > 0) {
-                  chartData = relevantHistory.map(point => {
-                    const ret = ((point.price / referencePrice) - 1) * 100;
-                    return {
-                      name: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-                      val: ret,
-                      price: point.price
-                    };
-                  });
-                } else {
-                   chartData = [
-                    { name: 'Entry', val: 0, price: referencePrice },
-                    { name: 'Current', val: currentReturnPct, price: stock.price }
-                   ];
+                if (relevantHistory.length < 2) {
+                   return (
+                     <div className="w-full h-full min-h-[80px] flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                          Chart Data Collecting...
+                        </span>
+                     </div>
+                   );
                 }
+                
+                let chartData = relevantHistory.map(point => {
+                  const ret = ((point.price / referencePrice) - 1) * 100;
+                  return {
+                    name: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                    val: ret,
+                    price: point.price
+                  };
+                });
 
                 return (
                   <div className="w-full h-full min-h-[80px]">

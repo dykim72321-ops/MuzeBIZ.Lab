@@ -14,6 +14,9 @@ import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { addToWatchlist } from '../services/watchlistService';
 import { useNavigate } from 'react-router-dom';
 
+const RISK_LOW_MAX = 40;
+const RISK_HIGH_MIN = 70;
+
 export const ScannerPage = () => {
   const navigate = useNavigate();
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -33,20 +36,34 @@ export const ScannerPage = () => {
   const [isHistorical, setIsHistorical] = useState(false);
 
 
-  const fetchStocks = async () => {
-    try {
-      setLoading(true);
-      const data = await getTopStocks(isHistorical);
-      setStocks(data);
-    } catch (err) {
-      console.error('Failed to fetch stocks:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const controller = new AbortController();
+    
+    const fetchStocks = async () => {
+      try {
+        setLoading(true);
+        // Note: Currently getTopStocks doesn't accept an AbortSignal, 
+        // but we can at least prevent state updates if unmounted.
+        const data = await getTopStocks(isHistorical);
+        if (!controller.signal.aborted) {
+          setStocks(data);
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error('Failed to fetch stocks:', err);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchStocks();
+    
+    return () => {
+      controller.abort();
+    };
   }, [isHistorical]);
 
 
@@ -60,9 +77,9 @@ export const ScannerPage = () => {
         const matchesDna = stock.dnaScore >= minDna;
         const matchesSector = selectedSector === 'All' || stock.sector === selectedSector;
         const matchesRisk = selectedRisk === 'All' ||
-          (selectedRisk === 'Low' && stock.dnaScore < 40) || // Example logic, adjust as needed
-          (selectedRisk === 'Medium' && stock.dnaScore >= 40 && stock.dnaScore < 70) ||
-          (selectedRisk === 'High' && stock.dnaScore >= 70);
+          (selectedRisk === 'Low' && stock.dnaScore < RISK_LOW_MAX) ||
+          (selectedRisk === 'Medium' && stock.dnaScore >= RISK_LOW_MAX && stock.dnaScore < RISK_HIGH_MIN) ||
+          (selectedRisk === 'High' && stock.dnaScore >= RISK_HIGH_MIN);
 
         return matchesSearch && matchesDna && matchesSector && matchesRisk;
       })
@@ -84,28 +101,30 @@ export const ScannerPage = () => {
 
   const handleDeepDive = (stock: Stock) => {
     // Map to Terminal format
-    const cache = (stock as any).stock_analysis_cache?.[0]?.analysis;
+    const cache = (stock as { stock_analysis_cache?: Array<{ analysis: any }> }).stock_analysis_cache?.[0]?.analysis;
     const rawSummary = stock.rawAiSummary || "";
 
     let bullPoints = ["No details available"];
     let bearPoints = ["No details available"];
     let aiSummaryStr = "해당 자산에 대한 최신 시장 Narrative를 분석 중입니다...";
-    let quantData = undefined;
+    let quantData: any = undefined;
 
     if (rawSummary && rawSummary.trim().startsWith('{')) {
       try {
         quantData = JSON.parse(rawSummary);
         aiSummaryStr = "순수 퀀트(수학적) 알고리즘 분석 결과가 적용되었습니다.";
         bullPoints = [
-          `이동평균선(20일) 이격도: ${quantData.ma20_distance_pct}%`,
-          `RSI (14일): ${quantData.rsi_14}`
+          `이동평균선(20일) 이격도: ${quantData.ma20_distance_pct ?? 'N/A'}%`,
+          `RSI (14일): ${quantData.rsi_14 ?? 'N/A'}`
         ];
         bearPoints = [
-          `최근 20일 변동성: ${quantData.volatility_20d_pct}%`,
-          `거래량 급증 배수: ${quantData.volume_surge_multiplier}x`
+          `최근 20일 변동성: ${quantData.volatility_20d_pct ?? 'N/A'}%`,
+          `거래량 급증 배수: ${quantData.volume_surge_multiplier ?? 'N/A'}x`
         ];
       } catch (e) {
-        // Fallback
+        console.warn(`Failed to parse raw summary for ${stock.ticker}:`, e);
+        quantData = undefined;
+        // Fallback since parsing failed
       }
     } else if (cache && Object.keys(cache).length > 0) {
       bullPoints = cache.bullCase || bullPoints;
@@ -164,7 +183,20 @@ export const ScannerPage = () => {
             <ArrowUpRight className="w-4 h-4" />
           </button>
           <button
-            onClick={fetchStocks}
+            onClick={() => {
+              const fetchStocks = async () => {
+                try {
+                  setLoading(true);
+                  const data = await getTopStocks(isHistorical);
+                  setStocks(data);
+                } catch (err) {
+                  console.error('Failed to fetch stocks:', err);
+                } finally {
+                  setLoading(false);
+                }
+              };
+              fetchStocks();
+            }}
             className="sfdc-button-primary flex items-center gap-2"
           >
             <RefreshCw className={clsx("w-4 h-4", loading && "animate-spin")} />

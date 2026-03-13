@@ -11,7 +11,16 @@ export const WATCHLIST_TICKERS = [
 ];
 
 const cache = new Map<string, { data: Stock; timestamp: number }>();
-const CACHE_DURATION = 15 * 60 * 1000;
+
+function getCacheDuration(): number {
+  const now = new Date();
+  const hour = now.getUTCHours();
+  const day = now.getUTCDay();
+  const isWeekend = day === 0 || day === 6;
+  // EST Market Hours are roughly 14:30 to 21:00 UTC
+  const isMarketHours = !isWeekend && (hour > 14 || (hour === 14 && now.getUTCMinutes() >= 30)) && hour < 21;
+  return isMarketHours ? 2 * 60 * 1000 : 15 * 60 * 1000;
+}
 
 // Finnhub API Key
 const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_API_KEY;
@@ -147,36 +156,39 @@ function formatMarketCap(value: number): string {
 
 export async function fetchStockQuote(ticker: string, historyRange?: string): Promise<Stock | null> {
   const cached = cache.get(ticker);
-  if (cached && Date.now() - cached.timestamp < CACHE_DURATION && (!historyRange || (cached.data.history && cached.data.history.length > 0))) {
+  if (cached && Date.now() - cached.timestamp < getCacheDuration() && (!historyRange || (cached.data.history && cached.data.history.length > 0))) {
     return cached.data;
   }
 
+  const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Timeout')), ms);
+      promise.then(resolve).catch(reject).finally(() => clearTimeout(timer));
+    });
+  };
+
   try {
-    // Use new unified smart-quote endpoint
-    const { data, error } = await supabase.functions.invoke('smart-quote', {
+    // Fast-fail: 4 second timeout for the primary smart-quote endpoint
+    const smartQuotePromise = supabase.functions.invoke('smart-quote', {
       body: { ticker, includeFinancials: false, historyRange }
     });
 
-    if (error) {
-      console.warn(`[SmartQuote] Error for ${ticker}:`, error);
-      // Fallback to direct Finnhub
-      const finnhubData = await fetchFromFinnhub(ticker);
-      if (finnhubData) return finnhubData;
+    const { data, error } = await withTimeout(smartQuotePromise, 4000).catch(() => ({ data: null, error: new Error('Timeout or failure') }));
 
-      // Fallback to Yahoo
-      const yahooData = await fetchFromYahoo(ticker);
-      if (yahooData) return yahooData;
+    if (error || !data || data.price <= 0) {
+      if (error) console.warn(`[SmartQuote] Error or Timeout for ${ticker}:`, error);
+      else console.warn(`[SmartQuote] No valid price for ${ticker}`);
+
+      // Race fallback APIs
+      const fallbackData = await Promise.any([
+        fetchFromFinnhub(ticker).then(res => res ? res : Promise.reject('Finnhub null')),
+        fetchFromYahoo(ticker).then(res => res ? res : Promise.reject('Yahoo null'))
+      ]).catch(() => null);
+
+      if (fallbackData) return fallbackData;
 
       // Fallback to stale cache
       if (cached) return cached.data;
-      return null;
-    }
-
-    if (!data || data.price <= 0) {
-      console.warn(`[SmartQuote] No valid price for ${ticker}`);
-      // Try direct APIs as fallback
-      const finnhubData = await fetchFromFinnhub(ticker);
-      if (finnhubData && finnhubData.price > 0) return finnhubData;
       return null;
     }
 
@@ -229,7 +241,8 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
 const pendingRequests = new Map<string, Promise<Stock | null>>();
 
 export async function fetchMultipleStocksOptimized(tickers: string[], historyRange?: string): Promise<Stock[]> {
-  const CHUNK_SIZE = 5;
+  // Dynamically adjust chunk size based on API provider limits
+  const CHUNK_SIZE = FINNHUB_API_KEY ? 8 : 4; 
   const results: Stock[] = [];
   
   // Deduplicate and filter out empty tickers
@@ -418,7 +431,7 @@ export async function getTopStocks(historical: boolean = false): Promise<Stock[]
     if (discoveryError) throw discoveryError;
 
     const tickersToSync = (discoveryData && discoveryData.length > 0)
-      ? discoveryData.map((item: any) => item.ticker)
+      ? discoveryData.map((item: { ticker: string }) => item.ticker)
       : WATCHLIST_TICKERS.slice(0, 10);
 
     const { data: realTimeData, error: syncError } = await supabase.functions.invoke('get-market-scanner', {
@@ -428,7 +441,7 @@ export async function getTopStocks(historical: boolean = false): Promise<Stock[]
     if (syncError) throw syncError;
     if (!realTimeData) return [];
 
-    const stocks: Stock[] = realTimeData.map((rtItem: any) => {
+    const stocks: Stock[] = realTimeData.map((rtItem: { ticker: string, price?: number, changePercent?: number, rawVolume?: number }) => {
       const discoveryInfo = discoveryData?.find(d => d.ticker === rtItem.ticker);
       const price = rtItem.price || 0;
       const changePercent = rtItem.changePercent || 0;
@@ -498,10 +511,10 @@ export function getCompanyName(ticker: string): string {
   return names[ticker] || ticker;
 }
 
-export function getSector(ticker: string | any): string {
+export function getSector(ticker: string | { sector?: string }): string {
   if (typeof ticker === 'object' && ticker !== null) return ticker.sector || 'Tech/Growth';
   const sectors: Record<string, string> = { SNDL: 'Cannabis', CLOV: 'Healthcare', SOFI: 'Fintech' };
-  return sectors[ticker] || 'Tech/Growth';
+  return sectors[ticker as string] || 'Tech/Growth';
 }
 
 function getDescription(ticker: string): string {

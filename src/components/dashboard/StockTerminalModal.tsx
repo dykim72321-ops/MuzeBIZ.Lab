@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X,
@@ -49,6 +49,34 @@ export const StockTerminalModal = ({
     onAddToWatchlist
 }: StockTerminalModalProps) => {
     const [isAddingWatchlist, setIsAddingWatchlist] = useState(false);
+    const isMounted = useRef(true);
+
+    useEffect(() => {
+        isMounted.current = true;
+        return () => {
+            isMounted.current = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
+            }
+        };
+
+        if (isOpen) {
+            document.body.style.overflow = 'hidden';
+            window.addEventListener('keydown', handleKeyDown);
+        } else {
+            document.body.style.overflow = '';
+        }
+
+        return () => {
+            document.body.style.overflow = '';
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isOpen, onClose]);
 
 
     return (
@@ -218,7 +246,7 @@ export const StockTerminalModal = ({
                                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 md:gap-6">
                                         <div>
                                             <p className="text-slate-500 text-[10px] font-bold mb-1 uppercase tracking-tighter">유사 패턴 종목</p>
-                                            <p className="text-xl md:text-2xl font-black text-white">{data.matchedLegend.ticker}</p>
+                                            <p className="text-xl md:text-2xl font-black text-white">{data.matchedLegend?.ticker ?? '분석 불가'}</p>
                                         </div>
                                         <div className="hidden sm:block h-10 w-px bg-white/10" />
                                         <div className="flex-1 w-full">
@@ -227,12 +255,12 @@ export const StockTerminalModal = ({
                                                 <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
                                                     <motion.div
                                                         initial={{ width: 0 }}
-                                                        animate={{ width: `${data.matchedLegend.similarity}%` }}
+                                                        animate={{ width: `${data.matchedLegend?.similarity ?? 0}%` }}
                                                         transition={{ duration: 1.5, ease: "circOut" }}
                                                         className="h-full bg-gradient-to-r from-indigo-500 to-cyan-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]"
                                                     />
                                                 </div>
-                                                <span className="text-indigo-400 font-mono text-sm font-bold">{data.matchedLegend.similarity}%</span>
+                                                <span className="text-indigo-400 font-mono text-sm font-bold">{data.matchedLegend?.similarity ?? 0}%</span>
                                             </div>
                                         </div>
                                     </div>
@@ -245,7 +273,9 @@ export const StockTerminalModal = ({
                                             if (onAddToWatchlist) {
                                                 setIsAddingWatchlist(true);
                                                 await onAddToWatchlist();
-                                                setIsAddingWatchlist(false);
+                                                if (isMounted.current) {
+                                                    setIsAddingWatchlist(false);
+                                                }
                                             }
                                         }}
                                         disabled={isAddingWatchlist}

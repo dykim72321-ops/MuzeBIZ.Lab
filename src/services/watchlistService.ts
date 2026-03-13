@@ -90,10 +90,21 @@ export async function addToWatchlist(
 /**
  * Update the status of a watchlist item
  */
-export async function updateWatchlistStatus(ticker: string, status: WatchlistStatus): Promise<void> {
+export async function updateWatchlistStatus(
+  ticker: string, 
+  status: WatchlistStatus,
+  buyPrice?: number,
+  targetProfit?: number,
+  stopLoss?: number
+): Promise<void> {
+  const payload: any = { status };
+  if (buyPrice !== undefined) payload.buy_price = buyPrice;
+  if (targetProfit !== undefined) payload.target_profit = targetProfit;
+  if (stopLoss !== undefined) payload.stop_loss = stopLoss;
+
   const { error } = await supabase
     .from('watchlist')
-    .update({ status })
+    .update(payload)
     .eq('ticker', ticker.toUpperCase());
 
   if (error) {

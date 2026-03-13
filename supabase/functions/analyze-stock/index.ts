@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // CORS 처리
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -19,23 +18,17 @@ serve(async (req) => {
       newsHeadlines, sector, relativeVolume
     } = payload;
 
-    // 1. 필수 데이터 검증
     if (!ticker) {
       return new Response(JSON.stringify({ error: "Ticker is required" }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // 가격이 0원일 경우(Sensing 실패 시) 임시값 할당 또는 경고 처리
-    const validPrice = (price && price > 0) ? price : 0;
-
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
 
-    // 2. 캐시 확인 (6시간 이내 분석 데이터 재사용)
     const CACHE_HOURS = 6;
     const { data: cachedData } = await supabase
       .from('stock_analysis_cache')
@@ -52,48 +45,68 @@ serve(async (req) => {
       });
     }
 
-    // 3. RAG/AI 분석 과정 제거 및 고정 값(Mock) 할당
-    let historicalContext = "OpenAI 제거로 인한 기본 분석 모드입니다.";
-    let matchedLegend = { ticker: "None", similarity: 0 };
+    // ---------------------------------------------------------
+    // 🧮 [Pure Quant Engine] 확정적 수학 공식 기반 점수 산출
+    // ---------------------------------------------------------
+    
+    // 데이터 정규화
+    const validPrice = (price && price > 0) ? price : 0;
+    const changePct = parseFloat(String(change).replace(/[^0-9.-]/g, '')) || 0;
+    const relVol = parseFloat(String(relativeVolume)) || 1.0;
+
+    // 1. DNA Score 산출 (Base 40 + 모멘텀 가중치 + 거래량 스파이크 가중치)
+    let rawScore = 40 + (changePct * 1.5) + ((relVol - 1) * 15);
+    const dnaScore = Math.min(Math.max(Math.round(rawScore), 0), 100); // 0~100 사이로 제한
+
+    // 2. 급등 확률 (Pop Probability): 거래량이 받쳐주는 양봉일 때 상승
+    let popProb = 20 + (changePct > 0 ? 15 : 0) + (relVol > 2.0 ? 30 : (relVol > 1.0 ? 10 : 0));
+    const popProbability = Math.min(Math.max(Math.round(popProb), 0), 100);
+
+    // 3. 정량적 근거 생성 (Bull / Bear Case)
+    const bullCase = [];
+    const bearCase = [];
+    if (relVol > 2.0) bullCase.push(`비정상적 거래량 스파이크 발생 (상대 거래량 ${relVol.toFixed(1)}배)`);
+    else bearCase.push("거래량 모멘텀 부족");
+    
+    if (changePct > 5) bullCase.push(`강한 단기 가격 모멘텀 (+${changePct}%)`);
+    else if (changePct < 0) bearCase.push(`단기 가격 추세 하락 (${changePct}%)`);
+
+    // 4. 리스크 및 추천 등급 평가
+    let riskLevel = relVol > 3.0 && changePct > 10 ? "High" : (relVol < 0.5 ? "Low" : "Medium");
+    let recommendation = dnaScore >= 70 ? "Strong Buy" : (dnaScore >= 55 ? "Buy" : (dnaScore < 40 ? "Sell" : "Hold"));
 
     const analysis = {
-      dnaScore: Math.floor(Math.random() * 41) + 40, // 40~80 난수
-      popProbability: Math.floor(Math.random() * 50) + 10,
-      bullCase: ["기술적 지표 분석 전용 모드 활성화 됨"],
-      bearCase: ["뉴스 및 센티먼트 분석 생략됨"],
-      riskLevel: "Medium",
-      recommendation: "Hold",
-      aiSummary: "OpenAI 의존성이 제거되어 퀀트 엔진에 의한 분석 결과만 참조합니다."
+      dnaScore,
+      popProbability,
+      bullCase: bullCase.length > 0 ? bullCase : ["특별한 상승 모멘텀 지표 없음"],
+      bearCase: bearCase.length > 0 ? bearCase : ["특별한 하락 지표 없음"],
+      riskLevel,
+      recommendation,
+      quantSummary: `수학적 퀀트 모델 분석 결과: 가격 변동성(${changePct}%) 및 상대 거래량(${relVol.toFixed(1)}x)을 가중 합산하여 DNA 스코어 ${dnaScore}점 산출됨.`
     };
-    // 분석 결과에 매칭된 전설 정보 병합
-    analysis.matchedLegend = matchedLegend;
 
-    // 6. 결과 저장 (비동기 처리 안정화)
+    // 비동기 저장 로직 (유지)
     const saveTask = (async () => {
       try {
-        const results = await Promise.all([
+        await Promise.all([
           supabase.from('stock_analysis_cache').insert({ ticker, analysis }),
           supabase.from('ai_predictions').insert({
             ticker,
             dna_score: analysis.dnaScore,
-            predicted_direction: analysis.dnaScore >= 60 ? 'BULLISH' : 'BEARISH',
-            start_price: price,
-            persona_used: 'AI_LAB_DEFAULT'
+            predicted_direction: analysis.dnaScore >= 55 ? 'BULLISH' : 'BEARISH',
+            start_price: validPrice,
+            persona_used: 'QUANT_ENGINE_V1'
           })
         ]);
-        results.forEach((res, i) => {
-          if (res.error) console.error(`   ❌ DB Save Error [${i === 0 ? 'Cache' : 'Prediction'}]:`, res.error.message);
-        });
       } catch (err: any) {
         console.error("   ❌ Async Save Task Failed:", err.message);
       }
     })();
 
-    // Edge Runtime 환경에 따라 처리
     if (typeof EdgeRuntime !== 'undefined') {
       EdgeRuntime.waitUntil(saveTask);
     } else {
-      await saveTask; // 로컬 테스트용
+      await saveTask;
     }
 
     return new Response(JSON.stringify(analysis), {
