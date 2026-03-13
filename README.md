@@ -28,9 +28,19 @@ cp .env.example .env.local
 
 ### 2. 설치 및 실행
 
+#### 전체 시스템 실행 (추천)
+프론트엔드와 부품 검색용 Python 백엔드를 동시에 실행합니다:
 ```bash
-npm install
+npm run dev:all
+```
+
+#### 개별 실행
+```bash
+# 프론트엔드만 실행
 npm run dev
+
+# Python 백엔드만 실행
+npm run dev:python
 ```
 
 ### 3. Supabase 설정
