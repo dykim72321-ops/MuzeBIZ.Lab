@@ -10,7 +10,7 @@ import { BacktestChart } from '../components/ui/BacktestChart';
 
 export const Dashboard = () => {
   // 1. WebSocket을 통한 v4 펄스 엔진 실시간 데이터 수신
-  const { pulseMap, isConnected, lastUpdatedTicker } = usePulseSocket('ws://localhost:8000/ws/pulse');
+  const { pulseMap, isConnected, lastUpdatedTicker } = usePulseSocket('ws://127.0.0.1:8000/ws/pulse');
   
   // 전체 종목 맵 중 BUY 시그널만 필터링
   const buyTickers = Object.keys(pulseMap).filter(

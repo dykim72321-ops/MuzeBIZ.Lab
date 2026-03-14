@@ -39,38 +39,115 @@ class PartNormalizer:
     def format_price(price_str: str) -> float:
         """
         Extracts a float value from various price string formats.
-        Handles multi-tier prices by taking the first one.
-        Example: '1 $299.06 5 $290.00' -> 299.06
+        FindChips often returns 'Qty Price Qty Price'.
         """
         if not price_str or "quote" in price_str.lower() or "call" in price_str.lower():
             return 0.0
         try:
-            # 1. Clean up common separators and currencies
-            # Remove commas and spaces between numbers to prevent merging them
+            # 1. Clean up
             p = price_str.replace(",", "").strip()
 
-            # 2. Extract all sequences that look like prices (numbers with optional decimal)
-            # We look for symbols that typically prefix a price or just the pattern
+            # 2. Extract pairs of numbers
             matches = re.findall(r"(\d+\.?\d*)", p)
+            if not matches:
+                return 0.0
 
-            # 3. Handle tiers (FindChips uses: Qty Price Qty Price)
-            # Usually the first number is Qty, second is Price.
-            if len(matches) >= 2:
-                # If the first match is a small integer (likely Qty 1), the second is the real price
-                # If only one match, it might just be the price.
-                potential_price = (
-                    float(matches[1]) if len(matches) >= 2 else float(matches[0])
-                )
+            # 3. Handle tiers: Qty Price Qty Price
+            # If the first match is '1', the second is the unit price.
+            # If no '1' found, we look for any float (contain '.') 
+            # and take the first one, or the first match if it looks like a price (small value)
+            for i in range(len(matches) - 1):
+                if matches[i] == "1":
+                    return float(matches[i+1])
 
-                # Sanity check: if the first match is very large compared to the second, maybe first is the price?
-                # But in component sourcing, MOQ 1 is common.
-                return potential_price
-            elif len(matches) == 1:
-                return float(matches[0])
-
-            return 0.0
+            # Heuristic fallback: return the first one that has a decimal point (likely a price)
+            for m in matches:
+                if "." in m:
+                    return float(m)
+            
+            # Final fallback: if no decimal, but the number is reasonably small (< 10000?), treat as price.
+            # If it's huge, it's probably stock/quantity number wrongly parsed as price.
+            val = float(matches[0])
+            return val if val < 5000 else 0.0
+            
         except (ValueError, TypeError, IndexError):
             return 0.0
+
+    @staticmethod
+    def calculate_risk_score(mpn: str, stock: int, lifecycle: str) -> int:
+        """
+        Calculates a numeric risk score (0-100).
+        High score = High risk.
+        """
+        score = 0
+        
+        # 1. Stock Risk (0-40 pts)
+        if stock == 0:
+            score += 40
+        elif stock < 50:
+            score += 25
+        elif stock < 200:
+            score += 10
+            
+        # 2. Lifecycle Risk (0-40 pts)
+        l_status = lifecycle.upper()
+        if "EOL" in l_status or "OBS" in l_status:
+            score += 40
+        elif "NRND" in l_status:
+            score += 30
+        elif "UNKNOWN" in l_status:
+            score += 15
+            
+        # 3. Part Type Risk (0-20 pts)
+        # Evaluation boards or alternatives are inherently riskier for mass production
+        if "-EVB" in mpn.upper() or "EVAL" in mpn.upper():
+            score += 20
+            
+        return min(100, score)
+
+    @staticmethod
+    def generate_market_notes(mpn: str, stock: int, price: float, lifecycle: str) -> str:
+        """Generates dynamic market insights based on part data."""
+        notes = []
+        
+        if stock > 5000:
+            notes.append("High Volume Available")
+        elif stock == 0:
+            notes.append("Stock Depleted - Factory Lead Time Likely")
+        elif stock < 100:
+            notes.append("Limited Spot Stock")
+            
+        if price > 1000:
+            notes.append("High Value / Module Item")
+            
+        if lifecycle == "NRND":
+            notes.append("Design Migration Recommended")
+            
+        if "-EVB" in mpn.upper():
+            notes.append("Prototyping Tool - Not for Production")
+            
+        return " | ".join(notes) if notes else "Market Stable"
+
+    @staticmethod
+    def guess_manufacturer(mpn: str) -> str:
+        """Heuristic to guess manufacturer from MPN prefix."""
+        m = mpn.upper()
+        if m.startswith("TPS") or m.startswith("SN") or m.startswith("TLV") or m.startswith("OPA"):
+            return "Texas Instruments"
+        if m.startswith("STM32") or m.startswith("STM8") or m.startswith("SPC5"):
+            return "STMicroelectronics"
+        if m.startswith("AD") or m.startswith("LTC") or m.startswith("LT") or m.startswith("MAX"):
+            # MAX is Maxim, now part of Analog Devices
+            return "Analog Devices"
+        if m.startswith("PIC") or m.startswith("ATMEGA") or m.startswith("SAM"):
+            return "Microchip"
+        if m.startswith("XCV") or m.startswith("XC7"):
+            return "Xilinx (AMD)"
+        if m.startswith("CY"):
+            return "Cypress (Infineon)"
+        if m.startswith("NCP") or m.startswith("MC78"):
+            return "ON Semiconductor"
+        return "Global Source"
 
     @staticmethod
     def get_base_family(mpn: str) -> str:

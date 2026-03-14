@@ -398,18 +398,18 @@ class SearchAggregator:
                 url = f"{self.base_url}{search_q}"
 
                 try:
-                    await page.goto(url, wait_until="networkidle", timeout=60000)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 except Exception as e:
-                    print(f"❌ [AGGREGATOR] Navigation timeout: {e}")
-                    try:
-                        await page.goto(
-                            url, wait_until="domcontentloaded", timeout=30000
-                        )
-                    except:
-                        await browser.close()
-                        return []
+                    print(f"❌ [AGGREGATOR] Navigation failed: {e}")
+                    await browser.close()
+                    return []
 
-                await page.wait_for_timeout(2000)
+                # Wait for the first distributor result to appear (more efficient than a hard wait)
+                try:
+                    await page.wait_for_selector(".distributor-results", timeout=5000)
+                except:
+                    # If not found after 5s, continue and try to parse anyway
+                    pass
 
                 # 유통사별 섹션 파싱
                 distributors = await page.query_selector_all(".distributor-results")
@@ -448,7 +448,16 @@ class SearchAggregator:
                                     "td.td-price, .price-list"
                                 )
                                 part_el = await row.query_selector(
-                                    "td.td-part, .td-part a"
+                                    "td.td-part, .td-part"
+                                )
+                                mfg_el = await row.query_selector(
+                                    "td.td-mfg, .td-mfg, .mfg-name"
+                                )
+                                pkg_el = await row.query_selector(
+                                    "td.td-pkg, .td-pkg, .package-name"
+                                )
+                                desc_el = await row.query_selector(
+                                    "td.td-description, .td-description, td.td-specs, .td-specs, .specs-info"
                                 )
 
                                 if not stock_el and not part_el:
@@ -496,7 +505,50 @@ class SearchAggregator:
                                         else:
                                             buy_url = href
 
+                                mfg_text = (
+                                    (await mfg_el.inner_text()).strip()
+                                    if mfg_el
+                                    else ""
+                                )
+                                pkg_text = (
+                                    (await pkg_el.inner_text()).strip()
+                                    if pkg_el
+                                    else "N/A"
+                                )
+                                spec_text = (
+                                    (await desc_el.inner_text()).strip()
+                                    if desc_el
+                                    else ""
+                                )
+                                
+                                # Heuristic: If dedicated package cell is missing, try to find it in description
+                                final_package = pkg_text if pkg_text and pkg_text != "N/A" else ""
+                                if not final_package:
+                                    # Look for common package patterns in description (flexible match including prefixes like 64LQFP)
+                                    pkg_match = re.search(r'([a-z0-9-]* (?:SOIC|SOP|SSOP|TSSOP|HTSSOP|QFP|LQFP|TQFP|BGA|DIP|SOT|TO-\d+|VSSOP|MSOP|SC-\d+)[a-z0-9-]*)', spec_text, re.IGNORECASE)
+                                    if not pkg_match:
+                                        # Try without space
+                                        pkg_match = re.search(r'([a-z0-9-]*(?:SOIC|SOP|SSOP|TSSOP|HTSSOP|QFP|LQFP|TQFP|BGA|DIP|SOT|TO-\d+|VSSOP|MSOP|SC-\d+)[a-z0-9-]*)', spec_text, re.IGNORECASE)
+                                    
+                                    if pkg_match:
+                                        final_package = pkg_match.group(0).strip().upper()
+                                    else:
+                                        # Try another common pattern: at the end of a comma-separated list
+                                        parts = [p.strip() for p in spec_text.split(',')]
+                                        if parts and len(parts[-1]) < 15 and any(c.isdigit() for c in parts[-1]):
+                                            final_package = parts[-1]
+                                
+                                if not final_package or final_package == "N/A":
+                                    final_package = "N/A"
+
                                 if actual_mpn:
+                                    # Clean manufacturer encoding artifacts
+                                    mfg_clean = re.sub(r'[^\x00-\x7F]+', ' ', mfg_text).strip()
+                                    manufacturer = mfg_clean or PartNormalizer.guess_manufacturer(actual_mpn)
+                                    
+                                    risk_score = PartNormalizer.calculate_risk_score(actual_mpn, stock, "Active")
+                                    market_notes = PartNormalizer.generate_market_notes(actual_mpn, stock, price, "Active")
+                                    
                                     results.append(
                                         {
                                             "distributor": dist_name,
@@ -504,22 +556,26 @@ class SearchAggregator:
                                             "normalized_mpn": PartNormalizer.clean_mpn(
                                                 actual_mpn
                                             ),
-                                            "manufacturer": "Global Source",
+                                            "manufacturer": manufacturer,
                                             "stock": stock,
                                             "price": price,
                                             "risk_level": (
                                                 "High"
-                                                if stock == 0
+                                                if risk_score > 70
                                                 else (
-                                                    "Medium" if stock < 100 else "Low"
+                                                    "Medium" if risk_score > 30 else "Low"
                                                 )
                                             ),
+                                            "risk_score": risk_score,
+                                            "market_notes": market_notes,
                                             "lifecycle": PartNormalizer.get_lifecycle_status(
                                                 actual_mpn, stock
                                             ),
                                             "source_type": "Market Aggregator",
                                             "product_url": buy_url,
                                             "is_alternative": depth > 0,
+                                            "package": final_package,
+                                            "description": spec_text
                                         }
                                     )
                             except:
@@ -529,17 +585,46 @@ class SearchAggregator:
 
                 await browser.close()
 
-                # Deduplicate
+                # Deduplicate and prioritize better matches
                 unique_results = {}
+                search_q_norm = PartNormalizer.clean_mpn(mpn)
+                
                 for r in results:
+                    # HEURISTIC: Skip parts that don't even contain the searched string (prevents too broad generic matches)
+                    if search_q_norm not in r["normalized_mpn"]:
+                        continue
+                        
                     key = f"{r['distributor']}_{r['normalized_mpn']}"
-                    if (
-                        key not in unique_results
-                        or r["stock"] > unique_results[key]["stock"]
-                    ):
+                    if key not in unique_results:
                         unique_results[key] = r
+                    else:
+                        existing = unique_results[key]
+                        # Prefer results with non-zero price, or higher stock if prices are equal/zero
+                        if (r["price"] > 0 and existing["price"] == 0) or \
+                           (r["price"] > 0 and r["price"] < existing["price"]) or \
+                           (r["price"] == existing["price"] and r["stock"] > existing["stock"]):
+                            unique_results[key] = r
 
                 final_list = list(unique_results.values())
+                
+                # Sort: Exact match first, then by stock/price
+                def rank_result(r):
+                    score = 0
+                    r_mpn = r["mpn"].upper()
+                    q_up = mpn.strip().upper()
+                    
+                    if r_mpn == q_up:
+                        score -= 1000  # Highest priority
+                    elif r_mpn.startswith(q_up):
+                        score -= 500
+                    
+                    # Deprioritize Evaluation Boards if the original query wasn't an EVB
+                    if ("-EVB" in r_mpn or "EVAL" in r_mpn) and ("-EVB" not in q_up and "EVAL" not in q_up):
+                        score += 800
+                        
+                    return score
+
+                final_list.sort(key=rank_result)
 
                 # RECURSIVE FALLBACK: If no stock found for exact MPN, search for its family
                 if len(final_list) > 0:
@@ -582,30 +667,24 @@ class MouserHunter:
 
 
 if __name__ == "__main__":
-
     async def test():
         aggregator = SearchAggregator()
-        res = await aggregator.search_market_intel("TPS54331")
-        print(f"Test Results: {res}")
-
+        # Test 1: TPS54331
+        res1 = await aggregator.search_market_intel("TPS54331")
+        print(f"\n🔍 [TEST] Results for TPS54331: {len(res1)} items found")
+        
+        # Test 2: STM32
+        res2 = await aggregator.search_market_intel("STM32F103")
+        print(f"\n🔍 [TEST] Results for STM32F103: {len(res2)} items found")
+        for r in res2[:3]:
+             print(f"   - MPN: {r['mpn']}, MFG: {r['manufacturer']}, DIST: {r['distributor']}")
+        # Test 3: LM358 (Generic/TI/ST)
+        res3 = await aggregator.search_market_intel("LM358")
+        print(f"\n🔍 [TEST] Results for LM358: {len(res3)} items found")
+        for r in res3[:3]:
+             print(f"   - MPN: {r['mpn']}, MFG: {r['manufacturer']}")
+    
     import sys
-
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
-        asyncio.run(test())
-    else:
-        hunter = FinvizHunter()
-        asyncio.run(hunter.scrape())
-
-
-if __name__ == "__main__":
-
-    async def test():
-        aggregator = SearchAggregator()
-        res = await aggregator.search_market_intel("STM32F103")
-        print(f"Test Results: {res}")
-
-    import sys
-
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         asyncio.run(test())
     else:

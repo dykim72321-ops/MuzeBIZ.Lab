@@ -13,7 +13,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import yfinance as yf
 import ta
 import os
@@ -39,6 +39,7 @@ import requests_cache
 import random
 from webhook_manager import WebhookManager
 from paper_engine import PaperTradingManager
+from utils import PartNormalizer
 
 webhook = WebhookManager()
 # PaperTradingManager 인스턴스 (Supabase가 초기화된 후 설정)
@@ -159,6 +160,8 @@ class StandardPart(BaseModel):
     date_code: str
     is_eol: bool
     risk_level: str
+    risk_score: Optional[int] = 0
+    market_notes: Optional[str] = ""
     lifecycle: Optional[str] = "Unknown"
     is_alternative: Optional[bool] = False
     updated_at: datetime
@@ -169,20 +172,46 @@ class StandardPart(BaseModel):
     voltage: Optional[str] = "N/A"
     temperature: Optional[str] = "N/A"
     rohs: Optional[bool] = True
+    specs: Dict[str, str] = {}
 
 
-from utils import PartNormalizer
+
+# from utils import PartNormalizer (Already imported at top)
 
 
 class SourcingEngine:
     def __init__(self):
         self.exchange_rate = 1450.0
+        # Results cache: max 100 queries, 5 min (300s) TTL
+        self.search_cache = TTLCache(maxsize=100, ttl=300)
 
     def _generate_price_history(self, current_price: float):
         """Returns actual current price only — no mock/fake history."""
         if current_price > 0:
             return [round(current_price, 2)]
         return []
+
+    def _calculate_risk_score(self, stock: int, distributors: List[str], is_eol: bool) -> int:
+        """
+        Deterministic Risk Calculation (0-100)
+        Based on availability, distribution breadth, and lifecycle.
+        """
+        score = 0
+        
+        # 1. Stock Risk (0-40 pts)
+        if stock == 0: score += 40
+        elif stock < 100: score += 25
+        elif stock < 1000: score += 10
+        
+        # 2. Source Diversity Risk (0-30 pts)
+        unique_dists = len(set(distributors))
+        if unique_dists <= 1: score += 30
+        elif unique_dists <= 3: score += 15
+        
+        # 3. Lifecycle Risk (0-30 pts)
+        if is_eol: score += 30
+        
+        return min(score, 100)
 
     async def _fetch_from_provider(
         self, provider_name: str, provider_instance, q: str
@@ -203,6 +232,29 @@ class SourcingEngine:
             for ext in results:
                 try:
                     price = ext.get("price", 0.0)
+                    stock = ext.get("stock", 0)
+                    is_eol = ext.get("lifecycle") == "NRND" or ext.get("risk_level") == "High"
+                    
+                    # Calculate deterministic risk score
+                    # Note: We don't have historical distributor list here easily, 
+                    # but we can use current result's context or mock it for now.
+                    risk_score = self._calculate_risk_score(
+                        stock, 
+                        [ext.get("distributor", "Unknown")], 
+                        is_eol
+                    )
+
+                    # Extract specs: everything else in ext that isn't a standard field
+                    standard_fields = {
+                        "id", "mpn", "manufacturer", "distributor", "source_type",
+                        "stock", "price", "currency", "delivery", "condition",
+                        "date_code", "is_eol", "risk_level", "risk_score",
+                        "lifecycle", "is_alternative", "updated_at", "datasheet",
+                        "product_url", "description", "market_notes", "package",
+                        "voltage", "temperature", "rohs"
+                    }
+                    specs = {k: str(v) for k, v in ext.items() if k not in standard_fields and v is not None}
+
                     part = StandardPart(
                         id=f"ext-{provider_name.lower()}-{uuid.uuid4().hex[:6]}",
                         mpn=ext["mpn"],
@@ -211,22 +263,24 @@ class SourcingEngine:
                             ext["distributor"]
                         ),
                         source_type=ext.get("source_type", "External"),
-                        stock=ext.get("stock", 0),
+                        stock=stock,
                         price=price,
                         price_history=self._generate_price_history(price),
                         currency=ext.get("currency", "USD"),
                         delivery=ext.get("delivery", "3-5 Days"),
                         condition="New",
                         date_code="2023+",
-                        is_eol=ext.get("lifecycle") == "NRND"
-                        or ext.get("risk_level") == "High",
-                        risk_level=ext.get("risk_level", "Low"),
+                        is_eol=is_eol,
+                        risk_level="High" if risk_score > 70 else ("Medium" if risk_score > 30 else "Low"),
+                        risk_score=ext.get("risk_score", risk_score),
                         lifecycle=ext.get("lifecycle", "Active"),
                         is_alternative=ext.get("is_alternative", False),
                         updated_at=datetime.now(),
                         datasheet=ext.get("datasheet", ""),
                         product_url=ext.get("product_url", ""),
                         description=ext.get("description", ""),
+                        market_notes=ext.get("market_notes", f"Stock availability score: {100-risk_score}/100"),
+                        specs=specs
                     )
                     standardized.append(part)
                 except Exception as e:
@@ -238,53 +292,77 @@ class SourcingEngine:
             print(f"❌ [ENGINE] Provider {provider_name} failed: {e}")
             return []
 
-    async def aggregate_intel(self, q: str):
+    async def aggregate_intel(self, q: str) -> List[StandardPart]:
         """
-        Aggregates results from multiple channels in parallel with intelligent deduplication.
+        Aggregates results from multiple channels in parallel with intelligent deduplication and caching.
         """
-        # 1. Start parallel fetching
+        # 1. Check Cache
+        q_norm = q.strip().upper()
+        if q_norm in self.search_cache:
+            print(f"⚡ [ENGINE] Cache Hit for: {q_norm}")
+            return self.search_cache[q_norm]
+
+        # 2. Start parallel fetching
         tasks = []
-
-        # Local Inventory
-        # Assuming we don't have _fetch_from_local logic changed, but we could add it
-        # For now, focus on the external aggregator's new features.
-
-        # Market Aggregator (Scraper) - This one now handles family search internally if OOS
         aggregator = SearchAggregator()
+        print(f"DEBUG: [ENGINE] Triggering fetch for: {q}", flush=True)
         tasks.append(self._fetch_from_provider("Market Aggregator", aggregator, q))
 
-        # Wait for all providers
+        # Wait for initial results
         all_results_lists = await asyncio.gather(*tasks)
+        results = [p for sublist in all_results_lists for p in sublist]
+        print(f"DEBUG: [ENGINE] Aggregated {len(results)} results from providers", flush=True)
 
-        # 2. Intellectual Merging & Deduplication
+        # 2. Parametric DNA Match Fallback (if results are weak)
+        # Weak results = < 3 results or all High Risk
+        is_weak = len(results) < 3 or all((p.risk_score or 0) > 70 for p in results)
+        
+        if is_weak:
+            try:
+                base_family = PartNormalizer.get_base_family(q)
+                if base_family and base_family.upper() != q.upper():
+                    print(f"🧬 [ENGINE] Initial results weak. Triggering Parametric DNA Match for: {base_family}")
+                    # Rename to clarify this is deterministic family search, not generic LLM AI
+                    alt_results = await self._fetch_from_provider("Parametric Engine", aggregator, base_family)
+                    for alt in alt_results:
+                        if PartNormalizer.clean_mpn(alt.mpn) != PartNormalizer.clean_mpn(q):
+                            alt.is_alternative = True
+                            alt.market_notes = f"Parametric alternative to {q}"
+                            results.append(alt)
+            except ImportError:
+                print("⚠️ [ENGINE] utils.PartNormalizer not found, skipping parametric match.")
+
+        # 3. Intellectual Merging & Deduplication
         merged_parts = {}
 
-        for part_list in all_results_lists:
-            for part in part_list:
-                # Key = Normalized MPN + Distributor
-                norm_mpn = PartNormalizer.clean_mpn(part.mpn)
-                key = f"{norm_mpn}@{part.distributor}"
+        for part in results:
+            # Key = Normalized MPN + Distributor
+            norm_mpn = PartNormalizer.clean_mpn(part.mpn)
+            key = f"{norm_mpn}@{part.distributor}"
 
-                if key not in merged_parts:
-                    merged_parts[key] = part
-                else:
-                    # Update existing entry if new one has more stock or a better (lower but non-zero) price
-                    existing = merged_parts[key]
-                    if part.stock > existing.stock:
-                        existing.stock = part.stock
-                    if part.price > 0 and (
-                        existing.price == 0 or part.price < existing.price
-                    ):
-                        existing.price = part.price
-                        existing.price_history = part.price_history
-                    if part.product_url and not existing.product_url:
-                        existing.product_url = part.product_url
+            if key not in merged_parts:
+                merged_parts[key] = part
+            else:
+                existing = merged_parts[key]
+                if part.stock > existing.stock:
+                    existing.stock = part.stock
+                if part.price > 0 and (
+                    existing.price == 0 or part.price < existing.price
+                ):
+                    existing.price = part.price
+                    existing.price_history = part.price_history
+                if part.product_url and not existing.product_url:
+                    existing.product_url = part.product_url
 
-        # 3. Final Sort (By price, non-zero first)
+        # 4. Final Sort (By price, non-zero first)
         final_list = list(merged_parts.values())
-        return sorted(
+        sorted_results = sorted(
             final_list, key=lambda x: x.price if x.price > 0 else float("inf")
         )
+
+        # 5. Store in Cache
+        self.search_cache[q_norm] = sorted_results
+        return sorted_results
 
     async def _fetch_from_local(self, q: str) -> List[StandardPart]:
         """Internal helper for local inventory fetch"""
@@ -312,6 +390,8 @@ class SourcingEngine:
                         date_code=item.get("date_code", "N/A"),
                         is_eol=item.get("is_eol", False),
                         risk_level=item.get("risk_level", "Low"),
+                        risk_score=item.get("risk_score", 0),
+                        market_notes=item.get("market_notes", ""),
                         updated_at=datetime.now(),
                         datasheet=item.get("datasheet", ""),
                         description=item.get("description", ""),
@@ -337,52 +417,56 @@ async def search_parts(
     max_voltage: Optional[float] = None,
     rohs_compliant: Optional[bool] = None,
 ):
-    """부품 통합 검색 및 지능형 필터링"""
-    cache_manager = get_cache_manager()
-    cache_key = f"{q}_{category}_{package}_{min_voltage}_{max_voltage}_{rohs_compliant}"
-    cached_results = await cache_manager.get_cached_results(cache_key)
-    if cached_results:
-        return [StandardPart(**item) for item in cached_results]
+    try:
+        cache_manager = get_cache_manager()
+        cache_key = f"{q}_{category}_{package}_{min_voltage}_{max_voltage}_{rohs_compliant}"
+        
+        # 1. Cache 조회 (Skip for internal test queries or explicitly requested real-time)
+        cached_results = await cache_manager.get_cached_results(cache_key)
+        if cached_results:
+            print(f"⚡ [API] Cache Hit for {q}")
+            return [StandardPart(**item) for item in cached_results]
 
-    results = await sourcing_engine.aggregate_intel(q)
+        print(f"📡 [API] Real-time Scouting for {q}...")
+        # 2. 실시간 검색 실행
+        results = await sourcing_engine.aggregate_intel(q)
+        
+        # ... (deduplication logic if needed, but aggregator should handle it)
 
-    if package:
-        results = [r for r in results if package.lower() in r.package.lower()]
+        # 3. 데이터 필터링 (패키지)
+        if package:
+            results = [r for r in results if r.package and package.lower() in r.package.lower()]
 
-    if min_voltage is not None:
+        # 4. 파라메트릭 필터링 (전압)
+        if min_voltage is not None or max_voltage is not None:
+            def extract_v(v_str: Optional[str]) -> Optional[float]:
+                if not v_str: return None
+                try:
+                    matches = re.findall(r"[-+]?\d*\.\d+|\d+", v_str)
+                    return float(matches[0]) if matches else None
+                except (ValueError, IndexError):
+                    return None
 
-        def extract_v(v_str):
-            try:
-                return float(re.findall(r"[-+]?\d*\.\d+|\d+", v_str)[0])
-            except:
-                return None
+            if min_voltage is not None:
+                results = [r for r in results if (v := extract_v(r.voltage)) is not None and v >= min_voltage]
+            if max_voltage is not None:
+                results = [r for r in results if (v := extract_v(r.voltage)) is not None and v <= max_voltage]
 
-        results = [
-            r
-            for r in results
-            if (v := extract_v(r.voltage)) is not None and v >= min_voltage
-        ]
+        # 5. RoHS 준수 여부
+        if rohs_compliant is not None:
+            results = [r for r in results if r.rohs is not None and r.rohs == rohs_compliant]
 
-    if max_voltage is not None:
+        # 6. 결과 캐싱
+        results_dict = [item.model_dump(mode="json") for item in results]
+        await cache_manager.set_cache(cache_key, results_dict)
+        
+        return results
 
-        def extract_v(v_str):
-            try:
-                return float(re.findall(r"[-+]?\d*\.\d+|\d+", v_str)[0])
-            except:
-                return None
-
-        results = [
-            r
-            for r in results
-            if (v := extract_v(r.voltage)) is not None and v <= max_voltage
-        ]
-
-    if rohs_compliant is not None:
-        results = [r for r in results if r.rohs == rohs_compliant]
-
-    results_dict = [item.model_dump(mode="json") for item in results]
-    await cache_manager.set_cache(cache_key, results_dict)
-    return results
+    except Exception as e:
+        import traceback
+        print(f"❌ [API] Search error: {e}")
+        print(traceback.format_exc())
+        return [] # 에러 발생 시 빈 리스트 반환하여 프론트엔드 크래시 방지
 
 
 @app.websocket("/ws/pulse")

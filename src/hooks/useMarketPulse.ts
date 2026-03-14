@@ -18,6 +18,8 @@ export const useMarketPulse = () => {
   const [lastSignal, setLastSignal] = useState<MarketSignal | null>(null);
 
   useEffect(() => {
+    let active = true;
+    
     // 'realtime_signals' 테이블의 INSERT 이벤트를 구독
     const channel = supabase
       .channel('market-pulse')
@@ -25,37 +27,57 @@ export const useMarketPulse = () => {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'realtime_signals' },
         (payload) => {
+          if (!active) return;
           const signal = payload.new as MarketSignal;
           setLastSignal(signal);
-          
           console.log("💓 Pulse Received:", signal);
 
-          // RSI 30 미만이면 즉각 알림 발송!
+          // RSI 신호에 따른 알림 발송
           if (signal.signal === 'OVERSOLD') {
-             try {
-                toast.error(`🚨 ${signal.ticker} 과매도 진입! (RSI: ${signal.value})`);
-             } catch(e) {
-                console.warn("Toast library not found:", e);
-             }
+             toast.error(`🚨 ${signal.ticker} 과매도! (RSI: ${signal.value})`);
           } else if (signal.signal === 'OVERBOUGHT') {
-             try {
-                toast.success(`📈 ${signal.ticker} 과매수 구간! (RSI: ${signal.value})`);
-             } catch(e) {
-                console.warn("Toast library not found:", e);
-             }
+             toast.success(`📈 ${signal.ticker} 과매수! (RSI: ${signal.value})`);
           }
         }
       );
 
-    channel.subscribe((status) => {
-      if (status === 'CHANNEL_ERROR') {
-        console.error('WebSocket connection error');
-      }
-    });
+    const subscribe = (attempt = 0) => {
+      if (!active) return;
+      
+      channel.subscribe((status, err) => {
+        if (!active) return;
+        
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Supabase Realtime connected');
+        }
+        
+        if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Supabase Realtime connection error:', err);
+          console.warn("💡 Tip: Supabase 대시보드에서 'realtime_signals' 테이블의 Realtime 기능이 켜져 있는지 확인하세요.");
+        }
+        
+        if (status === 'TIMED_OUT') {
+          console.warn(`⚠️ Supabase Realtime connection timed out (Attempt ${attempt + 1}). Retrying in 5s...`);
+          if (attempt < 5) {
+            setTimeout(() => subscribe(attempt + 1), 5000);
+          }
+        }
+      });
+    };
+
+    subscribe();
 
     return () => {
+      active = false;
       if (channel) {
-        supabase.removeChannel(channel);
+        supabase.removeChannel(channel).then(() => {
+           console.log("🔌 Supabase Realtime channel removed safely.");
+        }).catch(err => {
+           // 연결 도중 종료 시 발생하는 에러 무시 (closed before established)
+           if (!err.message?.includes('closed before the connection is established')) {
+             console.warn("Channel removal warning:", err);
+           }
+        });
       }
     };
   }, []);

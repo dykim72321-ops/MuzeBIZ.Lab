@@ -4,6 +4,7 @@ Manages search result caching using Supabase
 """
 
 import json
+import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import os
@@ -51,27 +52,33 @@ class CacheManager:
             # Normalize part number (case-insensitive)
             part_number_normalized = part_number.upper().strip()
 
-            # Query cache
-            response = (
-                self.client.table("search_cache")
-                .select("*")
-                .eq("part_number", part_number_normalized)
-                .gt("expires_at", datetime.now().isoformat())
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
+            # Query cache using to_thread since postgrest-py is synchronous
+            def query_sync():
+                return (
+                    self.client.table("search_cache")
+                    .select("*")
+                    .eq("part_number", part_number_normalized)
+                    .gt("expires_at", datetime.now().isoformat())
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+
+            response = await asyncio.to_thread(query_sync)
 
             if response.data and len(response.data) > 0:
                 cache_entry = response.data[0]
 
                 # Update last accessed time and search count
-                self.client.table("search_cache").update(
-                    {
-                        "last_accessed_at": datetime.now().isoformat(),
-                        "search_count": cache_entry["search_count"] + 1,
-                    }
-                ).eq("id", cache_entry["id"]).execute()
+                def update_sync():
+                    return self.client.table("search_cache").update(
+                        {
+                            "last_accessed_at": datetime.now().isoformat(),
+                            "search_count": cache_entry["search_count"] + 1,
+                        }
+                    ).eq("id", cache_entry["id"]).execute()
+                
+                await asyncio.to_thread(update_sync)
 
                 print(
                     f"✓ Cache HIT for {part_number} (age: {self._get_cache_age(cache_entry['created_at'])})"
@@ -116,7 +123,10 @@ class CacheManager:
             }
 
             # Insert into cache
-            self.client.table("search_cache").insert(cache_entry).execute()
+            def insert_sync():
+                return self.client.table("search_cache").insert(cache_entry).execute()
+            
+            await asyncio.to_thread(insert_sync)
 
             print(
                 f"✓ Cached {len(results)} results for {part_number} (expires in {self.cache_duration_hours}h)"
