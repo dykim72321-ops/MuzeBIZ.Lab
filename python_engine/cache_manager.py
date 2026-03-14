@@ -3,7 +3,6 @@ Cache Manager for RareSource
 Manages search result caching using Supabase
 """
 
-import json
 import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -71,13 +70,18 @@ class CacheManager:
 
                 # Update last accessed time and search count
                 def update_sync():
-                    return self.client.table("search_cache").update(
-                        {
-                            "last_accessed_at": datetime.now().isoformat(),
-                            "search_count": cache_entry["search_count"] + 1,
-                        }
-                    ).eq("id", cache_entry["id"]).execute()
-                
+                    return (
+                        self.client.table("search_cache")
+                        .update(
+                            {
+                                "last_accessed_at": datetime.now().isoformat(),
+                                "search_count": cache_entry["search_count"] + 1,
+                            }
+                        )
+                        .eq("id", cache_entry["id"])
+                        .execute()
+                    )
+
                 await asyncio.to_thread(update_sync)
 
                 print(
@@ -125,7 +129,7 @@ class CacheManager:
             # Insert into cache
             def insert_sync():
                 return self.client.table("search_cache").insert(cache_entry).execute()
-            
+
             await asyncio.to_thread(insert_sync)
 
             print(
@@ -192,7 +196,7 @@ class CacheManager:
                 return f"{age.seconds // 60}m"
             else:
                 return f"{age.seconds // 3600}h"
-        except:
+        except Exception:
             return "unknown"
 
 

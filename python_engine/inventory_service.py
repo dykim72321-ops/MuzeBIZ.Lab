@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import io
@@ -71,7 +70,7 @@ class InventoryService:
                 return {"status": "error", "message": "No valid records found"}
 
             # Bulk Insert
-            response = self.supabase.table("member_inventory").insert(records).execute()
+            self.supabase.table("member_inventory").insert(records).execute()
 
             return {
                 "status": "success",

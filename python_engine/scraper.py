@@ -11,13 +11,20 @@ from sklearn.ensemble import IsolationForest
 import random
 import re
 from typing import List, Dict
+import json
+from backtester import run_backtest
+from utils import PartNormalizer
 
 
 class FinvizHunter:
     def __init__(self):
         self.db = DBManager()
         self.news = NewsManager()
-        self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        self.user_agent = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/121.0.0.0 Safari/537.36"
+        )
 
         # S&P 500 등 기준 유니버스 (Anomaly Hunting용 기본 풀)
         self.base_universe = [
@@ -68,7 +75,10 @@ class FinvizHunter:
         modes = [
             {
                 "name": "🚀 모멘텀 폭발 (상승 추세 + 거래량)",
-                "url": "https://finviz.com/screener.ashx?v=111&f=ta_perf_52wup,ta_relvol_o1.5,ta_volatility_mo3&o=-change",
+                "url": (
+                    "https://finviz.com/screener.ashx?v=111"
+                    "&f=ta_perf_52wup,ta_relvol_o1.5,ta_volatility_mo3&o=-change"
+                ),
             },  # Mon
             {
                 "name": "🏛️ 기관 매집 (기관 비중 10% 이상 + 거래량 상위)",
@@ -271,15 +281,12 @@ class FinvizHunter:
                 volume = int(df["Volume"].iloc[-1])
 
                 rsi = ta.momentum.RSIIndicator(close=df["Close"]).rsi().iloc[-1]
-                indicators_summary = (
-                    f"Price: ${price:.2f}, RSI: {rsi:.1f}, Change: {change:.2f}%"
-                )
             except Exception as e:
                 print(f"⚠️ Failed to get technicals for {ticker_symbol}: {e}")
                 continue
 
-            # 2. Fetch News
-            headlines = self.news.fetch_company_news(ticker_symbol)
+            # 2. Fetch News (Optional, can be used for sentiment later)
+            self.news.fetch_company_news(ticker_symbol)
 
             # 3. Mathematical Quant Analysis (Replacing AI)
             ma20 = df["Close"].rolling(window=20).mean().iloc[-1]
@@ -329,7 +336,6 @@ class FinvizHunter:
             }
 
             # 4. Auto Backtest (1년 RSI 전략)
-            from backtester import run_backtest
 
             backtest_result = await asyncio.to_thread(
                 run_backtest, ticker_symbol, period="1y"
@@ -344,7 +350,6 @@ class FinvizHunter:
                 )
 
             # 5. Save to DB (Save as JSON string for frontend to parse)
-            import json
 
             ai_summary_text = json.dumps(quant_data)
 
@@ -370,12 +375,13 @@ class FinvizHunter:
             await asyncio.sleep(1)  # Be polite
 
 
-from utils import PartNormalizer
-
-
 class SearchAggregator:
     def __init__(self):
-        self.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        self.user_agent = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/121.0.0.0 Safari/537.36"
+        )
         self.base_url = "https://www.findchips.com/search/"
 
     async def search_market_intel(self, mpn: str, depth: int = 0) -> List[Dict]:
@@ -407,7 +413,7 @@ class SearchAggregator:
                 # Wait for the first distributor result to appear (more efficient than a hard wait)
                 try:
                     await page.wait_for_selector(".distributor-results", timeout=5000)
-                except:
+                except Exception:
                     # If not found after 5s, continue and try to parse anyway
                     pass
 
@@ -520,35 +526,65 @@ class SearchAggregator:
                                     if desc_el
                                     else ""
                                 )
-                                
+
                                 # Heuristic: If dedicated package cell is missing, try to find it in description
-                                final_package = pkg_text if pkg_text and pkg_text != "N/A" else ""
+                                final_package = (
+                                    pkg_text if pkg_text and pkg_text != "N/A" else ""
+                                )
                                 if not final_package:
-                                    # Look for common package patterns in description (flexible match including prefixes like 64LQFP)
-                                    pkg_match = re.search(r'([a-z0-9-]* (?:SOIC|SOP|SSOP|TSSOP|HTSSOP|QFP|LQFP|TQFP|BGA|DIP|SOT|TO-\d+|VSSOP|MSOP|SC-\d+)[a-z0-9-]*)', spec_text, re.IGNORECASE)
+                                    # Look for common package patterns in description
+                                    # (flexible match including prefixes like 64LQFP)
+                                    pkg_match = re.search(
+                                        r"([a-z0-9-]* (?:SOIC|SOP|SSOP|TSSOP|HTSSOP|QFP|LQFP|TQFP|"
+                                        r"BGA|DIP|SOT|TO-\d+|VSSOP|MSOP|SC-\d+)[a-z0-9-]*)",
+                                        spec_text,
+                                        re.IGNORECASE,
+                                    )
                                     if not pkg_match:
                                         # Try without space
-                                        pkg_match = re.search(r'([a-z0-9-]*(?:SOIC|SOP|SSOP|TSSOP|HTSSOP|QFP|LQFP|TQFP|BGA|DIP|SOT|TO-\d+|VSSOP|MSOP|SC-\d+)[a-z0-9-]*)', spec_text, re.IGNORECASE)
-                                    
+                                        pkg_match = re.search(
+                                            r"([a-z0-9-]*(?:SOIC|SOP|SSOP|TSSOP|HTSSOP|QFP|LQFP|TQFP|"
+                                            r"BGA|DIP|SOT|TO-\d+|VSSOP|MSOP|SC-\d+)[a-z0-9-]*)",
+                                            spec_text,
+                                            re.IGNORECASE,
+                                        )
+
                                     if pkg_match:
-                                        final_package = pkg_match.group(0).strip().upper()
+                                        final_package = (
+                                            pkg_match.group(0).strip().upper()
+                                        )
                                     else:
                                         # Try another common pattern: at the end of a comma-separated list
-                                        parts = [p.strip() for p in spec_text.split(',')]
-                                        if parts and len(parts[-1]) < 15 and any(c.isdigit() for c in parts[-1]):
+                                        parts = [
+                                            p.strip() for p in spec_text.split(",")
+                                        ]
+                                        if (
+                                            parts
+                                            and len(parts[-1]) < 15
+                                            and any(c.isdigit() for c in parts[-1])
+                                        ):
                                             final_package = parts[-1]
-                                
+
                                 if not final_package or final_package == "N/A":
                                     final_package = "N/A"
 
                                 if actual_mpn:
                                     # Clean manufacturer encoding artifacts
-                                    mfg_clean = re.sub(r'[^\x00-\x7F]+', ' ', mfg_text).strip()
-                                    manufacturer = mfg_clean or PartNormalizer.guess_manufacturer(actual_mpn)
-                                    
-                                    risk_score = PartNormalizer.calculate_risk_score(actual_mpn, stock, "Active")
-                                    market_notes = PartNormalizer.generate_market_notes(actual_mpn, stock, price, "Active")
-                                    
+                                    mfg_clean = re.sub(
+                                        r"[^\x00-\x7F]+", " ", mfg_text
+                                    ).strip()
+                                    manufacturer = (
+                                        mfg_clean
+                                        or PartNormalizer.guess_manufacturer(actual_mpn)
+                                    )
+
+                                    risk_score = PartNormalizer.calculate_risk_score(
+                                        actual_mpn, stock, "Active"
+                                    )
+                                    market_notes = PartNormalizer.generate_market_notes(
+                                        actual_mpn, stock, price, "Active"
+                                    )
+
                                     results.append(
                                         {
                                             "distributor": dist_name,
@@ -563,7 +599,9 @@ class SearchAggregator:
                                                 "High"
                                                 if risk_score > 70
                                                 else (
-                                                    "Medium" if risk_score > 30 else "Low"
+                                                    "Medium"
+                                                    if risk_score > 30
+                                                    else "Low"
                                                 )
                                             ),
                                             "risk_score": risk_score,
@@ -575,12 +613,12 @@ class SearchAggregator:
                                             "product_url": buy_url,
                                             "is_alternative": depth > 0,
                                             "package": final_package,
-                                            "description": spec_text
+                                            "description": spec_text,
                                         }
                                     )
-                            except:
+                            except Exception:
                                 continue
-                    except:
+                    except Exception:
                         continue
 
                 await browser.close()
@@ -588,40 +626,48 @@ class SearchAggregator:
                 # Deduplicate and prioritize better matches
                 unique_results = {}
                 search_q_norm = PartNormalizer.clean_mpn(mpn)
-                
+
                 for r in results:
-                    # HEURISTIC: Skip parts that don't even contain the searched string (prevents too broad generic matches)
+                    # HEURISTIC: Skip parts that don't even contain the searched string
+                    # (prevents too broad generic matches)
                     if search_q_norm not in r["normalized_mpn"]:
                         continue
-                        
+
                     key = f"{r['distributor']}_{r['normalized_mpn']}"
                     if key not in unique_results:
                         unique_results[key] = r
                     else:
                         existing = unique_results[key]
                         # Prefer results with non-zero price, or higher stock if prices are equal/zero
-                        if (r["price"] > 0 and existing["price"] == 0) or \
-                           (r["price"] > 0 and r["price"] < existing["price"]) or \
-                           (r["price"] == existing["price"] and r["stock"] > existing["stock"]):
+                        if (
+                            (r["price"] > 0 and existing["price"] == 0)
+                            or (r["price"] > 0 and r["price"] < existing["price"])
+                            or (
+                                r["price"] == existing["price"]
+                                and r["stock"] > existing["stock"]
+                            )
+                        ):
                             unique_results[key] = r
 
                 final_list = list(unique_results.values())
-                
+
                 # Sort: Exact match first, then by stock/price
                 def rank_result(r):
                     score = 0
                     r_mpn = r["mpn"].upper()
                     q_up = mpn.strip().upper()
-                    
+
                     if r_mpn == q_up:
                         score -= 1000  # Highest priority
                     elif r_mpn.startswith(q_up):
                         score -= 500
-                    
+
                     # Deprioritize Evaluation Boards if the original query wasn't an EVB
-                    if ("-EVB" in r_mpn or "EVAL" in r_mpn) and ("-EVB" not in q_up and "EVAL" not in q_up):
+                    if ("-EVB" in r_mpn or "EVAL" in r_mpn) and (
+                        "-EVB" not in q_up and "EVAL" not in q_up
+                    ):
                         score += 800
-                        
+
                     return score
 
                 final_list.sort(key=rank_result)
@@ -633,7 +679,8 @@ class SearchAggregator:
                         family_mpn = PartNormalizer.get_base_family(mpn)
                         if family_mpn and family_mpn != mpn:
                             print(
-                                f"⚠️ [AGGREGATOR] Exact Match '{mpn}' is OOS. Trying Family Search for '{family_mpn}'..."
+                                f"⚠️ [AGGREGATOR] Exact Match '{mpn}' is OOS. "
+                                f"Trying Family Search for '{family_mpn}'..."
                             )
                             family_results = await self.search_market_intel(
                                 family_mpn, depth=depth + 1
@@ -643,14 +690,6 @@ class SearchAggregator:
 
                 print(f"✅ [AGGREGATOR] Returning {len(final_list)} results for {mpn}")
                 return final_list
-
-        except Exception as e:
-            print(f"❌ [AGGREGATOR] Critical Failure: {e}")
-            return []
-
-        except Exception as e:
-            print(f"❌ [AGGREGATOR] Critical Failure: {e}")
-            return []
 
         except Exception as e:
             print(f"❌ [AGGREGATOR] Critical Failure: {e}")
@@ -667,24 +706,28 @@ class MouserHunter:
 
 
 if __name__ == "__main__":
+
     async def test():
         aggregator = SearchAggregator()
         # Test 1: TPS54331
         res1 = await aggregator.search_market_intel("TPS54331")
         print(f"\n🔍 [TEST] Results for TPS54331: {len(res1)} items found")
-        
+
         # Test 2: STM32
         res2 = await aggregator.search_market_intel("STM32F103")
         print(f"\n🔍 [TEST] Results for STM32F103: {len(res2)} items found")
         for r in res2[:3]:
-             print(f"   - MPN: {r['mpn']}, MFG: {r['manufacturer']}, DIST: {r['distributor']}")
+            print(
+                f"   - MPN: {r['mpn']}, MFG: {r['manufacturer']}, DIST: {r['distributor']}"
+            )
         # Test 3: LM358 (Generic/TI/ST)
         res3 = await aggregator.search_market_intel("LM358")
         print(f"\n🔍 [TEST] Results for LM358: {len(res3)} items found")
         for r in res3[:3]:
-             print(f"   - MPN: {r['mpn']}, MFG: {r['manufacturer']}")
-    
+            print(f"   - MPN: {r['mpn']}, MFG: {r['manufacturer']}")
+
     import sys
+
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         asyncio.run(test())
     else:

@@ -1,5 +1,4 @@
 import re
-from typing import List, Optional
 
 
 class PartNormalizer:
@@ -54,22 +53,22 @@ class PartNormalizer:
 
             # 3. Handle tiers: Qty Price Qty Price
             # If the first match is '1', the second is the unit price.
-            # If no '1' found, we look for any float (contain '.') 
+            # If no '1' found, we look for any float (contain '.')
             # and take the first one, or the first match if it looks like a price (small value)
             for i in range(len(matches) - 1):
                 if matches[i] == "1":
-                    return float(matches[i+1])
+                    return float(matches[i + 1])
 
             # Heuristic fallback: return the first one that has a decimal point (likely a price)
             for m in matches:
                 if "." in m:
                     return float(m)
-            
+
             # Final fallback: if no decimal, but the number is reasonably small (< 10000?), treat as price.
             # If it's huge, it's probably stock/quantity number wrongly parsed as price.
             val = float(matches[0])
             return val if val < 5000 else 0.0
-            
+
         except (ValueError, TypeError, IndexError):
             return 0.0
 
@@ -80,7 +79,7 @@ class PartNormalizer:
         High score = High risk.
         """
         score = 0
-        
+
         # 1. Stock Risk (0-40 pts)
         if stock == 0:
             score += 40
@@ -88,7 +87,7 @@ class PartNormalizer:
             score += 25
         elif stock < 200:
             score += 10
-            
+
         # 2. Lifecycle Risk (0-40 pts)
         l_status = lifecycle.upper()
         if "EOL" in l_status or "OBS" in l_status:
@@ -97,46 +96,58 @@ class PartNormalizer:
             score += 30
         elif "UNKNOWN" in l_status:
             score += 15
-            
+
         # 3. Part Type Risk (0-20 pts)
         # Evaluation boards or alternatives are inherently riskier for mass production
         if "-EVB" in mpn.upper() or "EVAL" in mpn.upper():
             score += 20
-            
+
         return min(100, score)
 
     @staticmethod
-    def generate_market_notes(mpn: str, stock: int, price: float, lifecycle: str) -> str:
+    def generate_market_notes(
+        mpn: str, stock: int, price: float, lifecycle: str
+    ) -> str:
         """Generates dynamic market insights based on part data."""
         notes = []
-        
+
         if stock > 5000:
             notes.append("High Volume Available")
         elif stock == 0:
             notes.append("Stock Depleted - Factory Lead Time Likely")
         elif stock < 100:
             notes.append("Limited Spot Stock")
-            
+
         if price > 1000:
             notes.append("High Value / Module Item")
-            
+
         if lifecycle == "NRND":
             notes.append("Design Migration Recommended")
-            
+
         if "-EVB" in mpn.upper():
             notes.append("Prototyping Tool - Not for Production")
-            
+
         return " | ".join(notes) if notes else "Market Stable"
 
     @staticmethod
     def guess_manufacturer(mpn: str) -> str:
         """Heuristic to guess manufacturer from MPN prefix."""
         m = mpn.upper()
-        if m.startswith("TPS") or m.startswith("SN") or m.startswith("TLV") or m.startswith("OPA"):
+        if (
+            m.startswith("TPS")
+            or m.startswith("SN")
+            or m.startswith("TLV")
+            or m.startswith("OPA")
+        ):
             return "Texas Instruments"
         if m.startswith("STM32") or m.startswith("STM8") or m.startswith("SPC5"):
             return "STMicroelectronics"
-        if m.startswith("AD") or m.startswith("LTC") or m.startswith("LT") or m.startswith("MAX"):
+        if (
+            m.startswith("AD")
+            or m.startswith("LTC")
+            or m.startswith("LT")
+            or m.startswith("MAX")
+        ):
             # MAX is Maxim, now part of Analog Devices
             return "Analog Devices"
         if m.startswith("PIC") or m.startswith("ATMEGA") or m.startswith("SAM"):

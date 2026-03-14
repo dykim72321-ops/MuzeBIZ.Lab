@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import ta
 import warnings
-from datetime import datetime, timedelta
+
 
 # 경고 무시
 warnings.filterwarnings("ignore")
@@ -181,12 +181,10 @@ class DNAValidator:
 
         # yfinance multi-index 처리
         if isinstance(data.columns, pd.MultiIndex):
-            tickers_in_data = data.columns.get_level_values(1).unique()
+            pass
         else:
             # 단일 종목일 경우 처리
-            tickers_in_data = (
-                [self.tickers[0]] if isinstance(self.tickers, list) else [self.tickers]
-            )
+            pass
 
         for ticker in self.tickers:
             try:

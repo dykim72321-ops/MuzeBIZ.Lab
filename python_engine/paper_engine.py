@@ -1,6 +1,4 @@
-import os
-from supabase import create_client, Client
-from datetime import datetime
+from supabase import Client
 from webhook_manager import WebhookManager
 import asyncio
 

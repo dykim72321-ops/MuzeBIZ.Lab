@@ -25,8 +25,14 @@ class NewsManager:
                 "%Y-%m-%d"
             )
 
-            url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date}&to={today}&token={self.api_key}"
-            response = requests.get(url)
+            params = {
+                "symbol": ticker,
+                "from": start_date,
+                "to": today,
+                "token": self.api_key,
+            }
+            url = "https://finnhub.io/api/v1/company-news"
+            response = requests.get(url, params=params)
 
             if response.status_code != 200:
                 return []

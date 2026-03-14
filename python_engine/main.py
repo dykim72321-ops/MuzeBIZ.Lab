@@ -7,8 +7,6 @@ from fastapi import (
     WebSocketDisconnect,
     Query,
     HTTPException,
-    File,
-    UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
@@ -20,26 +18,23 @@ import os
 from dotenv import load_dotenv
 
 # --- Rare Source Imports ---
-from cache_manager import get_cache_manager
-from inventory_service import inventory_service
 import uuid
 import re
 from cachetools import TTLCache
-import os
-from dotenv import load_dotenv
-from scraper import FinvizHunter, MouserHunter, SearchAggregator
+from scraper import FinvizHunter, SearchAggregator
 from db_manager import DBManager
 import asyncio
 from datetime import datetime
 from supabase import create_client, Client
 import pandas as pd
 import numpy as np
-from cachetools import TTLCache
-import requests_cache
 import random
 from webhook_manager import WebhookManager
 from paper_engine import PaperTradingManager
 from utils import PartNormalizer
+from backtester import run_backtest
+from cache_manager import get_cache_manager
+from inventory_service import inventory_service
 
 webhook = WebhookManager()
 # PaperTradingManager 인스턴스 (Supabase가 초기화된 후 설정)
@@ -175,7 +170,6 @@ class StandardPart(BaseModel):
     specs: Dict[str, str] = {}
 
 
-
 # from utils import PartNormalizer (Already imported at top)
 
 
@@ -191,26 +185,34 @@ class SourcingEngine:
             return [round(current_price, 2)]
         return []
 
-    def _calculate_risk_score(self, stock: int, distributors: List[str], is_eol: bool) -> int:
+    def _calculate_risk_score(
+        self, stock: int, distributors: List[str], is_eol: bool
+    ) -> int:
         """
         Deterministic Risk Calculation (0-100)
         Based on availability, distribution breadth, and lifecycle.
         """
         score = 0
-        
+
         # 1. Stock Risk (0-40 pts)
-        if stock == 0: score += 40
-        elif stock < 100: score += 25
-        elif stock < 1000: score += 10
-        
+        if stock == 0:
+            score += 40
+        elif stock < 100:
+            score += 25
+        elif stock < 1000:
+            score += 10
+
         # 2. Source Diversity Risk (0-30 pts)
         unique_dists = len(set(distributors))
-        if unique_dists <= 1: score += 30
-        elif unique_dists <= 3: score += 15
-        
+        if unique_dists <= 1:
+            score += 30
+        elif unique_dists <= 3:
+            score += 15
+
         # 3. Lifecycle Risk (0-30 pts)
-        if is_eol: score += 30
-        
+        if is_eol:
+            score += 30
+
         return min(score, 100)
 
     async def _fetch_from_provider(
@@ -233,27 +235,51 @@ class SourcingEngine:
                 try:
                     price = ext.get("price", 0.0)
                     stock = ext.get("stock", 0)
-                    is_eol = ext.get("lifecycle") == "NRND" or ext.get("risk_level") == "High"
-                    
+                    is_eol = (
+                        ext.get("lifecycle") == "NRND"
+                        or ext.get("risk_level") == "High"
+                    )
+
                     # Calculate deterministic risk score
-                    # Note: We don't have historical distributor list here easily, 
+                    # Note: We don't have historical distributor list here easily,
                     # but we can use current result's context or mock it for now.
                     risk_score = self._calculate_risk_score(
-                        stock, 
-                        [ext.get("distributor", "Unknown")], 
-                        is_eol
+                        stock, [ext.get("distributor", "Unknown")], is_eol
                     )
 
                     # Extract specs: everything else in ext that isn't a standard field
                     standard_fields = {
-                        "id", "mpn", "manufacturer", "distributor", "source_type",
-                        "stock", "price", "currency", "delivery", "condition",
-                        "date_code", "is_eol", "risk_level", "risk_score",
-                        "lifecycle", "is_alternative", "updated_at", "datasheet",
-                        "product_url", "description", "market_notes", "package",
-                        "voltage", "temperature", "rohs"
+                        "id",
+                        "mpn",
+                        "manufacturer",
+                        "distributor",
+                        "source_type",
+                        "stock",
+                        "price",
+                        "currency",
+                        "delivery",
+                        "condition",
+                        "date_code",
+                        "is_eol",
+                        "risk_level",
+                        "risk_score",
+                        "lifecycle",
+                        "is_alternative",
+                        "updated_at",
+                        "datasheet",
+                        "product_url",
+                        "description",
+                        "market_notes",
+                        "package",
+                        "voltage",
+                        "temperature",
+                        "rohs",
                     }
-                    specs = {k: str(v) for k, v in ext.items() if k not in standard_fields and v is not None}
+                    specs = {
+                        k: str(v)
+                        for k, v in ext.items()
+                        if k not in standard_fields and v is not None
+                    }
 
                     part = StandardPart(
                         id=f"ext-{provider_name.lower()}-{uuid.uuid4().hex[:6]}",
@@ -271,7 +297,11 @@ class SourcingEngine:
                         condition="New",
                         date_code="2023+",
                         is_eol=is_eol,
-                        risk_level="High" if risk_score > 70 else ("Medium" if risk_score > 30 else "Low"),
+                        risk_level=(
+                            "High"
+                            if risk_score > 70
+                            else ("Medium" if risk_score > 30 else "Low")
+                        ),
                         risk_score=ext.get("risk_score", risk_score),
                         lifecycle=ext.get("lifecycle", "Active"),
                         is_alternative=ext.get("is_alternative", False),
@@ -279,8 +309,11 @@ class SourcingEngine:
                         datasheet=ext.get("datasheet", ""),
                         product_url=ext.get("product_url", ""),
                         description=ext.get("description", ""),
-                        market_notes=ext.get("market_notes", f"Stock availability score: {100-risk_score}/100"),
-                        specs=specs
+                        market_notes=ext.get(
+                            "market_notes",
+                            f"Stock availability score: {100-risk_score}/100",
+                        ),
+                        specs=specs,
                     )
                     standardized.append(part)
                 except Exception as e:
@@ -311,26 +344,37 @@ class SourcingEngine:
         # Wait for initial results
         all_results_lists = await asyncio.gather(*tasks)
         results = [p for sublist in all_results_lists for p in sublist]
-        print(f"DEBUG: [ENGINE] Aggregated {len(results)} results from providers", flush=True)
+        print(
+            f"DEBUG: [ENGINE] Aggregated {len(results)} results from providers",
+            flush=True,
+        )
 
         # 2. Parametric DNA Match Fallback (if results are weak)
         # Weak results = < 3 results or all High Risk
         is_weak = len(results) < 3 or all((p.risk_score or 0) > 70 for p in results)
-        
+
         if is_weak:
             try:
                 base_family = PartNormalizer.get_base_family(q)
                 if base_family and base_family.upper() != q.upper():
-                    print(f"🧬 [ENGINE] Initial results weak. Triggering Parametric DNA Match for: {base_family}")
+                    print(
+                        f"🧬 [ENGINE] Initial results weak. Triggering Parametric DNA Match for: {base_family}"
+                    )
                     # Rename to clarify this is deterministic family search, not generic LLM AI
-                    alt_results = await self._fetch_from_provider("Parametric Engine", aggregator, base_family)
+                    alt_results = await self._fetch_from_provider(
+                        "Parametric Engine", aggregator, base_family
+                    )
                     for alt in alt_results:
-                        if PartNormalizer.clean_mpn(alt.mpn) != PartNormalizer.clean_mpn(q):
+                        if PartNormalizer.clean_mpn(
+                            alt.mpn
+                        ) != PartNormalizer.clean_mpn(q):
                             alt.is_alternative = True
                             alt.market_notes = f"Parametric alternative to {q}"
                             results.append(alt)
             except ImportError:
-                print("⚠️ [ENGINE] utils.PartNormalizer not found, skipping parametric match.")
+                print(
+                    "⚠️ [ENGINE] utils.PartNormalizer not found, skipping parametric match."
+                )
 
         # 3. Intellectual Merging & Deduplication
         merged_parts = {}
@@ -419,8 +463,10 @@ async def search_parts(
 ):
     try:
         cache_manager = get_cache_manager()
-        cache_key = f"{q}_{category}_{package}_{min_voltage}_{max_voltage}_{rohs_compliant}"
-        
+        cache_key = (
+            f"{q}_{category}_{package}_{min_voltage}_{max_voltage}_{rohs_compliant}"
+        )
+
         # 1. Cache 조회 (Skip for internal test queries or explicitly requested real-time)
         cached_results = await cache_manager.get_cached_results(cache_key)
         if cached_results:
@@ -430,17 +476,21 @@ async def search_parts(
         print(f"📡 [API] Real-time Scouting for {q}...")
         # 2. 실시간 검색 실행
         results = await sourcing_engine.aggregate_intel(q)
-        
+
         # ... (deduplication logic if needed, but aggregator should handle it)
 
         # 3. 데이터 필터링 (패키지)
         if package:
-            results = [r for r in results if r.package and package.lower() in r.package.lower()]
+            results = [
+                r for r in results if r.package and package.lower() in r.package.lower()
+            ]
 
         # 4. 파라메트릭 필터링 (전압)
         if min_voltage is not None or max_voltage is not None:
+
             def extract_v(v_str: Optional[str]) -> Optional[float]:
-                if not v_str: return None
+                if not v_str:
+                    return None
                 try:
                     matches = re.findall(r"[-+]?\d*\.\d+|\d+", v_str)
                     return float(matches[0]) if matches else None
@@ -448,25 +498,36 @@ async def search_parts(
                     return None
 
             if min_voltage is not None:
-                results = [r for r in results if (v := extract_v(r.voltage)) is not None and v >= min_voltage]
+                results = [
+                    r
+                    for r in results
+                    if (v := extract_v(r.voltage)) is not None and v >= min_voltage
+                ]
             if max_voltage is not None:
-                results = [r for r in results if (v := extract_v(r.voltage)) is not None and v <= max_voltage]
+                results = [
+                    r
+                    for r in results
+                    if (v := extract_v(r.voltage)) is not None and v <= max_voltage
+                ]
 
         # 5. RoHS 준수 여부
         if rohs_compliant is not None:
-            results = [r for r in results if r.rohs is not None and r.rohs == rohs_compliant]
+            results = [
+                r for r in results if r.rohs is not None and r.rohs == rohs_compliant
+            ]
 
         # 6. 결과 캐싱
         results_dict = [item.model_dump(mode="json") for item in results]
         await cache_manager.set_cache(cache_key, results_dict)
-        
+
         return results
 
     except Exception as e:
         import traceback
+
         print(f"❌ [API] Search error: {e}")
         print(traceback.format_exc())
-        return [] # 에러 발생 시 빈 리스트 반환하여 프론트엔드 크래시 방지
+        return []  # 에러 발생 시 빈 리스트 반환하여 프론트엔드 크래시 방지
 
 
 @app.websocket("/ws/pulse")
@@ -725,7 +786,6 @@ def get_recent_discoveries(limit: int = 10, sort_by: str = "updated_at"):
 
 
 # Backtesting endpoint
-from backtester import run_backtest
 
 
 class BacktestRequest(BaseModel):
@@ -878,7 +938,7 @@ def generate_ai_investment_report(data: dict):
 
     # 1. 시그널 요약 및 RVOL 검증
     if signal == "BUY":
-        rvol_note = f" (보통)" if rvol < 3.0 else f" (🔥 거래량 폭증: {rvol}x)"
+        rvol_note = " (보통)" if rvol < 3.0 else f" (🔥 거래량 폭증: {rvol}x)"
         report.append(
             f"📈 [Micro-Cap 하이브리드 BUY] RSI {rsi} & MACD 골든크로스 확인."
         )
@@ -1003,7 +1063,7 @@ try:
     )
     if supabase:
         paper_engine = PaperTradingManager(supabase)
-except:
+except Exception:
     supabase = None
 
 
@@ -1045,7 +1105,10 @@ async def process_ticker_pulse(ticker_symbol: str):
                             else "🔴 STRONG SELL / SCALE_OUT"
                         )
                         title = f"[MuzeBIZ Pulse] {ticker_symbol} {action}"
-                        desc = f"현재가: ${payload.get('price'):.2f} | RSI: {payload.get('rsi')}\n\n💡 {payload.get('ai_report', '')}"
+                        desc = (
+                            f"현재가: ${payload.get('price'):.2f} | RSI: {payload.get('rsi')}\n\n"
+                            f"💡 {payload.get('ai_report', '')}"
+                        )
                         await webhook.send_alert(
                             title=title, description=desc, color=color
                         )
@@ -1066,7 +1129,8 @@ async def process_ticker_pulse(ticker_symbol: str):
                     print(f"⚠️ DB Push Error (Realtime Signal): {db_err}")
             else:
                 print(
-                    f"⚠️ Supabase credentials missing (Pulse Engine). Pulse simulated for {ticker_symbol}"
+                    f"⚠️ Supabase credentials missing (Pulse Engine). "
+                    f"Pulse simulated for {ticker_symbol}"
                 )
     except Exception as e:
         print(f"❌ Pulse Error for {ticker_symbol}: {e}")
