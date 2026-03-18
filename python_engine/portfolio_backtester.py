@@ -39,7 +39,13 @@ class DNAValidator:
         return df
 
     def calculate_dna_score(
-        self, buy_price, current_price, target_price, stop_price, days_held, efficiency_ratio=1.0
+        self,
+        buy_price,
+        current_price,
+        target_price,
+        stop_price,
+        days_held,
+        efficiency_ratio=1.0,
     ):
         """JS useDNACalculator.ts와 동일한 비선형 스코어링 및 동적 감가 로직"""
         if current_price >= target_price:
@@ -65,27 +71,49 @@ class DNAValidator:
         final_score = max(0, min(100, base_score - time_penalty))
         return final_score
 
-    def simulate_ticker(self, ticker, data):
-        """단일 종목에 대해 DNA 전략 시뮬레이션"""
-        df = pd.DataFrame(data).dropna()
+    def preprocess_data(self, data):
+        """WFA 성능 최적화를 위한 1회성 보조지표 일괄 계산 시스템 (Pre-processing)"""
+        print("⚙️ 데이터 전처리 및 보조지표 계산 중 (Pre-processing)...")
+        preprocessed = {}
+        for ticker in self.tickers:
+            try:
+                if isinstance(data.columns, pd.MultiIndex):
+                    ticker_data = data.xs(ticker, axis=1, level=1)
+                else:
+                    ticker_data = data
+
+                df = pd.DataFrame(ticker_data).dropna()
+                if len(df) < 20:
+                    continue
+
+                # 1. ATR5
+                df["ATR5"] = ta.volatility.AverageTrueRange(
+                    high=df["High"], low=df["Low"], close=df["Close"], window=5
+                ).average_true_range()
+
+                # 2. 보조 지표 계산
+                df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
+                adx_obj = ta.trend.ADXIndicator(
+                    df["High"], df["Low"], df["Close"], window=14
+                )
+                df["ADX"] = adx_obj.adx()
+                df["DI_plus"] = adx_obj.adx_pos()
+                df["DI_minus"] = adx_obj.adx_neg()
+
+                # 3. 상대 거래량 (RVOL)
+                df["Vol_Avg"] = df["Volume"].shift(1).rolling(window=20).mean()
+                df["RVOL"] = df["Volume"] / (df["Vol_Avg"] + 1e-9)
+
+                preprocessed[ticker] = df.dropna()
+            except Exception as e:
+                print(f"⚠️ {ticker} 보조지표 계산 에러: {e}")
+        return preprocessed
+
+    def simulate_ticker(self, ticker, preprocessed_df):
+        """보조지표가 이미 계산된 단일 종목에 대해 DNA 전략 시뮬레이션 (초고속 연산)"""
+        df = preprocessed_df
         if len(df) < 20:
             return None
-
-        # 1. ATR5 계산 (백엔드 로직 동일)
-        df["ATR5"] = ta.volatility.AverageTrueRange(
-            high=df["High"], low=df["Low"], close=df["Close"], window=5
-        ).average_true_range()
-
-        # 2. 보조 지표 계산 (고도화된 진입 시그널용)
-        df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
-        adx_obj = ta.trend.ADXIndicator(df["High"], df["Low"], df["Close"], window=14)
-        df["ADX"] = adx_obj.adx()
-        df["DI_plus"] = adx_obj.adx_pos()
-        df["DI_minus"] = adx_obj.adx_neg()
-
-        # 상대 거래량 (RVOL)
-        df["Vol_Avg"] = df["Volume"].shift(1).rolling(window=20).mean()
-        df["RVOL"] = df["Volume"] / (df["Vol_Avg"] + 1e-9)
 
         # 3. 시뮬레이션 변수
         trades = []
@@ -133,34 +161,42 @@ class DNAValidator:
                 entry_idx = df.index.get_loc(entry_date)
                 # 실제 거래일(Trading Days) 기준 days_held
                 days_held = i - entry_idx
-                
+
                 # 1. ER 계산 및 변동성(Volatility) 연산
                 if days_held >= 1:
-                    prices = df["Close"].iloc[entry_idx:i+1].values
+                    prices = df["Close"].iloc[entry_idx : i + 1].values
                     net_change = abs(prices[-1] - prices[0])
                     price_diffs = np.diff(prices)
                     sum_vol = np.sum(np.abs(price_diffs))
                     er = net_change / sum_vol if sum_vol > 0 else 1.0
-                    
+
                     # JS volatilityStdDev 로직 대응
-                    vol_std_dev = np.sqrt(np.mean(price_diffs**2)) if len(price_diffs) > 0 else entry_price * 0.05
+                    vol_std_dev = (
+                        np.sqrt(np.mean(price_diffs**2))
+                        if len(price_diffs) > 0
+                        else entry_price * 0.05
+                    )
                 else:
                     er = 1.0
                     vol_std_dev = entry_price * 0.05
-                
+
                 # 2. 고도화된 스탑가 타이트닝 연산
-                high_so_far = df["High"].iloc[entry_idx:i+1].max()
-                effective_atr = current_atr if (current_atr > 0 and not np.isnan(current_atr)) else entry_price * 0.20
-                
+                high_so_far = df["High"].iloc[entry_idx : i + 1].max()
+                effective_atr = (
+                    current_atr
+                    if (current_atr > 0 and not np.isnan(current_atr))
+                    else entry_price * 0.20
+                )
+
                 # Base multiplier tightening
                 multiplier_base = 2.0
                 if days_held > 5:
                     multiplier_base = max(1.0, 2.0 - ((days_held - 5) * 0.1))
-                
+
                 # Volatility Factor 반영
                 volatility_factor = min(1.0, vol_std_dev / (entry_price * 0.05))
                 dynamic_multiplier = multiplier_base + volatility_factor
-                
+
                 trailing_stop = high_so_far - (effective_atr * dynamic_multiplier)
                 initial_stop = entry_price - (effective_atr * 1.5)
                 stop_price = max(initial_stop, trailing_stop, entry_price * 0.5)
@@ -221,23 +257,12 @@ class DNAValidator:
         return trades
 
     def run(self):
-        data = self.fetch_data()
+        raw_data = self.fetch_data()
+        precalculated_catalog = self.preprocess_data(raw_data)
         all_trades = []
 
-        # yfinance multi-index 처리
-        if isinstance(data.columns, pd.MultiIndex):
-            pass
-        else:
-            # 단일 종목일 경우 처리
-            pass
-
-        for ticker in self.tickers:
+        for ticker, ticker_data in precalculated_catalog.items():
             try:
-                if isinstance(data.columns, pd.MultiIndex):
-                    ticker_data = data.xs(ticker, axis=1, level=1)
-                else:
-                    ticker_data = data
-
                 trades = self.simulate_ticker(ticker, ticker_data)
                 if trades:
                     all_trades.extend(trades)
@@ -295,13 +320,18 @@ class DNAValidator:
         print("\n" + "=" * 60)
         print("  🔬 Walk-Forward Analysis (WFA) 시작")
         print("=" * 60 + "\n")
-        
-        data = self.fetch_data()
-        if data.empty:
+
+        raw_data = self.fetch_data()
+        if raw_data.empty:
             print("데이터 다운로드 실패")
             return
 
-        dates = data.index.unique().sort_values()
+        precalculated_catalog = self.preprocess_data(raw_data)
+        if not precalculated_catalog:
+            print("보조지표 계산 데이터 없음")
+            return
+
+        dates = raw_data.index.unique().sort_values()
         if len(dates) == 0:
             return
 
@@ -316,22 +346,25 @@ class DNAValidator:
         lambda_grid = [1.5, 3.0]
 
         total_oos_trades = []
-        
+
         while True:
             train_end = current_train_start + pd.DateOffset(months=train_months)
             test_end = train_end + pd.DateOffset(months=test_months)
-            
+
             if test_end > end_date:
                 # 마지막 구간 남은 기간 처리
                 break
-                
-            print(f"🔄 창(Window): Train[{current_train_start.date()} ~ {train_end.date()}] | Test[{train_end.date()} ~ {test_end.date()}]")
 
-            train_data = data.loc[current_train_start:train_end]
-            test_data = data.loc[train_end:test_end]
+            print(
+                f"🔄 창(Window): Train[{current_train_start.date()} ~ {train_end.date()}] | Test[{train_end.date()} ~ {test_end.date()}]"
+            )
 
             best_pf = 0
-            best_params = {"gamma": self.gamma, "delta": self.delta, "lambda_val": self.lambda_val}
+            best_params = {
+                "gamma": self.gamma,
+                "delta": self.delta,
+                "lambda_val": self.lambda_val,
+            }
 
             # IN-SAMPLE TRAINING Loop
             for g in gamma_grid:
@@ -340,25 +373,26 @@ class DNAValidator:
                         self.gamma = g
                         self.delta = d
                         self.lambda_val = l
-                        
+
                         is_trades = []
-                        for ticker in self.tickers:
+                        for ticker, ticker_data in precalculated_catalog.items():
                             try:
-                                if isinstance(train_data.columns, pd.MultiIndex):
-                                    ticker_data = train_data.xs(ticker, axis=1, level=1)
-                                else:
-                                    ticker_data = train_data
-                                    
-                                t = self.simulate_ticker(ticker, ticker_data)
-                                if t: is_trades.extend(t)
-                            except: pass
+                                train_slice = ticker_data.loc[
+                                    current_train_start:train_end
+                                ]
+                                if not train_slice.empty:
+                                    t = self.simulate_ticker(ticker, train_slice)
+                                    if t:
+                                        is_trades.extend(t)
+                            except:
+                                pass
 
                         if is_trades:
                             df_is = pd.DataFrame(is_trades)
-                            sum_win = df_is[df_is["result"]=="WIN"]["pnl"].sum()
-                            sum_loss = df_is[df_is["result"]=="LOSS"]["pnl"].sum()
+                            sum_win = df_is[df_is["result"] == "WIN"]["pnl"].sum()
+                            sum_loss = df_is[df_is["result"] == "LOSS"]["pnl"].sum()
                             pf = abs(sum_win / sum_loss) if sum_loss != 0 else sum_win
-                            
+
                             if pf > best_pf:
                                 best_pf = pf
                                 best_params = {"gamma": g, "delta": d, "lambda_val": l}
@@ -369,32 +403,31 @@ class DNAValidator:
             self.gamma = best_params["gamma"]
             self.delta = best_params["delta"]
             self.lambda_val = best_params["lambda_val"]
-            
+
             oos_trades = []
-            for ticker in self.tickers:
+            for ticker, ticker_data in precalculated_catalog.items():
                 try:
-                    if isinstance(test_data.columns, pd.MultiIndex):
-                        ticker_data = test_data.xs(ticker, axis=1, level=1)
-                    else:
-                        ticker_data = test_data
-                    t = self.simulate_ticker(ticker, ticker_data)
-                    if t: oos_trades.extend(t)
-                except: pass
+                    test_slice = ticker_data.loc[train_end:test_end]
+                    if not test_slice.empty:
+                        t = self.simulate_ticker(ticker, test_slice)
+                        if t:
+                            oos_trades.extend(t)
+                except:
+                    pass
 
             if oos_trades:
                 df_oos = pd.DataFrame(oos_trades)
-                wr = len(df_oos[df_oos["result"]=="WIN"]) / len(df_oos) * 100
+                wr = len(df_oos[df_oos["result"] == "WIN"]) / len(df_oos) * 100
                 total_oos_trades.extend(oos_trades)
                 print(f"   ✓ Test 검증 결과: 총 {len(df_oos)} 거래, 승률 {wr:.2f}%")
             else:
                 print(f"   ✓ Test 검증 결과: 거래 발생 안 함")
-            
+
             current_train_start += pd.DateOffset(months=test_months)
-            
+
         print("\n" + "=" * 60)
         print("  🏆 누적 OOS (Out-of-Sample) 종합 백테스트 리포트")
         return self.report(total_oos_trades)
-
 
 
 if __name__ == "__main__":
@@ -423,6 +456,6 @@ if __name__ == "__main__":
     )
     print("▶ 일반 백테스트 실행")
     validator.run()
-    
+
     print("\n▶ Walk-Forward Analysis (WFA) 실행")
     validator.walk_forward_optimization(train_months=6, test_months=2)
