@@ -77,17 +77,36 @@ export async function addToWatchlist(
       status,
   };
   
-  if (buyPrice !== undefined) payload.buy_price = buyPrice;
-  if (targetProfit !== undefined) payload.target_profit = targetProfit;
-  if (stopLoss !== undefined) payload.stop_loss = stopLoss;
-  if (initialDnaScore !== undefined) payload.initial_dna_score = initialDnaScore;
+  if (buyPrice !== undefined && !isNaN(buyPrice)) payload.buy_price = buyPrice;
+  if (targetProfit !== undefined && !isNaN(targetProfit)) payload.target_profit = targetProfit;
+  if (stopLoss !== undefined && !isNaN(stopLoss)) payload.stop_loss = stopLoss;
+  if (initialDnaScore !== undefined && !isNaN(initialDnaScore)) payload.initial_dna_score = initialDnaScore;
 
   const { error } = await supabase
     .from('watchlist')
     .upsert(payload);
 
   if (error) {
-    console.error('Error adding to watchlist:', error);
+    // 🆕 Graceful Degradation: If 400 error (column missing/NaN), retry without initial_dna_score
+    // 42P01: undefined_table, 42703: undefined_column, PGRST204: column not found
+    const isSchemaError = error.code === '42703' || error.code === 'PGRST204' || error.message?.includes('column');
+    if (isSchemaError) {
+      console.warn('Initial DNA Score column may be missing. Retrying without it...', error);
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.initial_dna_score;
+      
+      const { error: retryError } = await supabase
+        .from('watchlist')
+        .upsert(fallbackPayload);
+      
+      if (retryError) {
+        console.error('Final attempt to add to watchlist failed:', retryError);
+        throw retryError;
+      }
+    } else {
+      console.error('Error adding to watchlist:', error);
+      throw error;
+    }
   }
 }
 

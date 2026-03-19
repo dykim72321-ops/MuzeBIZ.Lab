@@ -1,9 +1,11 @@
-name: Finviz Hunter Bot (Python)
+name: 🤖 MuzeStock Mean Reversion Hunter
 
 on:
   schedule:
-    # 매일 오전 8시(KST) = UTC 23:00 (전날)
-    - cron: "0 23 * * *"
+    # [1] 프리마켓 스캔: KST 08:00 (UTC 23:00, 전날)
+    - cron: "0 23 * * 1-5"
+    # [2] 장 마감 직전 스캔: KST 15:30 (UTC 06:30)
+    - cron: "30 6 * * 1-5"
   workflow_dispatch: # 수동 실행 허용
 
 jobs:
@@ -15,31 +17,59 @@ jobs:
         working-directory: python_engine
 
     steps:
-      - name: Checkout repository
+      - name: 📦 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.9
+      - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.11"
           cache: "pip"
           cache-dependency-path: python_engine/requirements.txt
 
-      - name: Install dependencies
+      - name: 📥 Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Run Unified Hunter
+      - name: 🔭 Run Mean Reversion Hunter
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           VITE_FINNHUB_API_KEY: ${{ secrets.VITE_FINNHUB_API_KEY }}
-
         run: python scraper.py
 
-      - name: Summary
-        run: echo "🎯 Unified Python Hunter Bot 완료! 데이터 수집 및 AI 분석이 성공적으로 저장되었습니다."
+      - name: ✅ Notify completion
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python - <<'EOF'
+          import os, urllib.request, json
+          url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+          if not url:
+              print("⚠️ DISCORD_WEBHOOK_URL not set. Skipping CI notification.")
+              exit(0)
+          status = os.environ.get("JOB_STATUS", "unknown")
+          run_url = os.environ.get("RUN_URL", "")
+          color = 0x2ECC71 if status == "success" else 0xFF4444
+          icon = "✅" if status == "success" else "❌"
+          payload = {
+              "embeds": [{
+                  "title": f"{icon} MuzeStock Hunter — {status.upper()}",
+                  "description": f"Mean Reversion 자동 스캔이 완료되었습니다.\n[▶ 실행 로그 보기]({run_url})",
+                  "color": color,
+                  "footer": {"text": "MuzeStock.Lab GitHub Actions"},
+              }]
+          }
+          data = json.dumps(payload).encode("utf-8")
+          req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+          urllib.request.urlopen(req)
+          print(f"📨 Discord CI 알림 전송 완료 ({status})")
+          EOF

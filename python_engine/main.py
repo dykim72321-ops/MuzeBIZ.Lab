@@ -757,37 +757,32 @@ async def validate_candidates(
             if df.empty or len(df) < 20:
                 continue
 
-            # 1. RSI 계산
-            df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
+            # 1. RSI(2) 계산
+            df["RSI2"] = ta.momentum.RSIIndicator(df["Close"], window=2).rsi()
 
-            # 2. ADX & DI 계산
-            adx_obj = ta.trend.ADXIndicator(
-                df["High"], df["Low"], df["Close"], window=14
-            )
-            df["ADX"] = adx_obj.adx()
-            df["DI_plus"] = adx_obj.adx_pos()
-            df["DI_minus"] = adx_obj.adx_neg()
+            # 2. 이격도 (MA5) 계산
+            df["MA5"] = df["Close"].rolling(window=5).mean()
+            df["Deviation"] = (df["Close"] - df["MA5"]) / df["MA5"]
 
             # 3. RVOL (상대 거래량, 당일 제외 20일 평균 기준)
             df["Vol_Avg"] = df["Volume"].shift(1).rolling(window=20).mean()
             df["RVOL"] = df["Volume"] / (df["Vol_Avg"] + 1e-9)
 
             latest = df.iloc[-1]
-            prev = df.iloc[-2]
 
-            # 퀀트 검증 필터 (Backtester 입증 수치)
-            # 1. RSI 40 이상 (회복세)
-            # 2. ADX 상승 (추세 강화) & DI+ > DI-
-            # 3. RVOL > 1.5 (거래량 폭발)
-            cond1 = latest["RSI"] > 40
-            cond2 = (
-                latest["ADX"] > prev["ADX"] and latest["DI_plus"] > latest["DI_minus"]
-            )
-            cond3 = latest["RVOL"] > 1.5
+            # 퀀트 검증 필터 (Mean Reversion 최적화 수치)
+            # 1. RSI2 < 10 (극심한 과매도)
+            # 2. Deviation < -7% (이격도 낙폭과대)
+            # 3. RVOL > 3.0 (투매 또는 바닥 수급 확인)
+            cond1 = latest["RSI2"] < 10
+            cond2 = latest["Deviation"] < -0.07
+            cond3 = latest["RVOL"] > 3.0
 
             if cond1 and cond2 and cond3:
                 valid_tickers.append(ticker.upper())
-                print(f"🎯 [VALIDATED] {ticker} 통과 (RVOL: {latest['RVOL']:.2f})")
+                print(
+                    f"🎯 [VALIDATED] {ticker} 통과 (RSI2: {latest['RSI2']:.1f}, Dev: {latest['Deviation']:.2%})"
+                )
 
         except Exception as e:
             print(f"⚠️ {ticker} 검증 중 오류: {e}")

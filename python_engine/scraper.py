@@ -4,6 +4,7 @@ from playwright_stealth import Stealth
 from datetime import datetime
 from db_manager import DBManager
 from news_manager import NewsManager
+from webhook_manager import WebhookManager
 import yfinance as yf
 import ta
 import pandas as pd
@@ -20,6 +21,7 @@ class FinvizHunter:
     def __init__(self):
         self.db = DBManager()
         self.news = NewsManager()
+        self.webhook = WebhookManager()
         self.user_agent = (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -130,28 +132,28 @@ class FinvizHunter:
                     volumes.iloc[-20:-5].mean() + 1e-9
                 )
 
-                # 2. RSI (14일)
-                rsi = ta.momentum.RSIIndicator(close_prices).rsi().iloc[-1]
+                # 2. RSI(2) - 단기 과매도 지표
+                rsi2 = ta.momentum.RSIIndicator(close_prices, window=2).rsi().iloc[-1]
 
-                # 3. 일간 변동성 (최근 20일)
-                returns = close_prices.pct_change().dropna()
-                volatility = returns.tail(20).std()
+                # 3. 이격도 (MA5 Deviation)
+                ma5 = close_prices.rolling(window=5).mean().iloc[-1]
+                deviation = (close_prices.iloc[-1] - ma5) / ma5
 
                 # 4. 가격 모멘텀 (20일)
                 momentum = (close_prices.iloc[-1] / close_prices.iloc[-20]) - 1
 
                 if (
                     not pd.isna(vol_change)
-                    and not pd.isna(rsi)
-                    and not pd.isna(volatility)
+                    and not pd.isna(rsi2)
+                    and not pd.isna(deviation)
                     and not pd.isna(momentum)
                 ):
                     data_records.append(
                         {
                             "ticker": ticker,
                             "vol_change": vol_change,
-                            "rsi": rsi,
-                            "volatility": volatility,
+                            "rsi2": rsi2,
+                            "deviation": deviation,
                             "momentum": momentum,
                         }
                     )
@@ -163,7 +165,7 @@ class FinvizHunter:
             return []
 
         df = pd.DataFrame(data_records)
-        features = df[["vol_change", "rsi", "volatility", "momentum"]].values
+        features = df[["vol_change", "rsi2", "deviation", "momentum"]].values
 
         # Isolation Forest 모델 적용 (가장 이질적인 5% 추출)
         model = IsolationForest(contamination=0.05, random_state=42)
@@ -181,7 +183,7 @@ class FinvizHunter:
                 {
                     "ticker": row["ticker"],
                     "sector": "Anomaly (AI Detected)",
-                    "reason": f"Vol Change: {row['vol_change']:.2f}x, RSI: {row['rsi']:.1f}",
+                "reason": f"Vol Change: {row['vol_change']:.2f}x, RSI2: {row['rsi2']:.1f}, Dev: {row['deviation']:.1%}",
                 }
             )
 
@@ -257,6 +259,11 @@ class FinvizHunter:
             f"✅ Stage 1 Complete. Total Unique Candidates: {len(combined_candidates)}. Starting Deep Analysis..."
         )
 
+        # 일일 요약용 카운터
+        total_discovered = len(combined_candidates)
+        total_validated = 0
+        total_super_oversold = 0
+
         for stock in combined_candidates:
             ticker_symbol = stock["ticker"]
             print(f"\n🔍 Analyzing {ticker_symbol} [{stock.get('reason', '')}]...")
@@ -280,7 +287,18 @@ class FinvizHunter:
                 )
                 volume = int(df["Volume"].iloc[-1])
 
-                rsi = ta.momentum.RSIIndicator(close=df["Close"]).rsi().iloc[-1]
+                rsi2 = ta.momentum.RSIIndicator(close=df["Close"], window=2).rsi().iloc[-1]
+                ma5 = df["Close"].rolling(window=5).mean().iloc[-1]
+                deviation = (price - ma5) / ma5
+                rvol = volume / (df["Volume"].tail(20).mean() + 1e-9)
+
+                # ATR(5) — 목표가 및 손절가 계산용
+                atr5 = ta.volatility.AverageTrueRange(
+                    high=df["High"], low=df["Low"], close=df["Close"], window=5
+                ).average_true_range().iloc[-1]
+                target_price = price + (atr5 * 5.0)
+                stop_price = price - (atr5 * 1.5)
+
             except Exception as e:
                 print(f"⚠️ Failed to get technicals for {ticker_symbol}: {e}")
                 continue
@@ -288,23 +306,19 @@ class FinvizHunter:
             # 2. Fetch News (Optional, can be used for sentiment later)
             self.news.fetch_company_news(ticker_symbol)
 
-            # 3. Mathematical Quant Analysis (Replacing AI)
+            # 3. Mathematical Quant Analysis
             ma20 = df["Close"].rolling(window=20).mean().iloc[-1]
             ma20_dist = ((price / ma20) - 1) * 100 if not pd.isna(ma20) else 0.0
 
-            # Simple historical win rate simulation (if similar RSI and MA dist occurred)
-            # Find past instances in the 3mo data
             hist_df = df.copy()
-            hist_df["MA20"] = hist_df["Close"].rolling(20).mean()
-            hist_df["MA20_Dist"] = (hist_df["Close"] / hist_df["MA20"] - 1) * 100
-            hist_df["RSI"] = ta.momentum.RSIIndicator(close=hist_df["Close"]).rsi()
+            hist_df["MA5"] = hist_df["Close"].rolling(5).mean()
+            hist_df["Deviation"] = (hist_df["Close"] / hist_df["MA5"] - 1) * 100
+            hist_df["RSI2"] = ta.momentum.RSIIndicator(close=hist_df["Close"], window=2).rsi()
 
-            # Define "similar" conditions: RSI within +/- 5, MA20_Dist within +/- 2%
+            # Define "similar" conditions for Mean Reversion: RSI2 < 15, Deviation < -5%
             similar_cases = hist_df[
-                (hist_df["RSI"] >= rsi - 5)
-                & (hist_df["RSI"] <= rsi + 5)
-                & (hist_df["MA20_Dist"] >= ma20_dist - 2)
-                & (hist_df["MA20_Dist"] <= ma20_dist + 2)
+                (hist_df["RSI2"] <= 15)
+                & (hist_df["Deviation"] <= -5)
             ]
 
             # Calculate win rate after 5 days
@@ -323,35 +337,32 @@ class FinvizHunter:
 
             quant_data = {
                 "math_mode": True,
-                "ma20_distance_pct": round(ma20_dist, 2),
-                "rsi_14": round(rsi, 2),
+                "deviation_pct": round(deviation * 100, 2),
+                "rsi_2": round(rsi2, 2),
                 "historical_win_rate_pct": round(win_rate, 1),
                 "similar_historical_cases": valid_cases,
                 "volatility_20d_pct": round(
                     df["Close"].pct_change().tail(20).std() * 100, 2
                 ),
-                "volume_surge_multiplier": round(
-                    volume / (df["Volume"].tail(20).mean() + 1), 2
-                ),
+                "volume_surge_multiplier": round(rvol, 2),
             }
 
-            # 4. Auto Backtest (1년 RSI 전략)
-
+            # 4. Auto Backtest
             backtest_result = await asyncio.to_thread(
                 run_backtest, ticker_symbol, period="1y"
             )
             backtest_return = None
             if "error" not in backtest_result:
                 backtest_return = backtest_result.get("total_return_pct", 0)
-                print(f"📈 Backtest: {ticker_symbol} → {backtest_return:.2f}% (1Y RSI)")
+                print(f"📈 Backtest: {ticker_symbol} → {backtest_return:.2f}% (1Y MR)")
             else:
                 print(
                     f"⚠️ Backtest skipped for {ticker_symbol}: {backtest_result.get('error')}"
                 )
 
-            # 5. Save to DB (Save as JSON string for frontend to parse)
-
+            # 5. Save to DB
             ai_summary_text = json.dumps(quant_data)
+            dna_score = int(max(0, 100 - rsi2 + (deviation * 100)))
 
             db_data = {
                 "ticker": ticker_symbol,
@@ -359,20 +370,47 @@ class FinvizHunter:
                 "price": round(price, 2),
                 "volume": str(volume),
                 "change": f"{change:.2f}%",
-                "dna_score": (
-                    int(rsi) if not pd.isna(rsi) else 50
-                ),  # Map RSI to DNA for quant mode
+                "dna_score": dna_score,
                 "ai_summary": ai_summary_text,
                 "backtest_return": backtest_return,
                 "updated_at": datetime.now().isoformat(),
             }
 
             self.db.upsert_discovery(db_data)
+            total_validated += 1
             print(
-                f"💾 Saved {ticker_symbol} (DNA: {db_data['dna_score']}, BT: {backtest_return}%)"
+                f"💾 Saved {ticker_symbol} (DNA: {dna_score}, RSI2: {rsi2:.1f}, RVOL: {rvol:.1f}x)"
             )
 
+            # 6. ─── Discord 알림 발송 ───────────────────────────────────────────
+            # Super Oversold: RSI2 < 10 AND RVOL > 3.0 → 🚨 빨간 긴급 알림
+            is_super = (rsi2 < 10) and (rvol > 3.0)
+            if is_super:
+                total_super_oversold += 1
+
+            # DNA Score 50 이상 종목만 알림 (노이즈 필터링)
+            if dna_score >= 50 or is_super:
+                await self.webhook.send_discovery_alert(
+                    ticker=ticker_symbol,
+                    price=float(price),
+                    rsi2=float(rsi2),
+                    deviation_pct=float(deviation * 100),
+                    rvol=float(rvol),
+                    target_price=float(target_price),
+                    stop_price=float(stop_price),
+                    atr=float(atr5),
+                    is_super_oversold=is_super,
+                )
+
             await asyncio.sleep(1)  # Be polite
+
+        # ─── 일일 스캔 요약 알림 ─────────────────────────────────────────────
+        await self.webhook.send_daily_summary(
+            discovered=total_discovered,
+            validated=total_validated,
+            super_oversold=total_super_oversold,
+        )
+        print(f"\n🏁 스캔 완료: 발굴 {total_discovered} → 검증 {total_validated} → Super {total_super_oversold}")
 
 
 class SearchAggregator:

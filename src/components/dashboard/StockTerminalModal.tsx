@@ -32,7 +32,6 @@ interface StockTerminalModalProps {
         change?: string;
         kellyWeight?: number;
         efficiencyRatio?: number;
-        relativeStrength?: number;
         quantData?: {
             math_mode: boolean;
             ma20_distance_pct: number;
@@ -77,6 +76,10 @@ export const StockTerminalModal = ({
                     .order('created_at', { ascending: false })
                     .limit(1)
                     .maybeSingle();
+
+                if (error) {
+                    console.error("Supabase fetch error for analysis:", error);
+                }
 
                 if (cacheData && cacheData.analysis && isMounted.current) {
                     const analysis = cacheData.analysis;
@@ -172,15 +175,15 @@ export const StockTerminalModal = ({
                                         </span>
                                     </div>
                                     <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tighter flex items-center gap-3">
-                                        {data.ticker}
+                                        {liveData.ticker}
                                         <Fingerprint className="w-6 h-6 md:w-8 md:h-8 text-indigo-400 opacity-50" />
                                     </h1>
                                     <p className="text-slate-400 text-[10px] md:text-sm font-medium flex items-center gap-2 mt-1 md:mt-2">
                                         <span className={clsx(
                                             "w-2.5 h-2.5 rounded-full shadow-[0_0_8px_rgba(0,0,0,0.5)]",
-                                            data.dnaScore >= 70 ? "bg-emerald-500 shadow-emerald-500/50" : data.dnaScore >= 50 ? "bg-amber-500 shadow-amber-500/50" : "bg-rose-500 shadow-rose-500/50"
+                                            liveData.dnaScore >= 70 ? "bg-emerald-500 shadow-emerald-500/50" : liveData.dnaScore >= 50 ? "bg-amber-500 shadow-amber-500/50" : "bg-rose-500 shadow-rose-500/50"
                                         )} />
-                                        AI 분석 신뢰도: <span className="text-white font-bold">{data.dnaScore}%</span>
+                                        AI 분석 신뢰도: <span className="text-white font-bold">{liveData.dnaScore}%</span>
                                     </p>
                                 </div>
                                 <button
@@ -203,12 +206,12 @@ export const StockTerminalModal = ({
                                               AI가 분석한 현재 종목의 종합 상승 잠재력입니다. 기술 지표, 거래량 패턴 및 시장 모멘텀을 결합한 100점 만점의 신뢰 지수입니다.
                                             </div>
                                         </span>
-                                        <span className="text-4xl md:text-5xl font-black text-white">{data.dnaScore}</span>
+                                        <span className="text-4xl md:text-5xl font-black text-white">{liveData.dnaScore}</span>
                                     </div>
                                     <div className="w-full h-8 md:h-10 flex gap-1 relative">
                                         {[...Array(20)].map((_, i) => {
                                             const threshold = (i + 1) * 5;
-                                            const isActive = data.dnaScore >= threshold;
+                                            const isActive = liveData.dnaScore >= threshold;
                                             return (
                                                 <motion.div
                                                     key={i}
@@ -217,7 +220,7 @@ export const StockTerminalModal = ({
                                                         opacity: isActive ? 1 : 0.1, 
                                                         scaleY: isActive ? 1 : 0.8,
                                                         backgroundColor: isActive 
-                                                            ? (data.dnaScore >= 70 ? '#10b981' : data.dnaScore >= 50 ? '#f59e0b' : '#f43f5e') 
+                                                            ? (liveData.dnaScore >= 70 ? '#10b981' : liveData.dnaScore >= 50 ? '#f59e0b' : '#f43f5e') 
                                                             : 'rgba(255,255,255,0.1)'
                                                     }}
                                                     transition={{ delay: i * 0.03, duration: 0.4 }}
@@ -249,29 +252,12 @@ export const StockTerminalModal = ({
                                             <HelpCircle className="w-2.5 h-2.5 opacity-30" />
                                         </p>
                                         <div className="flex items-end gap-1 md:gap-2 text-2xl md:text-3xl font-black text-emerald-400">
-                                            {data.efficiencyRatio || '0.00'}
+                                            {liveData.efficiencyRatio || '0.00'}
                                             <Activity className="w-4 h-4 md:w-5 md:h-5 mb-0.5 md:mb-1" />
                                         </div>
                                         <div className="absolute bottom-full left-0 mb-3 w-72 bg-slate-900/95 backdrop-blur-xl text-white text-[11px] p-4 rounded-xl shadow-2xl opacity-0 group-hover/er:opacity-100 transition-all z-50 pointer-events-none border border-white/10 leading-relaxed font-normal normal-case tracking-normal">
                                             <span className="text-emerald-400 font-bold block mb-1 uppercase tracking-widest text-[10px]">Trend Purity (ER)</span>
                                             추세의 '순도'를 측정합니다. 1.0에 가까울수록 가격 노이즈가 적고 방향성이 명확하며 강력한 추세임을 의미합니다.
-                                        </div>
-                                    </div>
-                                    <div className="bg-white/5 p-3 md:p-4 rounded-2xl md:rounded-3xl border border-white/5 hover:bg-white/10 transition-colors group/rs relative cursor-help">
-                                        <p className="text-[9px] md:text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 flex items-center gap-1">
-                                            Rel. Strength (vs IWM)
-                                            <HelpCircle className="w-2.5 h-2.5 opacity-30" />
-                                        </p>
-                                        <div className={clsx(
-                                            "flex items-end gap-1 md:gap-2 text-2xl md:text-3xl font-black",
-                                            (data.relativeStrength || 0) >= 0 ? "text-indigo-400" : "text-rose-400"
-                                        )}>
-                                            {(data.relativeStrength || 0).toFixed(1)}%
-                                            <TrendingUp className="w-4 h-4 md:w-5 md:h-5 mb-0.5 md:mb-1" />
-                                        </div>
-                                        <div className="absolute bottom-full right-0 mb-3 w-72 bg-slate-900/95 backdrop-blur-xl text-white text-[11px] p-4 rounded-xl shadow-2xl opacity-0 group-hover/rs:opacity-100 transition-all z-50 pointer-events-none border border-white/10 leading-relaxed font-normal normal-case tracking-normal">
-                                            <span className="text-indigo-400 font-bold block mb-1 uppercase tracking-widest text-[10px]">Market Relative Strength</span>
-                                            중소형주 벤치마크(IWM) 대비 성과입니다. 시장 평균보다 강한 수급이 유입되는 종목을 선별하는 전문 퀀트 지표입니다.
                                         </div>
                                     </div>
                                 </div>
@@ -290,7 +276,7 @@ export const StockTerminalModal = ({
                                     </p>
                                     <div className="flex items-center justify-between relative z-10">
                                         <span className="text-4xl font-black text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
-                                            {data.kellyWeight || 0}%
+                                            {liveData.kellyWeight || 0}%
                                         </span>
                                         <div className="text-right">
                                             <span className="text-[10px] text-indigo-300/80 font-bold block uppercase tracking-tighter">Safe Allocation</span>
@@ -314,26 +300,30 @@ export const StockTerminalModal = ({
                                 <div>
                                     <h3 className="text-[10px] md:text-xs font-black text-indigo-400 uppercase tracking-[0.2em] mb-3 md:mb-4 flex items-center gap-2">
                                         <Zap className="w-4 h-4 fill-indigo-400" />
-                                        {data.quantData ? "Quant Analysis Verdict" : "AI Intelligence Synthesis"}
+                                        {liveData.quantData ? "Quant Analysis Verdict" : "AI Intelligence Synthesis"}
                                     </h3>
-                                    {(!data.aiSummary || data.aiSummary.includes("해당 자산에 대한")) ? (
+                                    {(!liveData.aiSummary || liveData.aiSummary.includes("해당 자산에 대한") || liveData.aiSummary.includes("평가지가 존재하지")) ? (
                                         <div className="flex gap-4 mb-4">
-                                            {data.quantData && (
+                                            {liveData.quantData ? (
                                                 <>
                                                     <div className="bg-white/5 px-4 py-2 rounded-xl border border-white/10">
                                                         <p className="text-[9px] text-slate-500 font-bold uppercase mb-1">Win Rate</p>
-                                                        <p className="text-lg font-black text-emerald-400">{data.quantData.historical_win_rate_pct}%</p>
+                                                        <p className="text-lg font-black text-emerald-400">{liveData.quantData.historical_win_rate_pct}%</p>
                                                     </div>
                                                     <div className="bg-white/5 px-4 py-2 rounded-xl border border-white/10">
                                                         <p className="text-[9px] text-slate-500 font-bold uppercase mb-1">Sim. Cases</p>
-                                                        <p className="text-lg font-black text-indigo-400">{data.quantData.similar_historical_cases}</p>
+                                                        <p className="text-lg font-black text-indigo-400">{liveData.quantData.similar_historical_cases}</p>
                                                     </div>
                                                 </>
+                                            ) : (
+                                                <p className="text-sm text-slate-400 font-medium italic mb-4 mt-2 px-2">
+                                                    {liveData.aiSummary}
+                                                </p>
                                             )}
                                         </div>
                                     ) : (
                                         <p className="text-sm sm:text-base md:text-lg lg:text-xl text-slate-200 font-medium leading-relaxed tracking-tight">
-                                            {data.aiSummary}
+                                            {liveData.aiSummary}
                                         </p>
                                     )}
                                 </div>
@@ -343,11 +333,11 @@ export const StockTerminalModal = ({
                                     <div className="space-y-3 md:space-y-4">
                                         <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
                                             <TrendingUp className="w-3 h-3" />
-                                            {data.quantData ? '수치 기반 강세 지표' : '강세 요인 (Bullish)'}
+                                            {liveData.quantData ? '수치 기반 강세 지표' : '강세 요인 (Bullish)'}
                                         </h4>
                                         <ul className="space-y-3">
-                                            {data.bullPoints && data.bullPoints.length > 0 && data.bullPoints[0] !== "No details" ? (
-                                                data.bullPoints.map((point, i) => (
+                                            {liveData.bullPoints && liveData.bullPoints.length > 0 && liveData.bullPoints[0] !== "No details" && liveData.bullPoints[0] !== "모멘텀 지표 분석 중" ? (
+                                                liveData.bullPoints.map((point, i) => (
                                                     <li key={i} className="flex gap-2 text-slate-400 text-sm font-medium leading-snug">
                                                         <ChevronRight className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                                                         {point}
@@ -364,11 +354,11 @@ export const StockTerminalModal = ({
                                     <div className="space-y-4">
                                         <h4 className="text-[10px] font-black text-rose-400 uppercase tracking-widest flex items-center gap-2">
                                             <TrendingDown className="w-3 h-3" />
-                                            {data.quantData ? '수치 기반 약세/변동성 지표' : '약세 요인 (Bearish)'}
+                                            {liveData.quantData ? '수치 기반 약세/변동성 지표' : '약세 요인 (Bearish)'}
                                         </h4>
                                         <ul className="space-y-3">
-                                            {data.bearPoints && data.bearPoints.length > 0 && data.bearPoints[0] !== "No details" ? (
-                                                data.bearPoints.map((point, i) => (
+                                            {liveData.bearPoints && liveData.bearPoints.length > 0 && liveData.bearPoints[0] !== "No details" && liveData.bearPoints[0] !== "리스크 요인 스캔 중" ? (
+                                                liveData.bearPoints.map((point, i) => (
                                                     <li key={i} className="flex gap-2 text-slate-400 text-sm font-medium leading-snug">
                                                         <ChevronRight className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
                                                         {point}

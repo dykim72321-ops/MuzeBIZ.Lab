@@ -9,8 +9,23 @@ interface DNAConfig {
   atr5?: number;
   buyDate: string;
   history?: HistoricalDataPoint[];
-  benchmarkHistory?: HistoricalDataPoint[]; // 🆕 Russell 2000 (IWM)
+  benchmarkHistory?: HistoricalDataPoint[]; // Russell 2000 (IWM)
 }
+
+// 가격 데이터가 미로딩 상태일 때 반환하는 안전한 기본값
+const LOADING_DEFAULTS = {
+  dnaScore: 0,
+  targetPrice: 0,
+  stopPrice: 0,
+  timePenalty: 0,
+  daysHeld: 0,
+  effectiveATR: 0,
+  efficiencyRatio: 0,
+  kellyWeight: 0,
+  isTrailing: false,
+  action: 'HOLD' as 'HOLD' | 'TIME_STOP' | 'EXIT',
+  isLoading: true,
+};
 
 export function useDNACalculator({ 
   buyPrice, 
@@ -22,25 +37,16 @@ export function useDNACalculator({
   benchmarkHistory = []
 }: DNAConfig) {
   return useMemo(() => {
+    // ✅ 가격 데이터 미로딩 가드: price가 0이면 계산 불가 → 로딩 기본값 반환
+    if (!currentPrice || currentPrice <= 0 || !buyPrice || buyPrice <= 0) {
+      return LOADING_DEFAULTS;
+    }
+
     // 1. Efficiency Ratio (ER) 계산
     const historicalPrices = history.map(h => h.price);
     const efficiencyRatio = calculateEfficiencyRatio(historicalPrices);
-
-    // 2. Relative Strength (RS) 계산
-    let relativeStrength = 0;
-    if (history.length > 5 && benchmarkHistory.length > 5) {
-      const stockStart = history[0].price;
-      const stockEnd = currentPrice;
-      const stockReturn = (stockEnd / stockStart) - 1;
-
-      const benchStart = benchmarkHistory[0].price;
-      const benchEnd = benchmarkHistory[benchmarkHistory.length - 1].price;
-      const benchReturn = (benchEnd / benchStart) - 1;
-
-      relativeStrength = Number(((stockReturn - benchReturn) * 100).toFixed(2));
-    }
     
-    // 3. 변동성 StdDev 계산 (단순화: 가격 변동폭의 평균)
+    // 2. 변동성 StdDev 계산
     const volatilityStdDev = history.length > 1 
       ? Math.sqrt(history.reduce((acc, h, i, arr) => {
           if (i === 0) return 0;
@@ -48,8 +54,7 @@ export function useDNACalculator({
         }, 0) / history.length)
       : buyPrice * 0.05;
 
-    // 3. 시간 계산 (daysHeld를 먼저 계산하여 Time-based ATR Tightening에 전달)
-    // 주말(토, 일)을 제외한 실제 거래일(Trading Days) 기준
+    // 3. 보유 기간 계산 (거래일 기준, 주말 제외)
     const msPerDay = 1000 * 60 * 60 * 24;
     const now = new Date();
     const utcNow = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -61,18 +66,16 @@ export function useDNACalculator({
     while (currentUtc < utcNow) {
       currentUtc += msPerDay;
       const dayOfWeek = new Date(currentUtc).getUTCDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) { // 0: Sunday, 6: Saturday
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
         daysHeld++;
       }
     }
 
-    // 4. 고도화된 목표가/손절가 연산 (Chandelier Exit + Time-based Tightening)
-    // Efficiency Ratio(ER)와 Relative Strength(RS)를 반영한 동적 익절/손절 멀티플라이어 적용
+    // 4. 목표가 / 손절가 계산 (Chandelier Exit + Time-based Tightening)
     const { 
       targetPrice: T, 
       stopPrice: S, 
       effectiveATR, 
-      targetMultiplier,
       isTrailing 
     } = calculateDNATargets(
       buyPrice, 
@@ -80,60 +83,62 @@ export function useDNACalculator({
       currentHigh, 
       atr5,
       volatilityStdDev,
-      daysHeld,
-      efficiencyRatio,
-      relativeStrength > 0 // 주도주 여부 (RS 양수 기준)
+      daysHeld
     );
     
     const GAMMA = 0.8; 
     const DELTA = 1.5; 
     const LAMBDA = 2.0; 
 
-    // 5. 모멘텀 기반 동적 시간 감가 (Dynamic Momentum Decay)
-    // ER(Efficiency Ratio)에 따라 감가 가속/감속: 노이즈가 심할수록(ER 0) 1.5배 감가, 추세가 깔끔할수록(ER 1) 0.5배 감가
+    // 5. 모멘텀 기반 동적 시간 감가
     const decayMultiplier = Math.max(0.5, 1.5 - efficiencyRatio);
     let timePenalty = Math.min(60, daysHeld * LAMBDA * decayMultiplier);
 
-    // 🆕 "Winner's Grace" (승자의 여유): 
-    // 주가가 목표가의 80%를 넘어서거나 상회 중인 우량주(Winner)는 시간 페널티를 50% 감면하여 장기 보유 유도
+    // "Winner's Grace": 목표가 80% 이상 혹은 초과 시 시간 페널티 50% 감면
     if (currentPrice > T * 0.8) {
       timePenalty = timePenalty * 0.5;
     }
 
-    // 5. DNA 스코어 계산 (ER 가중치 적용)
+    let aggressiveTimePenalty = timePenalty;
+    if (daysHeld > 3) {
+      aggressiveTimePenalty += (daysHeld - 3) * 30;
+    }
+
+    // 6. DNA 스코어 계산
     let score = 50;
 
     if (currentPrice >= T) {
       score = 100; 
     } else if (currentPrice >= buyPrice) {
-      const progress = (currentPrice === buyPrice) ? 0 : (currentPrice - buyPrice) / (T - buyPrice);
-      // ER이 높을수록(추세가 깔끔할수록) 점수 가점
+      const denominator = T - buyPrice;
+      const progress = (currentPrice === buyPrice || denominator <= 0) ? 0 : (currentPrice - buyPrice) / denominator;
       const erBonus = efficiencyRatio * 10;
-      score = 50 + (50 * Math.pow(progress, GAMMA)) + erBonus - timePenalty;
+      score = 50 + (50 * Math.pow(progress, GAMMA)) + erBonus - aggressiveTimePenalty;
     } else {
-      const fall = (buyPrice - currentPrice) / (buyPrice - S);
+      const denominator = buyPrice - S;
+      const fall = (denominator <= 0) ? 1 : (buyPrice - currentPrice) / denominator;
       const clampedFall = Math.min(1, fall); 
-      // ER이 낮을수록(노이즈가 심할수록) 하락장에서 감점 가중
       const erPenalty = (1 - efficiencyRatio) * 15;
-      score = 50 - (50 * Math.pow(clampedFall, DELTA)) - erPenalty - timePenalty;
+      score = 50 - (50 * Math.pow(clampedFall, DELTA)) - erPenalty - aggressiveTimePenalty;
     }
 
     const finalScore = Math.max(0, Math.min(100, Math.round(score)));
 
-    // 6. Kelly Position Sizing (Quarter-Kelly) + Time Stop
-    // 손익비 R = (Target - Entry) / (Entry - Stop)
-    const riskRewardRatio = (T - buyPrice) / (buyPrice - S);
-    let kellyWeight = calculateKellyWeight(finalScore, riskRewardRatio);
+    // 7. Kelly Position Sizing (Quarter-Kelly) + Time Stop
+    const riskDenominator = buyPrice - S;
+    const riskRewardRatio = riskDenominator <= 0 ? 0.1 : (T - buyPrice) / riskDenominator;
+    const kellyResult = calculateKellyWeight(finalScore, riskRewardRatio);
+    // ✅ Kelly 상한선: 실제 투자에서 100% 이상은 불가능하므로 1.0으로 클램프
+    let kellyWeight = Math.min(1.0, Math.max(0, kellyResult.weight));
 
-    // Time Stop Logic: 보유 일수가 길어지면 강제로 비중 축소 경고
     let actionFlag: 'HOLD' | 'TIME_STOP' | 'EXIT' = 'HOLD';
-    if (daysHeld > 14) {
-      kellyWeight = Math.max(0, kellyWeight - ((daysHeld - 14) * 2)); // 14일 초과 시 매일 2%p 타격
-      if (kellyWeight <= 0) {
-        actionFlag = 'EXIT';
-      } else {
-        actionFlag = 'TIME_STOP';
-      }
+    
+    if (kellyResult.rawKelly < 0 || isNaN(kellyResult.rawKelly)) {
+      kellyWeight = 0;
+      actionFlag = 'EXIT';
+    } else if (daysHeld > 3) {
+      kellyWeight = 0; 
+      actionFlag = 'EXIT';
     } else if (kellyWeight <= 0) {
       actionFlag = 'EXIT';
     }
@@ -146,12 +151,12 @@ export function useDNACalculator({
       daysHeld,
       effectiveATR,
       efficiencyRatio: Number(efficiencyRatio.toFixed(2)),
-      targetMultiplier,
       kellyWeight,
-      relativeStrength,
       isTrailing,
-      action: actionFlag
+      action: actionFlag,
+      isLoading: false,
     };
-  }, [buyPrice, currentPrice, currentHigh, atr5, buyDate, history, benchmarkHistory]);
+  }, [buyPrice, currentPrice, currentHigh, atr5, buyDate, history]);
 }
+
 

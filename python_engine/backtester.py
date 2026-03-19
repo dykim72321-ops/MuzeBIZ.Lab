@@ -7,15 +7,17 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def run_backtest(ticker: str, period: str = "1y", initial_capital: float = 10000.0):
+def run_backtest(
+    ticker: str,
+    period: str = "1y",
+    initial_capital: float = 10000.0,
+    deviation_threshold: float = -0.07,
+    target_atr: float = 5.0,
+):
     """
-    v4 펄스 엔진 백테스트 (State Machine + 3/4 Kelly + Target Volatility 0.30)
-    - 진입: RSI < 45 + MACD 히스토그램 기울기 개선 (우량주 눌림목 포착)
-    - 청산 A: 트레일링 스탑 (최고가 대비 -10%)
-    - 청산 B: 수익보전 룰 (+5% 달성 후 손절선 +1%로 상향)
-    - 청산 C: RSI 60 돌파 시 50% 선제 분할 익절
-    - 청산 D: RSI > 65 AND MACD 기울기 꺾임 전량 청산
-    프론트엔드 Recharts 렌더링용 JSON 반환
+    Mean Reversion 유효성 검증 백테스트
+    - 진입: RSI2 < 10 + Deviation < -7%
+    - 청산: Target 5.0 ATR 또는 3일 Time Stop
     """
     # 1. 데이터 다운로드 및 전처리
     df = yf.download(ticker, period=period, progress=False)
@@ -27,7 +29,10 @@ def run_backtest(ticker: str, period: str = "1y", initial_capital: float = 10000
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    df = df[["Close"]].copy()
+    if "Close" not in df.columns:
+        return {"error": "Close price not found"}
+
+    df = df.copy()
     if isinstance(df["Close"], pd.DataFrame):
         df["Close"] = df["Close"].iloc[:, 0]
 
@@ -35,109 +40,78 @@ def run_backtest(ticker: str, period: str = "1y", initial_capital: float = 10000
         return {"error": "Not enough data (need 50+ bars)"}
 
     # 2. 기술적 지표 계산
-    df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
-    macd = ta.trend.MACD(df["Close"], window_slow=26, window_fast=12, window_sign=9)
-    df["MACD_Diff"] = macd.macd_diff()
+    df["RSI2"] = ta.momentum.RSIIndicator(df["Close"], window=2).rsi()
+    df["MA5"] = df["Close"].rolling(window=5).mean()
+    df["Deviation"] = (df["Close"] - df["MA5"]) / df["MA5"]
+    df["ATR5"] = ta.volatility.AverageTrueRange(
+        high=df["High"], low=df["Low"], close=df["Close"], window=5
+    ).average_true_range()
 
-    # 3. 전략 시그널 (MOMENTUM 모드)
-    #    매수: RSI < 45 (우량주 눌림목) + MACD 기울기 개선 시작
-    #    매도: RSI > 65 AND MACD 기울기 꺾임 (추세 홀딩 후 과열 청산)
-    df["Strong_Buy"] = (df["RSI"] < 45) & (df["MACD_Diff"] > df["MACD_Diff"].shift(1))
-    df["Strong_Sell"] = (df["RSI"] > 65) & (df["MACD_Diff"] < df["MACD_Diff"].shift(1))
-
-    # 4. 포지션 사이징 파라미터 (Target Vol 0.30 + 3/4 Kelly)
-    TARGET_VOL = 0.30
-    KELLY_FRACTION = 0.75
-    BASE_KELLY = (2.0 * 0.55 - 0.45) / 2.0  # = 0.325
-    OPTIMAL_KELLY = max(0.0, BASE_KELLY) * KELLY_FRACTION  # = 0.24375
-
-    df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
-    df["ann_vol"] = df["log_return"].rolling(window=20).std() * np.sqrt(252)
-    df["vol_weight"] = TARGET_VOL / (df["ann_vol"] + 1e-9)
-    df["Weight"] = (df["vol_weight"] * OPTIMAL_KELLY).clip(upper=1.0).fillna(0)
+    # 3. 전략 시그널
+    df["Entry_Signal"] = (df["RSI2"] < 10) & (df["Deviation"] < deviation_threshold)
 
     # 벡터 추출 (루프 성능 최적화)
     close_arr = df["Close"].values
-    rsi_arr = df["RSI"].values
-    buy_arr = df["Strong_Buy"].values
-    sell_arr = df["Strong_Sell"].values
-    weight_arr = df["Weight"].values
+    atr_arr = df["ATR5"].values
+    signal_arr = df["Entry_Signal"].values
 
-    # 5. State Machine — 포지션 추적
+    # 4. State Machine — 포지션 추적
     positions = []
     strategy_returns = []
 
-    position = 0.0
+    is_holding = False
     entry_price = 0.0
-    highest_price = 0.0
-    scaled_out = False
-    prev_position = 0.0
-    prev_weight = 0.0
+    days_held = 0
+    target_price = 0.0
 
     for i in range(len(df)):
         cp = float(close_arr[i])
-        rsi = float(rsi_arr[i]) if not np.isnan(rsi_arr[i]) else 50.0
-        strong_buy = bool(buy_arr[i])
-        strong_sell = bool(sell_arr[i])
-        kelly_w = float(weight_arr[i]) if not np.isnan(weight_arr[i]) else 0.0
+        atr = float(atr_arr[i]) if not np.isnan(atr_arr[i]) else 0.0
+        signal = bool(signal_arr[i])
 
-        if position == 0.0:
-            # ── 진입
-            if strong_buy and not np.isnan(cp):
-                position = 1.0
+        current_pos = 1.0 if is_holding else 0.0
+
+        if not is_holding:
+            if signal and not np.isnan(cp):
+                is_holding = True
                 entry_price = cp
-                highest_price = cp
-                scaled_out = False
+                target_price = cp + (atr * target_atr)
+                days_held = 0
+                current_pos = 1.0
         else:
-            # 최고가 갱신
-            if cp > highest_price:
-                highest_price = cp
+            days_held += 1
+            # 청산 조건: 목표가 도달 또는 3일 경과
+            if cp >= target_price or days_held >= 3:
+                is_holding = False
+                current_pos = 0.0
 
-            # ── 청산 A: 트레일링 스탑 (최고가 대비 -10%)
-            ts_threshold = highest_price * 0.90
-            # ── 청산 B: 수익보전 룰 — +5% 이상 이익 달성 시 손절선 +1%로 상향
-            if highest_price > entry_price * 1.05:
-                ts_threshold = max(ts_threshold, entry_price * 1.01)
-
-            if cp < ts_threshold:
-                position = 0.0
-                entry_price = 0.0
-            elif strong_sell:
-                # ── 청산 D: 정규 매도 (RSI 과열 + MACD 꺾임)
-                position = 0.0
-                entry_price = 0.0
-            elif position == 1.0 and rsi > 60 and not scaled_out:
-                # ── 청산 C: RSI 60 돌파 시 50% 선제 분할 익절
-                position = 0.5
-                scaled_out = True
-
-        # 일간 전략 수익률 (전 봉 포지션 × 켈리 비중 × 당일 등락)
+        # 일간 전략 수익률
         if i == 0:
             sr = 0.0
         else:
             prev_cp = float(close_arr[i - 1])
             mr = (cp - prev_cp) / prev_cp if prev_cp != 0 else 0.0
-            sr = mr * prev_position * prev_weight
+            # 전일 포지션 기준으로 수익률 계산
+            prev_pos = positions[i - 1] if i > 0 else 0.0
+            sr = mr * prev_pos
 
         strategy_returns.append(sr)
-        positions.append(position)
-        prev_position = position
-        prev_weight = kelly_w
+        positions.append(current_pos)
 
     df["Position"] = positions
     df["Strategy_Return"] = strategy_returns
     df["Market_Return"] = df["Close"].pct_change().fillna(0)
 
-    # 6. 누적 자산 곡선 (Equity Curve)
+    # 5. 누적 자산 곡선 (Equity Curve)
     df["Benchmark_Equity"] = initial_capital * (1 + df["Market_Return"]).cumprod()
     df["Strategy_Equity"] = initial_capital * (1 + df["Strategy_Return"]).cumprod()
 
-    # 7. MDD 계산
+    # 6. MDD 계산
     rolling_max = df["Strategy_Equity"].cummax()
     drawdown = (df["Strategy_Equity"] - rolling_max) / rolling_max
     mdd = float(drawdown.min() * 100)
 
-    # 8. React / Recharts 포맷으로 변환
+    # 7. React / Recharts 포맷으로 변환
     chart_data = []
     for date, row in df.iterrows():
         if pd.isna(row["Strategy_Equity"]):
@@ -147,7 +121,7 @@ def run_backtest(ticker: str, period: str = "1y", initial_capital: float = 10000
                 "date": date.strftime("%Y-%m-%d"),
                 "benchmark": round(float(row["Benchmark_Equity"]), 2),
                 "strategy": round(float(row["Strategy_Equity"]), 2),
-                "rsi": round(float(row["RSI"]), 2) if not pd.isna(row["RSI"]) else 0,
+                "rsi": round(float(row["RSI2"]), 2) if not pd.isna(row["RSI2"]) else 0,
             }
         )
 
@@ -162,8 +136,7 @@ def run_backtest(ticker: str, period: str = "1y", initial_capital: float = 10000
         "ticker": ticker,
         "period": period,
         "initial_capital": initial_capital,
-        "engine_version": "v4",
-        "strategy": "MOMENTUM (RSI<45 + MACD Slope + State Machine Exit)",
+        "strategy": "Mean Reversion (RSI2<10, Dev<-7%, Target 5.0 ATR)",
         "total_return_pct": round(float(total_return_pct), 2),
         "benchmark_return_pct": round(float(benchmark_return_pct), 2),
         "outperformance": round(float(total_return_pct - benchmark_return_pct), 2),

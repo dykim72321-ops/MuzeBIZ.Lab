@@ -23,7 +23,7 @@ async function scrapeFinviz(): Promise<DiscoveredStock[]> {
   });
   
   const page = await context.newPage();
-  const url = 'https://finviz.com/screener.ashx?v=111&f=sh_price_u1&o=-volume';
+  const url = 'https://finviz.com/screener.ashx?v=111&f=sh_price_u1,ta_rsi_u30&o=-volume';
   
   console.log('📡 Finviz 접속 중...');
   try {

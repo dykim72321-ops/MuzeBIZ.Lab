@@ -19,6 +19,8 @@ class DNAValidator:
         delta: float = 1.5,  # 손실 공포
         lambda_val: float = 2.0,  # 시간 감가
         slippage_rate: float = 0.002,  # 슬리피지 (0.2%)
+        deviation_threshold: float = -0.07,  # [Optimized] 이격도 진입 장벽
+        target_atr: float = 5.0,  # [Optimized] 목표 ATR 멀티플라이어
     ):
         self.tickers = tickers
         self.start_date = start_date
@@ -27,6 +29,9 @@ class DNAValidator:
         self.delta = delta
         self.lambda_val = lambda_val
         self.slippage_rate = slippage_rate
+        self.deviation_threshold = deviation_threshold
+        self.target_atr = target_atr
+        self.benchmark_data = None
 
     def fetch_data(self):
         print(
@@ -36,6 +41,14 @@ class DNAValidator:
         df = yf.download(
             self.tickers, start=self.start_date, end=self.end_date, progress=False
         )
+        print("📥 벤치마크 데이터(IWM) 다운로드 중...")
+        bench = yf.download(
+            "IWM", start=self.start_date, end=self.end_date, progress=False
+        )
+        if isinstance(bench.columns, pd.MultiIndex):
+            self.benchmark_data = bench["Close"]["IWM"]
+        else:
+            self.benchmark_data = bench["Close"]
         return df
 
     def calculate_dna_score(
@@ -66,13 +79,29 @@ class DNAValidator:
 
         # 동적 시간 감가 (Dynamic Momentum Decay)
         decay_multiplier = max(0.5, 1.5 - efficiency_ratio)
-        time_penalty = min(60, days_held * self.lambda_val * decay_multiplier)
+        time_penalty = min(60, float(days_held) * self.lambda_val * decay_multiplier)
+
+        # 🆕 "Winner's Grace" (승자의 여유):
+        # 주가가 목표가의 80%를 넘어서거나 상회 중인 우량주(Winner)는 시간 페널티를 50% 감면
+        if current_price > target_price * 0.8:
+            time_penalty = time_penalty * 0.5
 
         final_score = max(0, min(100, base_score - time_penalty))
         return final_score
 
+    def calculate_kelly_weight(self, win_prob, win_loss_ratio):
+        """Fractional Kelly Criterion (Quarter-Kelly)"""
+        # 손익비(r)를 최대 5.0으로 캡핑
+        r = min(5.0, max(0.1, win_loss_ratio))
+        p = win_prob / 100.0
+        kelly = p - (1 - p) / r
+
+        # Quarter-Kelly 적용 (최대 25% 제한)
+        quarter_kelly = max(0, kelly / 4.0)
+        return round(quarter_kelly * 100, 1)
+
     def preprocess_data(self, data):
-        """WFA 성능 최적화를 위한 1회성 보조지표 일괄 계산 시스템 (Pre-processing)"""
+        """Mean Reversion 전략을 위한 지표 계산"""
         print("⚙️ 데이터 전처리 및 보조지표 계산 중 (Pre-processing)...")
         preprocessed = {}
         for ticker in self.tickers:
@@ -86,12 +115,18 @@ class DNAValidator:
                 if len(df) < 20:
                     continue
 
-                # 1. ATR5
+                # 1. ATR5 유지
                 df["ATR5"] = ta.volatility.AverageTrueRange(
                     high=df["High"], low=df["Low"], close=df["Close"], window=5
                 ).average_true_range()
 
-                # 2. 보조 지표 계산
+                # 2. [NEW] 단기 낙폭과대 지표
+                df["RSI2"] = ta.momentum.RSIIndicator(df["Close"], window=2).rsi()
+                df["MA5"] = df["Close"].rolling(window=5).mean()
+                # 이격도 수식: (Close - MA5) / MA5
+                df["Deviation"] = (df["Close"] - df["MA5"]) / (df["MA5"] + 1e-9)
+
+                # 기존 지표 유지 (DNA Score 계산용 ER 등에서 활용)
                 df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
                 adx_obj = ta.trend.ADXIndicator(
                     df["High"], df["Low"], df["Close"], window=14
@@ -131,122 +166,142 @@ class DNAValidator:
             current_atr = df["ATR5"].iloc[i]
 
             if not is_holding:
-                # 고도화된 진입 조건:
-                # 1. RSI 40 이상 (회복세)
-                # 2. ADX 상승 (추세 강화) + DI+ > DI-
-                # 3. 거래량 폭발 (RVOL > 1.5)
-                cond1 = df["RSI"].iloc[i] > 40
-                cond2 = (
-                    df["ADX"].iloc[i] > df["ADX"].iloc[i - 1]
-                    and df["DI_plus"].iloc[i] > df["DI_minus"].iloc[i]
-                )
-                cond3 = df["RVOL"].iloc[i] > 1.5
+                # [전략 변경] Mean Reversion (낙폭과대 역추세) 진입 로직:
+                # 1. RSI(2) < 10 (극단적 과매도)
+                # 2. 이격도 (MA5 대비 인자값 이하 하락)
+                cond1 = df["RSI2"].iloc[i] < 10
+                cond2 = df["Deviation"].iloc[i] < self.deviation_threshold
 
-                if cond1 and cond2 and cond3:
+                if cond1 and cond2:
                     is_holding = True
-                    # 슬리피지를 진입가에 반영 (비싸게 삼)
                     entry_price = current_close * (1 + self.slippage_rate)
                     entry_date = current_date
+                    entry_idx = i
 
                     effective_atr = (
                         current_atr
                         if (current_atr > 0 and not np.isnan(current_atr))
                         else entry_price * 0.20
                     )
-                    target_price = entry_price + (effective_atr * 2.5)
-                    stop_price = max(
-                        entry_price - (effective_atr * 1.2), entry_price * 0.5
-                    )
+
+                    # 목표가는 인자값(target_atr), 초기 손절가 3.0 ATR로 확대
+                    target_price = entry_price + (effective_atr * self.target_atr)
+                    initial_stop = entry_price - (effective_atr * 3.0)
+                    stop_price = max(initial_stop, entry_price * 0.5)
             else:
-                entry_idx = df.index.get_loc(entry_date)
-                # 실제 거래일(Trading Days) 기준 days_held
+                # 실제 거래일(Trading Days) 기준 days_held (이미 i - entry_idx로 근사화됨)
                 days_held = i - entry_idx
 
-                # 1. ER 계산 및 변동성(Volatility) 연산
-                if days_held >= 1:
-                    prices = df["Close"].iloc[entry_idx : i + 1].values
-                    net_change = abs(prices[-1] - prices[0])
-                    price_diffs = np.diff(prices)
-                    sum_vol = np.sum(np.abs(price_diffs))
-                    er = net_change / sum_vol if sum_vol > 0 else 1.0
+                # 1. ER 및 RS 계산
+                prices = df["Close"].iloc[entry_idx : i + 1].values
+                net_change = abs(prices[-1] - prices[0])
+                price_diffs = np.diff(prices)
+                sum_vol = np.sum(np.abs(price_diffs))
+                er = net_change / sum_vol if sum_vol > 0 else 1.0
 
-                    # JS volatilityStdDev 로직 대응
-                    vol_std_dev = (
-                        np.sqrt(np.mean(price_diffs**2))
-                        if len(price_diffs) > 0
-                        else entry_price * 0.05
-                    )
-                else:
-                    er = 1.0
-                    vol_std_dev = entry_price * 0.05
-
-                # 2. 고도화된 스탑가 타이트닝 연산
-                high_so_far = df["High"].iloc[entry_idx : i + 1].max()
-                effective_atr = (
-                    current_atr
-                    if (current_atr > 0 and not np.isnan(current_atr))
-                    else entry_price * 0.20
+                vol_std_dev = (
+                    np.sqrt(np.mean(price_diffs**2))
+                    if len(price_diffs) > 0
+                    else entry_price * 0.05
                 )
 
-                # Base multiplier tightening
-                multiplier_base = 2.0
-                if days_held > 5:
-                    multiplier_base = max(1.0, 2.0 - ((days_held - 5) * 0.1))
+                # RS 계산 (IWM 대비)
+                rs = 0
+                if self.benchmark_data is not None:
+                    try:
+                        stock_ret = (current_close / entry_price) - 1
+                        bench_start = self.benchmark_data.loc[entry_date]
+                        bench_end = self.benchmark_data.loc[current_date]
+                        
+                        # 만약 Series가 반환되면 첫 번째 값 사용
+                        if isinstance(bench_start, pd.Series): bench_start = bench_start.iloc[0]
+                        if isinstance(bench_end, pd.Series): bench_end = bench_end.iloc[0]
+                        
+                        bench_ret = (bench_end / bench_start) - 1
+                        rs = (stock_ret - bench_ret) * 100
+                    except:
+                        pass
 
-                # Volatility Factor 반영
-                volatility_factor = min(1.0, vol_std_dev / (entry_price * 0.05))
-                dynamic_multiplier = multiplier_base + volatility_factor
+                # [전략 변경] 페니 스탁 전용 타이트닝 (Floor 1.8)
+                multiplier_base = 3.0
+                if days_held > 1:
+                    # 하루만 지나도 스탑을 빠르게 올림 (최하단 1.8)
+                    multiplier_base = max(1.8, 3.0 - (days_held * 0.5))
 
+                high_so_far = df["High"].iloc[entry_idx : i + 1].max()
+                dynamic_multiplier = multiplier_base + 1.0  # volatility_factor 대체
                 trailing_stop = high_so_far - (effective_atr * dynamic_multiplier)
-                initial_stop = entry_price - (effective_atr * 1.5)
+                initial_stop = entry_price - (effective_atr * 3.0)
                 stop_price = max(initial_stop, trailing_stop, entry_price * 0.5)
 
                 score = self.calculate_dna_score(
                     entry_price, current_close, target_price, stop_price, days_held, er
                 )
 
-                # 1. 장중 목표가 달성 (최우선)
-                if current_high >= target_price:
-                    # 슬리피지를 익절가에 반영 (싸게 팖)
-                    slippage_exit = target_price * (1 - self.slippage_rate)
-                    pnl = (slippage_exit - entry_price) / entry_price
+                # Kelly Weight 및 Time Stop 로직
+                risk_denominator = entry_price - stop_price
+                risk_reward = (target_price - entry_price) / (
+                    risk_denominator if risk_denominator > 0 else 0.1
+                )
+                kelly_weight = self.calculate_kelly_weight(score, risk_reward)
+
+                # [전략 변경] 극한의 Time Stop 로직 (3일 초과 시 무조건 청산)
+                if days_held > 3:
+                    exit_price = current_close * (1 - self.slippage_rate)
+                    pnl = (exit_price - entry_price) / entry_price
                     trades.append(
                         {
                             "ticker": ticker,
                             "entry_price": entry_price,
-                            "exit_price": slippage_exit,
+                            "exit_price": exit_price,
                             "pnl": pnl,
+                            "days": days_held,
+                            "result": "WIN" if pnl > 0 else "LOSS",
+                            "reason": "TIME_STOP",
+                        }
+                    )
+                    is_holding = False
+                    continue
+
+                # 1. 장중 목표가 달성
+                if current_high >= target_price:
+                    exit_price = target_price * (1 - self.slippage_rate)
+                    trades.append(
+                        {
+                            "ticker": ticker,
+                            "entry_price": entry_price,
+                            "exit_price": exit_price,
+                            "pnl": (exit_price - entry_price) / entry_price,
                             "days": days_held,
                             "result": "WIN",
                         }
                     )
                     is_holding = False
 
-                # 2. 장중 손절가 이탈 (슬리피지 반영)
+                # 2. 장중 손절가 이탈
                 elif current_low <= stop_price:
-                    slippage_exit = stop_price * (1 - self.slippage_rate)
-                    pnl = (slippage_exit - entry_price) / entry_price
+                    exit_price = stop_price * (1 - self.slippage_rate)
                     trades.append(
                         {
                             "ticker": ticker,
                             "entry_price": entry_price,
-                            "exit_price": slippage_exit,
-                            "pnl": pnl,
+                            "exit_price": exit_price,
+                            "pnl": (exit_price - entry_price) / entry_price,
                             "days": days_held,
                             "result": "LOSS",
                         }
                     )
                     is_holding = False
 
-                # 3. DNA Score가 0점 이하로 떨어져 강제 청산 (종가 기준)
-                elif score <= 0:
-                    slippage_exit = current_close * (1 - self.slippage_rate)
-                    pnl = (slippage_exit - entry_price) / entry_price
+                # 3. Kelly Weight가 0 이하로 떨어져 강제 청산 (종가 기준)
+                elif kelly_weight <= 0:
+                    exit_price = current_close * (1 - self.slippage_rate)
+                    pnl = (exit_price - entry_price) / entry_price
                     trades.append(
                         {
                             "ticker": ticker,
                             "entry_price": entry_price,
-                            "exit_price": slippage_exit,
+                            "exit_price": exit_price,
                             "pnl": pnl,
                             "days": days_held,
                             "result": "WIN" if pnl > 0 else "LOSS",

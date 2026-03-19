@@ -18,13 +18,13 @@ export const MorningBrief = () => {
         setLoading(true);
         const data = await getTopStocks();
         if (data.length > 0) {
-          setStocks(data.slice(0, 4)); // Get 4 for the row
+          setStocks(data.slice(0, 8)); // Increase to 8 for better visibility
         } else {
-          setStocks(MOCK_STOCKS.slice(0, 4));
+          setStocks(MOCK_STOCKS.slice(0, 8));
         }
       } catch (err) {
         console.error('Failed to fetch stocks:', err);
-        setStocks(MOCK_STOCKS.slice(0, 4));
+        setStocks(MOCK_STOCKS.slice(0, 8));
       } finally {
         setLoading(false);
       }

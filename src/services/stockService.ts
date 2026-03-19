@@ -24,6 +24,7 @@ function getCacheDuration(): number {
 
 // Finnhub API Key
 const FINNHUB_API_KEY = import.meta.env.VITE_FINNHUB_API_KEY;
+let isFinnhubExhausted = false; // 🆕 Circuit breaker for 403/Forbidden keys
 
 // Finnhub API fallback for real-time quotes
 async function fetchFromFinnhub(ticker: string): Promise<Stock | null> {
@@ -267,12 +268,16 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
       return request;
     });
     
-    const chunkResults = await Promise.all(chunkPromises);
-    results.push(...chunkResults.filter((s): s is Stock => s !== null));
+    try {
+      const chunkResults = await Promise.all(chunkPromises);
+      results.push(...chunkResults.filter((s): s is Stock => s !== null));
+    } catch (err) {
+      console.error(`[Fetch Optimization] Chunk failed for ${chunk.join(',')}:`, err);
+    }
     
-    // Minimal delay between chunks to be safe
+    // Minimal delay between chunks to be safe (Increase if Yahoo is 429ing)
     if (i + CHUNK_SIZE < uniqueTickers.length) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Increase to 1s
     }
   }
   
@@ -284,8 +289,8 @@ export async function fetchMultipleStocks(tickers: string[]): Promise<Stock[]> {
 }
 
 // Helper to handle retries for rate-limited APIs (Yahoo 429)
-async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 2): Promise<Response> {
-  let delay = 1000;
+async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3): Promise<Response> {
+  let delay = 2000; // Start with 2s for Yahoo stability
   for (let i = 0; i < maxRetries; i++) {
     const res = await fetch(url, options);
     if (res.status === 429 && i < maxRetries - 1) {
@@ -345,27 +350,31 @@ export async function fetchStockHistory(ticker: string, resolution: string = 'D'
     let history: { date: string; price: number }[] = [];
 
     // 1. Try Finnhub First
-    if (FINNHUB_API_KEY) {
+    if (FINNHUB_API_KEY && !isFinnhubExhausted) {
       const to = Math.floor(Date.now() / 1000);
       const from = to - (days * 24 * 60 * 60);
-      console.log(`[History] Fetching Finnhub for ${ticker}...`);
-      const finnhubRes = await fetch(
-        `https://finnhub.io/api/v1/stock/candle?symbol=${ticker}&resolution=${resolution}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`
-      );
+      try {
+        const finnhubRes = await fetch(
+          `https://finnhub.io/api/v1/stock/candle?symbol=${ticker}&resolution=${resolution}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`
+        );
 
-      if (finnhubRes.ok) {
-        const data = await finnhubRes.json();
-        if (data.s === 'ok' && data.t && data.c) {
-          history = data.t.map((timestamp: number, index: number) => ({
-            date: new Date(timestamp * 1000).toISOString(),
-            price: data.c[index]
-          }));
-          console.log(`✅ [Finnhub History] Loaded ${history.length} points for ${ticker}`);
-        } else if (data.s === 'no_data') {
-          console.warn(`[Finnhub History] No data returned for ${ticker}`);
+        if (finnhubRes.ok) {
+          const data = await finnhubRes.json();
+          if (data.s === 'ok' && data.t && data.c) {
+            history = data.t.map((timestamp: number, index: number) => ({
+              date: new Date(timestamp * 1000).toISOString(),
+              price: data.c[index]
+            }));
+            console.log(`✅ [Finnhub History] Loaded ${history.length} points for ${ticker}`);
+          } else if (data.s === 'no_data') {
+            console.warn(`[Finnhub History] No data returned for ${ticker}`);
+          }
+        } else if (finnhubRes.status === 403 || finnhubRes.status === 401) {
+          console.error(`🔴 [Finnhub] API Key Invalid or Exhausted (403). Switching to fallback mode.`);
+          isFinnhubExhausted = true; // Trip the circuit breaker
         }
-      } else {
-        console.warn(`[Finnhub History] Failed for ${ticker}: ${finnhubRes.status}`);
+      } catch (e) {
+        console.warn(`[Finnhub] Fetch failed for ${ticker}`);
       }
     }
 
@@ -490,7 +499,7 @@ export async function getTopStocks(historical: boolean = false): Promise<Stock[]
     return diverseStocks;
   } catch (err) {
     console.warn('Real-time sync failed, falling back to cache:', err);
-    return fetchMultipleStocks(WATCHLIST_TICKERS.slice(0, 5));
+    return fetchMultipleStocks(WATCHLIST_TICKERS.slice(0, 10));
   }
 }
 

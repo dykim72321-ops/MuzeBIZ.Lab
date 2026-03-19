@@ -7,35 +7,29 @@ export function calculateDNATargets(
   currentHigh: number = 0,
   atr5?: number,
   volatilityStdDev: number = 0,
-  daysHeld: number = 0,
-  efficiencyRatio: number = 0.5,
-  isRelativeStrong: boolean = false
+  daysHeld: number = 0
 ) {
-  // 1. Fallback: 데이터 없을 시 매수가의 20% 변동성 가정
-  const effectiveATR = atr5 && atr5 > 0 ? atr5 : entryPrice * 0.20;
+  // 1. Fallback: 데이터 없을 시 매수가의 20% 변동성 가정 (최소 0.01로 0 나누기 방지)
+  const effectiveATR = Math.max(0.01, atr5 && atr5 > 0 ? atr5 : entryPrice * 0.20);
   
-  // 2. 동적 목표가 (Target) - ER(Efficiency Ratio) 기반 가변 멀티플라이어 (2.0 ~ 3.0)
-  // 추세가 깔끔할수록(ER이 높을수록) 더 높은 수익을 추구
-  const targetMultiplier = 2.0 + (Math.max(0, Math.min(1, efficiencyRatio)) * 1.0);
-  const targetPrice = entryPrice + (effectiveATR * targetMultiplier);
+  // 2. 동적 목표가 (Target) - [Optimized] 5.0 ATR
+  const targetPrice = entryPrice + (effectiveATR * 5.0); 
 
   // 3. 동적 손절가 멀티플라이어 (Chandelier Exit 기반)
-  // Grace Period: 주도주(RS가 높음)인 경우 7일, 아니면 5일간 초기 변동성 허용
-  const gracePeriod = isRelativeStrong ? 7 : 5;
-  
-  let multiplierBase = 2.0;
-  if (daysHeld > gracePeriod) {
-    // 유예 기간 초과 시 하루마다 0.1씩 멀티플라이어 감소 (최소 1.2까지 - Shakeout 방지)
-    multiplierBase = Math.max(1.2, 2.0 - ((daysHeld - gracePeriod) * 0.1));
+  // 1. Time-based ATR Tightening (시작 3.0 -> 최저 1.8)
+  let multiplierBase = 3.0;
+  if (daysHeld > 1) {
+    // 1일 경과 후부터 가파르게 타이트닝
+    multiplierBase = Math.max(1.8, 3.0 - (daysHeld * 0.5));
   }
   
   // 변동성 표준편차에 따른 미세 조정
   const volatilityFactor = Math.min(1.0, volatilityStdDev / (entryPrice * 0.05));
-  const dynamicMultiplier = multiplierBase + (volatilityFactor * 1.0); 
+  const dynamicMultiplier = multiplierBase + (volatilityFactor * 0.5); 
 
   // 4. Chandelier Exit (Trailing Stop)
-  // 매수가 기준 초기 손절선
-  const initialStop = entryPrice - (effectiveATR * 1.5);
+  // 2. 초기 손절선 대폭 완화 (3.0 ATR)
+  const initialStop = entryPrice - (effectiveATR * 3.0);
   // 현재가/최고가 기준 트레일링 스탑
   const highSoFar = Math.max(currentHigh, currentPrice, entryPrice);
   const trailingStop = highSoFar - (effectiveATR * dynamicMultiplier);
@@ -47,7 +41,6 @@ export function calculateDNATargets(
     targetPrice: Number(targetPrice.toFixed(4)),
     stopPrice: Number(stopPrice.toFixed(4)),
     effectiveATR,
-    targetMultiplier: Number(targetMultiplier.toFixed(2)),
     isTrailing: trailingStop > initialStop
   };
 }
@@ -73,14 +66,16 @@ export function calculateEfficiencyRatio(prices: number[]): number {
  * Fractional Kelly Criterion (Quarter-Kelly)
  * 포지션 사이징 제안
  */
-export function calculateKellyWeight(winProb: number, winLossRatio: number): number {
+export function calculateKellyWeight(winProb: number, winLossRatio: number): { weight: number, rawKelly: number } {
   // f* = p - (1-p)/r
   // 손익비(r)를 최대 5.0으로 캡핑하여 과도한 비중 실림 방지 (안전장치)
   const r = Math.min(5.0, Math.max(0.1, winLossRatio));
   const p = winProb / 100;
   const kelly = p - (1 - p) / r;
   
-  // 보수적 운용을 위한 Quarter-Kelly 적용 (최대 25% 제한)
-  const quarterKelly = Math.max(0, kelly / 4);
-  return Number((quarterKelly * 100).toFixed(1));
+  const quarterKelly = isNaN(kelly) ? 0 : Math.max(0, kelly / 4);
+  return {
+    weight: Number((quarterKelly * 100).toFixed(1)),
+    rawKelly: isNaN(kelly) ? 0 : kelly
+  };
 }
