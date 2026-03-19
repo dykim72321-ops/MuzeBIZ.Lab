@@ -10,6 +10,7 @@ export interface WatchlistItem {
   buyPrice?: number;
   targetProfit?: number;
   stopLoss?: number;
+  initialDnaScore?: number;
 }
 
 /**
@@ -34,6 +35,7 @@ export async function getWatchlist(): Promise<WatchlistItem[]> {
     buyPrice: item.buy_price ? Number(item.buy_price) : undefined,
     targetProfit: item.target_profit ? Number(item.target_profit) : undefined,
     stopLoss: item.stop_loss ? Number(item.stop_loss) : undefined,
+    initialDnaScore: item.initial_dna_score ? Number(item.initial_dna_score) : undefined,
   }));
 }
 
@@ -63,7 +65,8 @@ export async function addToWatchlist(
   status: WatchlistStatus = 'WATCHING', 
   buyPrice?: number,
   targetProfit?: number,
-  stopLoss?: number
+  stopLoss?: number,
+  initialDnaScore?: number
 ): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   
@@ -77,6 +80,7 @@ export async function addToWatchlist(
   if (buyPrice !== undefined) payload.buy_price = buyPrice;
   if (targetProfit !== undefined) payload.target_profit = targetProfit;
   if (stopLoss !== undefined) payload.stop_loss = stopLoss;
+  if (initialDnaScore !== undefined) payload.initial_dna_score = initialDnaScore;
 
   const { error } = await supabase
     .from('watchlist')
@@ -133,14 +137,15 @@ export async function toggleWatchlist(
   ticker: string, 
   buyPrice?: number,
   targetProfit?: number,
-  stopLoss?: number
+  stopLoss?: number,
+  initialDnaScore?: number
 ): Promise<boolean> {
   const inWatchlist = await isInWatchlist(ticker);
   if (inWatchlist) {
     await removeFromWatchlist(ticker);
     return false;
   } else {
-    await addToWatchlist(ticker, undefined, 'WATCHING', buyPrice, targetProfit, stopLoss);
+    await addToWatchlist(ticker, undefined, 'WATCHING', buyPrice, targetProfit, stopLoss, initialDnaScore);
     return true;
   }
 }

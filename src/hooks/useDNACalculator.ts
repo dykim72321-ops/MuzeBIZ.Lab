@@ -67,31 +67,46 @@ export function useDNACalculator({
     }
 
     // 4. 고도화된 목표가/손절가 연산 (Chandelier Exit + Time-based Tightening)
-    const { targetPrice: T, stopPrice: S, effectiveATR, isTrailing } = calculateDNATargets(
+    // Efficiency Ratio(ER)와 Relative Strength(RS)를 반영한 동적 익절/손절 멀티플라이어 적용
+    const { 
+      targetPrice: T, 
+      stopPrice: S, 
+      effectiveATR, 
+      targetMultiplier,
+      isTrailing 
+    } = calculateDNATargets(
       buyPrice, 
       currentPrice, 
       currentHigh, 
       atr5,
       volatilityStdDev,
-      daysHeld
+      daysHeld,
+      efficiencyRatio,
+      relativeStrength > 0 // 주도주 여부 (RS 양수 기준)
     );
     
     const GAMMA = 0.8; 
     const DELTA = 1.5; 
-    const LAMBDA = 2; 
+    const LAMBDA = 2.0; 
 
     // 5. 모멘텀 기반 동적 시간 감가 (Dynamic Momentum Decay)
     // ER(Efficiency Ratio)에 따라 감가 가속/감속: 노이즈가 심할수록(ER 0) 1.5배 감가, 추세가 깔끔할수록(ER 1) 0.5배 감가
     const decayMultiplier = Math.max(0.5, 1.5 - efficiencyRatio);
-    const timePenalty = Math.min(60, daysHeld * LAMBDA * decayMultiplier);
+    let timePenalty = Math.min(60, daysHeld * LAMBDA * decayMultiplier);
+
+    // 🆕 "Winner's Grace" (승자의 여유): 
+    // 주가가 목표가의 80%를 넘어서거나 상회 중인 우량주(Winner)는 시간 페널티를 50% 감면하여 장기 보유 유도
+    if (currentPrice > T * 0.8) {
+      timePenalty = timePenalty * 0.5;
+    }
 
     // 5. DNA 스코어 계산 (ER 가중치 적용)
     let score = 50;
 
     if (currentPrice >= T) {
       score = 100; 
-    } else if (currentPrice > buyPrice) {
-      const progress = (currentPrice - buyPrice) / (T - buyPrice);
+    } else if (currentPrice >= buyPrice) {
+      const progress = (currentPrice === buyPrice) ? 0 : (currentPrice - buyPrice) / (T - buyPrice);
       // ER이 높을수록(추세가 깔끔할수록) 점수 가점
       const erBonus = efficiencyRatio * 10;
       score = 50 + (50 * Math.pow(progress, GAMMA)) + erBonus - timePenalty;
@@ -127,10 +142,11 @@ export function useDNACalculator({
       dnaScore: finalScore,
       targetPrice: T,
       stopPrice: S,
-      timePenalty,
+      timePenalty: Number(timePenalty.toFixed(1)),
       daysHeld,
       effectiveATR,
       efficiencyRatio: Number(efficiencyRatio.toFixed(2)),
+      targetMultiplier,
       kellyWeight,
       relativeStrength,
       isTrailing,

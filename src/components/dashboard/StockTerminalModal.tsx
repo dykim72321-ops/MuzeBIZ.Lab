@@ -6,7 +6,6 @@ import {
     TrendingDown,
     Zap,
     Target,
-    Info,
     ChevronRight,
     Fingerprint,
     ShieldCheck,
@@ -54,7 +53,58 @@ export const StockTerminalModal = ({
     onAddToWatchlist
 }: StockTerminalModalProps) => {
     const [isAddingWatchlist, setIsAddingWatchlist] = useState(false);
+    const [liveData, setLiveData] = useState(data);
     const isMounted = useRef(true);
+
+    // Sync state with incoming prop data
+    useEffect(() => {
+        setLiveData(data);
+    }, [data]);
+
+    // Fetch missing analysis data if it wasn't pre-loaded
+    useEffect(() => {
+        const fetchMissingData = async () => {
+            if (data.bullPoints[0] !== "No details" && data.bullPoints[0] !== "모멘텀 지표 분석 중") return;
+            
+            try {
+                // Import supabase directly in this async closure or use global if available.
+                // It's better to fetch from daily_discovery or stock_analysis_cache.
+                const { supabase } = await import('../../lib/supabase');
+                const { data: cacheData, error } = await supabase
+                    .from('stock_analysis_cache')
+                    .select('analysis')
+                    .eq('ticker', data.ticker)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (cacheData && cacheData.analysis && isMounted.current) {
+                    const analysis = cacheData.analysis;
+                    setLiveData(prev => ({
+                        ...prev,
+                        bullPoints: analysis.bullCase || ["강세 요인 데이터가 부족합니다."],
+                        bearPoints: analysis.bearCase || ["약세 요인 데이터가 부족합니다."],
+                        aiSummary: analysis.aiSummary || prev.aiSummary,
+                        popProbability: analysis.popProbability || prev.popProbability,
+                        matchedLegend: analysis.matchedLegend || prev.matchedLegend,
+                        riskLevel: analysis.riskLevel || prev.riskLevel,
+                    }));
+                } else if (isMounted.current) {
+                    // Fallback clearly indicating lack of data instead of spinning
+                    setLiveData(prev => ({
+                        ...prev,
+                        bullPoints: ["실시간 AI 분석 데이터가 아직 생성되지 않았습니다.", "스캐너를 통해 종목을 다시 스캔해 보세요."],
+                        bearPoints: ["리스크 요인 분석 결과를 기다리는 중입니다."],
+                        aiSummary: "이 종목에 대한 최신 심층 AI 분석 평가지가 존재하지 않습니다."
+                    }));
+                }
+            } catch (err) {
+                console.error("Failed to fetch missing analysis:", err);
+            }
+        };
+
+        fetchMissingData();
+    }, [data.ticker]);
 
     useEffect(() => {
         isMounted.current = true;

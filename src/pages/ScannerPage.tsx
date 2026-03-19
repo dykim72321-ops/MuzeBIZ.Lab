@@ -533,7 +533,12 @@ export const ScannerPage = () => {
           onAddToWatchlist={async () => {
             const buyPrice = terminalData.price;
             // Use Pure Function to get consistent T/S
-            const { targetPrice, stopPrice } = calculateDNATargets(buyPrice, terminalData.quantData?.atr5);
+            const { targetPrice, stopPrice } = calculateDNATargets(
+              buyPrice, 
+              buyPrice, // 진입 시점이므로 현재가는 진입가와 동일
+              buyPrice, // 진입 시점이므로 최고가도 진입가와 동일
+              terminalData.quantData?.atr5
+            );
             
             await addToWatchlist(
               terminalData.ticker, 
@@ -541,7 +546,8 @@ export const ScannerPage = () => {
               'WATCHING', 
               buyPrice,
               targetPrice,
-              stopPrice
+              stopPrice,
+              terminalData.dnaScore
             );
             navigate('/watchlist');
           }}

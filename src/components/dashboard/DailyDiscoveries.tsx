@@ -128,6 +128,7 @@ const TopPickHero: React.FC<{ item: DiscoveryItem }> = ({ item }) => {
           similarity: item.legend_similarity || 0
         } : { ticker: 'N/A', similarity: 0 }}
         aiSummary={item.ai_summary}
+        price={item.price}
         className="shadow-2xl shadow-indigo-500/10"
       />
     </div>
@@ -245,6 +246,7 @@ const DiscoveryCard: React.FC<{ item: DiscoveryItem; rank: number }> = ({ item, 
         {/* Add to Watchlist Button */}
         <AddToWatchlistBtn
           ticker={item.ticker}
+          dnaScore={item.dna_score}
           variant="icon"
           className="bg-slate-800/50 border-white/5 hover:border-indigo-500/30 hover:bg-indigo-500/10"
         />

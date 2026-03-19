@@ -16,6 +16,7 @@ interface AnalysisResultCardProps {
     riskLevel: string;
     className?: string;
     aiSummary?: string;
+    price?: number;
 }
 
 export const AnalysisResultCard = ({
@@ -27,7 +28,8 @@ export const AnalysisResultCard = ({
     matchedLegend,
     riskLevel,
     className,
-    aiSummary
+    aiSummary,
+    price
 }: AnalysisResultCardProps) => {
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
@@ -150,7 +152,7 @@ export const AnalysisResultCard = ({
                 }}
 
                 onAddToWatchlist={async () => {
-                    await addToWatchlist(ticker);
+                    await addToWatchlist(ticker, undefined, 'WATCHING', price, undefined, undefined, dnaScore);
                     alert(`${ticker}가 관심 종목에 추가되었습니다.`);
                 }}
             />

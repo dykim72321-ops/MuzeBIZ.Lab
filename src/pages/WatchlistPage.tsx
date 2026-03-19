@@ -308,11 +308,11 @@ const WatchlistItemCard = ({ item, stock, viewMode, onRemove, benchmarkHistory, 
             {viewMode === 'grid' && (
               <div className="flex items-center gap-2">
                 <div className="flex flex-col items-end">
-                  <div className="flex items-center gap-1 bg-[#0176d3]/10 text-[#0176d3] px-2 py-1 rounded text-[10px] font-black tracking-widest border border-[#0176d3]/20 hover:bg-[#0176d3]/20 transition-colors group/score relative cursor-help">
+                  <div className="flex items-center gap-1 bg-indigo-500/10 text-indigo-600 px-2 py-1 rounded text-[10px] font-black tracking-widest border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors group/score relative cursor-help">
                     <ShieldCheck className="w-3 h-3" />
-                    {dnaScore}% DNA SCORE
+                    {dnaScore}% TRADE HEALTH
                     <div className="absolute bottom-full right-0 mb-2 w-48 bg-slate-900 text-white text-[8px] p-2 rounded shadow-xl opacity-0 group-hover/score:opacity-100 transition-opacity z-50 pointer-events-none leading-relaxed font-normal normal-case tracking-normal">
-                      <span className="text-indigo-400 font-bold">DNA SCORE:</span> AI가 분석한 현재 종목의 종합 상승 잠재력 점수 (100점에 가까울수록 강력)
+                      <span className="text-indigo-400 font-bold">TRADE HEALTH:</span> 진입가 대비 현재 포지션의 진행 상태와 안정성을 나타내는 건강도 지표
                     </div>
                   </div>
                   {timePenalty > 0 && (
@@ -427,111 +427,118 @@ const WatchlistItemCard = ({ item, stock, viewMode, onRemove, benchmarkHistory, 
             </div>
           </div>
 
-          {/* Performance Chart */}
+          {/* Performance Chart & Metrics Area */}
           {viewMode === 'grid' && (
-            <div className="h-20 w-full mt-4 relative group/chart">
-              {(() => {
-                const hasHistory = stock.history && stock.history.length > 0;
-                const sortedHistory = hasHistory && stock.history ? [...stock.history].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) : [];
-                
-                const itemAddedDate = new Date(item.addedAt);
-                itemAddedDate.setHours(0, 0, 0, 0);
-                
-                const relevantHistory = sortedHistory.filter(h => {
-                    const hDate = new Date(h.date);
-                    hDate.setHours(0, 0, 0, 0);
-                    return hDate.getTime() >= itemAddedDate.getTime() - (24 * 60 * 60 * 1000);
-                });
+            <div className="mt-4 space-y-3">
+              <div className="h-20 w-full relative group/chart">
+                {(() => {
+                  const hasHistory = stock.history && stock.history.length > 0;
+                  const sortedHistory = hasHistory && stock.history ? [...stock.history].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) : [];
+                  
+                  const itemAddedDate = new Date(item.addedAt);
+                  itemAddedDate.setHours(0, 0, 0, 0);
+                  
+                  const relevantHistory = sortedHistory.filter(h => {
+                      const hDate = new Date(h.date);
+                      hDate.setHours(0, 0, 0, 0);
+                      return hDate.getTime() >= itemAddedDate.getTime() - (24 * 60 * 60 * 1000);
+                  });
 
-                const color = isProfit ? '#10b981' : '#f43f5e';
-                
-                if (relevantHistory.length < 2) {
-                   return (
-                     <div className="w-full h-full min-h-[80px] flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                           Chart Data Collecting...
-                        </span>
-                     </div>
-                   );
-                }
-                
-                let chartData = relevantHistory.map(point => {
-                  const ret = ((point.price / referencePrice) - 1) * 100;
-                  return {
-                    name: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-                    val: ret,
-                    price: point.price
-                  };
-                });
+                  const color = isProfit ? '#10b981' : '#f43f5e';
+                  
+                  if (relevantHistory.length < 2) {
+                     return (
+                       <div className="w-full h-full min-h-[80px] flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                             Chart Data Collecting...
+                          </span>
+                       </div>
+                     );
+                  }
+                  
+                  let chartData = relevantHistory.map(point => {
+                    const ret = ((point.price / referencePrice) - 1) * 100;
+                    return {
+                      name: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                      val: ret,
+                      price: point.price
+                    };
+                  });
 
-                return (
-                  <div className="w-full h-full min-h-[80px]">
-                    <ResponsiveContainer width="100%" height={80}>
-                      <AreaChart data={chartData} margin={{ top: 5, right: 0, left: 0, bottom: 5 }}>
-                        <defs>
-                          <linearGradient id={`color-${item.ticker}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor={color} stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <YAxis domain={['dataMin', 'dataMax']} hide />
-                        <ReferenceLine y={0} stroke="rgba(0,0,0,0.1)" strokeDasharray="3 3" />
-                        <Area 
-                          type="monotone" 
-                          dataKey="val" 
-                          stroke={color} 
-                          strokeWidth={2}
-                          fillOpacity={1}
-                          fill={`url(#color-${item.ticker})`}
-                          isAnimationActive={true}
-                        />
-                        <RechartsTooltip
-                            content={({ active, payload }: any) => {
-                                if (active && payload && payload.length) {
-                                  const data = payload[0].payload;
-                                  const pColor = data.val >= 0 ? 'text-emerald-500' : 'text-rose-500';
-                                  return (
-                                      <div className="bg-white border border-slate-200 p-2 rounded shadow-xl text-[10px] font-mono z-50 pointer-events-none">
-                                          <p className="font-bold text-slate-500 mb-0.5">{data.name}</p>
-                                          <p className="font-black text-slate-900">{formatPrice(data.price)}</p>
-                                          <p className={`font-bold ${pColor}`}>
-                                              {data.val >= 0 ? '+' : ''}{data.val.toFixed(2)}%
-                                          </p>
-                                      </div>
-                                  );
-                                }
-                                return null;
-                            }}
-                            cursor={{ stroke: 'rgba(0,0,0,0.1)', strokeWidth: 1, strokeDasharray: '3 3' }}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                    <div className="absolute top-0 left-0 flex flex-wrap items-start gap-2 max-w-full z-10 px-2 pt-2">
-                      <div className="bg-white/90 px-2 py-1 rounded-md backdrop-blur-sm border border-slate-200 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono transition-opacity group-hover/chart:opacity-0">
-                        {isProfit ? <TrendingUp className="w-3 h-3 text-emerald-500" /> : <TrendingDown className="w-3 h-3 text-rose-500" />}
-                        <span className={isProfit ? 'text-emerald-500' : 'text-rose-500'}>
-                          {isProfit ? '+' : ''}{currentReturnPct.toFixed(2)}%
-                        </span>
-                        <span className="text-[8px] text-slate-400 ml-1 uppercase">ROI</span>
-                      </div>
-                      
-                      <div className="bg-white/90 px-2 py-1 rounded-md backdrop-blur-sm border border-[#0176d3]/20 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono transition-opacity group-hover/chart:opacity-0">
-                        <Zap className="w-3 h-3 text-amber-500" />
-                        <span className="text-slate-900">{dnaScore}%</span>
-                        <span className="text-[8px] text-slate-400 ml-1 uppercase underline decoration-[#0176d3]/30 underline-offset-2 tracking-tighter">DNA MATCH</span>
-                      </div>
-
-                      <div className="bg-white/90 px-2 py-1 rounded-md backdrop-blur-sm border border-emerald-500/20 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono transition-opacity group-hover/chart:opacity-0 group/er relative cursor-help">
-                        <Activity className="w-3 h-3 text-emerald-500" />
-                        <span className="text-slate-900">ER {efficiencyRatio}</span>
-                        <div className="absolute bottom-full left-0 mb-2 w-48 bg-slate-900 text-white text-[8px] p-2 rounded shadow-xl opacity-0 group-hover/er:opacity-100 transition-opacity z-50 pointer-events-none leading-relaxed font-normal normal-case tracking-normal">
-                          <span className="text-emerald-400 font-bold">Efficiency Ratio:</span> 추세 순도. 1.0에 가까울수록 잡음 없이 깔끔하고 강력한 상승 추세임을 의미합니다.
-                        </div>
-                      </div>
+                  return (
+                    <div className="w-full h-full min-h-[80px]">
+                      <ResponsiveContainer width="100%" height={80}>
+                        <AreaChart data={chartData} margin={{ top: 5, right: 0, left: 0, bottom: 5 }}>
+                          <defs>
+                            <linearGradient id={`color-${item.ticker}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={color} stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor={color} stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <YAxis domain={['dataMin', 'dataMax']} hide />
+                          <ReferenceLine y={0} stroke="rgba(0,0,0,0.1)" strokeDasharray="3 3" />
+                          <Area 
+                            type="monotone" 
+                            dataKey="val" 
+                            stroke={color} 
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill={`url(#color-${item.ticker})`}
+                            isAnimationActive={true}
+                          />
+                          <RechartsTooltip
+                              content={({ active, payload }: any) => {
+                                  if (active && payload && payload.length) {
+                                    const data = payload[0].payload;
+                                    const pColor = data.val >= 0 ? 'text-emerald-500' : 'text-rose-500';
+                                    return (
+                                        <div className="bg-white border border-slate-200 p-2 rounded shadow-xl text-[10px] font-mono z-50 pointer-events-none">
+                                            <p className="font-bold text-slate-500 mb-0.5">{data.name}</p>
+                                            <p className="font-black text-slate-900">{formatPrice(data.price)}</p>
+                                            <p className={`font-bold ${pColor}`}>
+                                                {data.val >= 0 ? '+' : ''}{data.val.toFixed(2)}%
+                                            </p>
+                                        </div>
+                                    );
+                                  }
+                                  return null;
+                              }}
+                              cursor={{ stroke: 'rgba(0,0,0,0.1)', strokeWidth: 1, strokeDasharray: '3 3' }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
                     </div>
+                  );
+                })()}
+              </div>
+
+              {/* Status Badges - Now Always Visible */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="bg-white/90 px-2 py-1 rounded-md border border-slate-200 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono">
+                  {isProfit ? <TrendingUp className="w-3 h-3 text-emerald-500" /> : <TrendingDown className="w-3 h-3 text-rose-500" />}
+                  <span className={isProfit ? 'text-emerald-500' : 'text-rose-500'}>
+                    {isProfit ? '+' : ''}{currentReturnPct.toFixed(2)}%
+                  </span>
+                  <span className="text-[8px] text-slate-400 ml-1 uppercase">ROI</span>
+                </div>
+                
+                <div className="bg-white/90 px-2 py-1 rounded-md border border-amber-500/20 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono group/dnapp relative cursor-help">
+                  <Zap className="w-3 h-3 text-amber-500" />
+                  <span className="text-slate-900">{item.initialDnaScore ? `${Math.round(item.initialDnaScore)}%` : 'MANUAL'}</span>
+                  <span className="text-[8px] text-slate-400 ml-1 uppercase underline decoration-amber-500/30 underline-offset-2 tracking-tighter">DNA MATCH</span>
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-slate-900 text-white text-[8px] p-2 rounded shadow-xl opacity-0 group-hover/dnapp:opacity-100 transition-opacity z-50 pointer-events-none leading-relaxed font-normal normal-case tracking-normal hidden sm:block">
+                    <span className="text-amber-400 font-bold">Initial DNA Match:</span> 관심목록에 최초 등록될 당시 스캐너가 측정한 퀀트 잠재력 점수 (Fixed)
                   </div>
-                );
-              })()}
+                </div>
+
+                <div className="bg-white/90 px-2 py-1 rounded-md border border-emerald-500/20 shadow-sm flex items-center gap-1 text-[10px] font-black font-mono group/er relative cursor-help">
+                  <Activity className="w-3 h-3 text-emerald-500" />
+                  <span className="text-slate-900">ER {efficiencyRatio}</span>
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-slate-900 text-white text-[8px] p-2 rounded shadow-xl opacity-0 group-hover/er:opacity-100 transition-opacity z-50 pointer-events-none leading-relaxed font-normal normal-case tracking-normal">
+                    <span className="text-emerald-400 font-bold">Efficiency Ratio:</span> 추세 순도. 1.0에 가까울수록 잡음 없이 깔끔하고 강력한 상승 추세임을 의미합니다.
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           
@@ -553,50 +560,49 @@ const WatchlistItemCard = ({ item, stock, viewMode, onRemove, benchmarkHistory, 
                  </div>
                </div>
 
-               {/* Score & Decay */}
-               <div className="flex flex-col items-end min-w-[100px]">
-                 <div className="flex items-center gap-1.5 bg-[#0176d3]/10 text-[#0176d3] px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest border border-[#0176d3]/20 whitespace-nowrap">
-                    <ShieldCheck className="w-3 h-3" />
-                    {dnaScore}% DNA
+               {/* Score & Decay & Stats Group */}
+               <div className="flex items-center gap-4 min-w-[320px] justify-end">
+                  {/* DNA Match Badge (Fixed) */}
+                  <div className="flex items-center gap-1 bg-amber-500/5 text-amber-600 px-2.5 py-1.5 rounded-lg border border-amber-500/10 text-[10px] font-bold">
+                    <Zap className="w-3 h-3 fill-current" />
+                    {item.initialDnaScore ? `${Math.round(item.initialDnaScore)}%` : 'MANUAL'} MATCH
                   </div>
-                  {timePenalty > 0 && (
-                    <span className="text-[8px] text-rose-400 font-bold mt-1 opacity-80 flex items-center gap-1">
-                      <TrendingDown className="w-2 h-2" /> {timePenalty.toFixed(0)}pt Decay
-                    </span>
-                  )}
-                  {action === 'TIME_STOP' && (
-                    <span className="text-[8px] bg-amber-500 text-white px-1.5 py-0.5 rounded font-bold mt-1 uppercase animate-pulse">
-                      Time Stop
-                    </span>
-                  )}
-                  {action === 'EXIT' && (
-                    <span className="text-[8px] bg-rose-500 text-white px-1.5 py-0.5 rounded font-bold mt-1 uppercase animate-pulse">
-                      Exit
-                    </span>
-                  )}
-               </div>
 
-               {/* ROI Badge */}
-               <div className={clsx(
-                 "flex flex-col items-end min-w-[80px] p-2 rounded-lg border",
-                 isProfit ? "bg-emerald-50/50 border-emerald-100" : "bg-rose-50/50 border-rose-100"
-               )}>
-                 <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-0.5">Total ROI</p>
-                 <p className={`text-sm font-black font-mono flex items-center gap-1 ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
-                   {isProfit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                   {isProfit ? '+' : ''}{currentReturnPct.toFixed(2)}%
-                 </p>
-               </div>
+                  {/* Trade Health Badge */}
+                  <div className="flex flex-col items-end min-w-[100px]">
+                    <div className="flex items-center gap-1.5 bg-indigo-500/10 text-indigo-600 px-2.5 py-1.5 rounded-lg text-[10px] font-black tracking-widest border border-indigo-500/20 whitespace-nowrap">
+                       <ShieldCheck className="w-3 h-3" />
+                       {dnaScore}% HEALTH
+                     </div>
+                     {timePenalty > 0 && (
+                       <span className="text-[8px] text-rose-400 font-bold mt-1 opacity-80 flex items-center gap-1">
+                         <TrendingDown className="w-2 h-2" /> {timePenalty.toFixed(0)}pt Decay
+                       </span>
+                     )}
+                  </div>
 
-               <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove(item.ticker);
-                }}
-                className="p-2.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all border border-transparent hover:border-rose-100"
-              >
-                <Trash2 className="w-4.5 h-4.5" />
-              </button>
+                  {/* ROI Badge */}
+                  <div className={clsx(
+                    "flex flex-col items-end min-w-[80px] p-2 rounded-lg border",
+                    isProfit ? "bg-emerald-50/50 border-emerald-100" : "bg-rose-50/50 border-rose-100"
+                  )}>
+                    <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-0.5">Total ROI</p>
+                    <p className={`text-sm font-black font-mono flex items-center gap-1 ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {isProfit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      {isProfit ? '+' : ''}{currentReturnPct.toFixed(2)}%
+                    </p>
+                  </div>
+
+                  <button 
+                   onClick={(e) => {
+                     e.stopPropagation();
+                     onRemove(item.ticker);
+                   }}
+                   className="p-2.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all border border-transparent hover:border-rose-100"
+                 >
+                   <Trash2 className="w-4.5 h-4.5" />
+                 </button>
+               </div>
             </div>
           )}
         </div>

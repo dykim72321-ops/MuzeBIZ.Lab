@@ -153,7 +153,7 @@ export const StockCard: React.FC<StockCardProps> = ({
             </div>
           )}
           
-          <AddToWatchlistBtn ticker={stock.ticker} variant="icon" />
+          <AddToWatchlistBtn ticker={stock.ticker} dnaScore={stock.dnaScore} variant="icon" />
         </div>
       </div>
       

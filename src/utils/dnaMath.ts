@@ -7,25 +7,32 @@ export function calculateDNATargets(
   currentHigh: number = 0,
   atr5?: number,
   volatilityStdDev: number = 0,
-  daysHeld: number = 0
+  daysHeld: number = 0,
+  efficiencyRatio: number = 0.5,
+  isRelativeStrong: boolean = false
 ) {
   // 1. Fallback: 데이터 없을 시 매수가의 20% 변동성 가정
   const effectiveATR = atr5 && atr5 > 0 ? atr5 : entryPrice * 0.20;
   
-  // 2. 동적 멀티플라이어 (1.5 ~ 3.0)
-  // Time-based ATR Tightening: 시간이 지날수록 스탑라인을 바짝 올려 수익을 보존
+  // 2. 동적 목표가 (Target) - ER(Efficiency Ratio) 기반 가변 멀티플라이어 (2.0 ~ 3.0)
+  // 추세가 깔끔할수록(ER이 높을수록) 더 높은 수익을 추구
+  const targetMultiplier = 2.0 + (Math.max(0, Math.min(1, efficiencyRatio)) * 1.0);
+  const targetPrice = entryPrice + (effectiveATR * targetMultiplier);
+
+  // 3. 동적 손절가 멀티플라이어 (Chandelier Exit 기반)
+  // Grace Period: 주도주(RS가 높음)인 경우 7일, 아니면 5일간 초기 변동성 허용
+  const gracePeriod = isRelativeStrong ? 7 : 5;
+  
   let multiplierBase = 2.0;
-  if (daysHeld > 5) {
-    // 5일 초과 시 하루마다 0.1씩 멀티플라이어 감소 (최소 1.0까지)
-    multiplierBase = Math.max(1.0, 2.0 - ((daysHeld - 5) * 0.1));
+  if (daysHeld > gracePeriod) {
+    // 유예 기간 초과 시 하루마다 0.1씩 멀티플라이어 감소 (최소 1.2까지 - Shakeout 방지)
+    multiplierBase = Math.max(1.2, 2.0 - ((daysHeld - gracePeriod) * 0.1));
   }
   
+  // 변동성 표준편차에 따른 미세 조정
   const volatilityFactor = Math.min(1.0, volatilityStdDev / (entryPrice * 0.05));
   const dynamicMultiplier = multiplierBase + (volatilityFactor * 1.0); 
 
-  // 3. 목표가 (Target) - 고정 2.5 ATR
-  const targetPrice = entryPrice + (effectiveATR * 2.5);
-  
   // 4. Chandelier Exit (Trailing Stop)
   // 매수가 기준 초기 손절선
   const initialStop = entryPrice - (effectiveATR * 1.5);
@@ -40,6 +47,7 @@ export function calculateDNATargets(
     targetPrice: Number(targetPrice.toFixed(4)),
     stopPrice: Number(stopPrice.toFixed(4)),
     effectiveATR,
+    targetMultiplier: Number(targetMultiplier.toFixed(2)),
     isTrailing: trailingStop > initialStop
   };
 }
@@ -67,7 +75,8 @@ export function calculateEfficiencyRatio(prices: number[]): number {
  */
 export function calculateKellyWeight(winProb: number, winLossRatio: number): number {
   // f* = p - (1-p)/r
-  const r = Math.max(0.1, winLossRatio);
+  // 손익비(r)를 최대 5.0으로 캡핑하여 과도한 비중 실림 방지 (안전장치)
+  const r = Math.min(5.0, Math.max(0.1, winLossRatio));
   const p = winProb / 100;
   const kelly = p - (1 - p) / r;
   
