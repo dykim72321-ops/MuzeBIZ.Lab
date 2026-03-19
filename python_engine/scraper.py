@@ -390,8 +390,8 @@ class FinvizHunter:
             if is_super:
                 total_super_oversold += 1
 
-            # DNA Score 50 이상 종목만 알림 (노이즈 필터링)
-            if dna_score >= 50 or is_super:
+            # DNA Score 80 이상 종목만 알림 (노이즈 필터링 강화)
+            if dna_score >= 80 or is_super:
                 # Discord (기존)
                 await self.webhook.send_discovery_alert(
                     ticker=ticker_symbol,
