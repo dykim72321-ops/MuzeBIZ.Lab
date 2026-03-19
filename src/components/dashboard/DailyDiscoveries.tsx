@@ -92,8 +92,9 @@ export const DailyDiscoveries: React.FC<DailyDiscoveriesProps> = ({
       </div>
 
       <div className="space-y-4">
-        {discoveries.map((item, index) => (
-          <DiscoveryCard key={item.id} item={item} rank={index + 1} />
+        {/* Bug Fix: skip discoveries[0] — already shown in TopPickHero above */}
+        {discoveries.slice(1).map((item, index) => (
+          <DiscoveryCard key={item.id} item={item} rank={index + 2} />
         ))}
       </div>
     </Card>
@@ -148,6 +149,9 @@ const DiscoveryCard: React.FC<{ item: DiscoveryItem; rank: number }> = ({ item, 
         setBacktestResult(data.total_return_pct);
       }
     },
+    onError: () => {
+      // isError state on mutation will drive the red UI — no extra state needed
+    },
   });
 
   const handleBacktest = (e: React.MouseEvent) => {
@@ -195,15 +199,21 @@ const DiscoveryCard: React.FC<{ item: DiscoveryItem; rank: number }> = ({ item, 
             "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black transition-all flex-shrink-0 uppercase tracking-wider",
             backtestMutation.isPending
               ? "bg-slate-700 text-slate-400 cursor-wait"
-              : backtestResult !== null
-                ? backtestResult >= 0
-                  ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
-                  : "bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30"
-                : "bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-white/5"
+              : backtestMutation.isError
+                ? "bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/40 cursor-pointer"
+                : backtestResult !== null
+                  ? backtestResult >= 0
+                    ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
+                    : "bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30"
+                  : "bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-white/5"
           )}
         >
           {backtestMutation.isPending ? (
             <Loader2 className="w-3 h-3 animate-spin" />
+          ) : backtestMutation.isError ? (
+            <>
+              <span>✗ FAILED</span>
+            </>
           ) : backtestResult !== null ? (
             <>
               <TrendingUp className="w-3 h-3" />
