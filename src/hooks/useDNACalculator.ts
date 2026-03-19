@@ -22,7 +22,9 @@ const LOADING_DEFAULTS = {
   efficiencyRatio: 0,
   kellyWeight: 0,
   isTrailing: false,
-  action: 'HOLD' as 'HOLD' | 'TIME_STOP' | 'EXIT',
+  rrRatio: 0,
+  rejectReason: undefined as string | undefined,
+  action: 'HOLD' as 'HOLD' | 'TIME_STOP' | 'EXIT' | 'REJECT',
   isLoading: true,
 };
 
@@ -74,7 +76,9 @@ export function useDNACalculator({
       targetPrice: T, 
       stopPrice: S, 
       effectiveATR, 
-      isTrailing 
+      isTrailing,
+      rrRatio,
+      rejectReason,
     } = calculateDNATargets(
       buyPrice, 
       currentPrice, 
@@ -129,9 +133,13 @@ export function useDNACalculator({
     // ✅ Kelly 상한선: 실제 투자에서 100% 이상은 불가능하므로 1.0으로 클램프
     let kellyWeight = Math.min(1.0, Math.max(0, kellyResult.weight));
 
-    let actionFlag: 'HOLD' | 'TIME_STOP' | 'EXIT' = 'HOLD';
+    let actionFlag: 'HOLD' | 'TIME_STOP' | 'EXIT' | 'REJECT' = 'HOLD';
     
-    if (kellyResult.rawKelly < 0 || isNaN(kellyResult.rawKelly)) {
+    // R/R Ratio 미달 → REJECT (시장이 먹을 자리를 안 줄 때는 진입하지 않는다)
+    if (rejectReason) {
+      kellyWeight = 0;
+      actionFlag = 'REJECT';
+    } else if (kellyResult.rawKelly < 0 || isNaN(kellyResult.rawKelly)) {
       kellyWeight = 0;
       actionFlag = 'EXIT';
     } else if (daysHeld > 3) {
@@ -151,6 +159,8 @@ export function useDNACalculator({
       efficiencyRatio: Number(efficiencyRatio.toFixed(2)),
       kellyWeight,
       isTrailing,
+      rrRatio,
+      rejectReason,
       action: actionFlag,
       isLoading: false,
     };

@@ -1,5 +1,10 @@
 /**
  * ATR 기반 목표가(Target) 및 Chandelier Exit (Trailing Stop) 연산 로직
+ *
+ * [Design Philosophy]
+ * - Target/Stop은 시장의 자연스러운 ATR을 따른다. 절대 강제 보정하지 않는다.
+ * - 자연스러운 손익비가 1.5배 미만이면, 목표가를 올리는 것이 아니라 진입 자체를 REJECT한다.
+ * - Fallback 변동성은 종목의 가격대에 따라 다르게 적용한다 (Tiered Fallback).
  */
 export function calculateDNATargets(
   entryPrice: number, 
@@ -8,52 +13,73 @@ export function calculateDNATargets(
   atr5?: number,
   volatilityStdDev: number = 0,
   daysHeld: number = 0
-) {
-  // 1. Fallback: 데이터 없을 시 매수가의 8% 변동성 가정 (현실적인 스윙 변동성)
-  // 저가주(Under $1)의 경우 주가의 1% 혹은 최소 0.0005로 조정하여 초정밀 대응
+): {
+  targetPrice: number;
+  stopPrice: number;
+  effectiveATR: number;
+  isTrailing: boolean;
+  rrRatio: number;
+  rejectReason?: string; // 손익비 미달 또는 논리 오류 시 사유
+} {
+  // ─────────────────────────────────────────────────────────────
+  // STEP 1. Tiered Fallback: 종목 가격대에 따라 기본 변동성 분리
+  //   - 페니스탁($5 미만): 20% 유지 (노이즈 쉐이크아웃 방어)
+  //   - 일반 스윙($5 이상): 8% 적용 (정교한 타점)
+  // ─────────────────────────────────────────────────────────────
+  const fallbackVolatility = entryPrice < 5 ? 0.20 : 0.08;
   const minAtr = entryPrice < 1 ? Math.max(0.0005, entryPrice * 0.01) : 0.01;
-  const effectiveATR = Math.max(minAtr, atr5 && atr5 > 0 ? atr5 : entryPrice * 0.08);
-  
-  // 2. 동적 목표가 (Target) - [Optimized] 4.0 ATR (보수적 수익 실현)
-  let targetPrice = entryPrice + (effectiveATR * 4.0); 
+  const effectiveATR = Math.max(minAtr, atr5 && atr5 > 0 ? atr5 : entryPrice * fallbackVolatility);
 
-  // 3. 동적 손절가 멀티플라이어 (Chandelier Exit 기반)
-  // 1. Time-based ATR Tightening (시작 3.0 -> 최저 1.8)
-  let multiplierBase = 2.5; // [Fix] 3.0 -> 2.5로 더 타이트하게 보호
+  // ─────────────────────────────────────────────────────────────
+  // STEP 2. 자연스러운 목표가 계산 (ATR × 4.0 — 강제 보정 없음)
+  // ─────────────────────────────────────────────────────────────
+  const targetPrice = entryPrice + (effectiveATR * 4.0);
+
+  // ─────────────────────────────────────────────────────────────
+  // STEP 3. 손절가 계산 (Chandelier Exit + Time-based Tightening)
+  // ─────────────────────────────────────────────────────────────
+  let multiplierBase = 2.5;
   if (daysHeld > 1) {
     multiplierBase = Math.max(1.5, 2.5 - (daysHeld * 0.4));
   }
-  
-  const volatilityFactor = Math.min(1.0, volatilityStdDev / (entryPrice * 0.05));
-  const dynamicMultiplier = multiplierBase + (volatilityFactor * 0.5); 
 
-  // 4. Chandelier Exit (Trailing Stop)
+  const volatilityFactor = Math.min(1.0, volatilityStdDev / (entryPrice * 0.05));
+  const dynamicMultiplier = multiplierBase + (volatilityFactor * 0.5);
+
   const initialStop = entryPrice - (effectiveATR * 2.5);
   const highSoFar = Math.max(currentHigh, currentPrice, entryPrice);
   const trailingStop = highSoFar - (effectiveATR * dynamicMultiplier);
   
-  // 최종 손절가 (매수가의 50% 하방 방어 유지)
+  // 손절가: 매수가의 50% 하방 방어선 유지
   let stopPrice = Math.max(initialStop, trailingStop, entryPrice * 0.5);
-
-  // [Fix] 논리적 가드 (Math Guards)
-  // 1. Target은 항상 현재가보다 최소 3% 위, 진입가보다 최소 5% 위여야 함
-  targetPrice = Math.max(targetPrice, currentPrice * 1.03, entryPrice * 1.05);
   
-  // 2. Stop은 항상 현재가보다 낮아야 함 (직격 손절 방지)
+  // 손절가는 현재가를 반드시 하회해야 함 (직격 손절 방지)
   stopPrice = Math.min(stopPrice, currentPrice * 0.98);
 
-  // 3. R/R Ratio Guard: Target 수익폭이 Stop 리스크폭의 최소 1.5배가 되도록 보정
+  // ─────────────────────────────────────────────────────────────
+  // STEP 4. R/R Ratio 검증 및 REJECT 로직
+  //   [핵심 원칙] 손익비 미달 시 목표가를 올리지 않는다.
+  //   대신 rejectReason을 반환하여 상위 로직에서 REJECT 처리한다.
+  // ─────────────────────────────────────────────────────────────
   const risk = entryPrice - stopPrice;
-  const minReward = risk * 1.5;
-  if ((targetPrice - entryPrice) < minReward) {
-    targetPrice = entryPrice + minReward;
+  const reward = targetPrice - entryPrice;
+  const rrRatio = risk <= 0 ? 0 : reward / risk;
+
+  let rejectReason: string | undefined;
+  if (rrRatio < 1.5) {
+    rejectReason = `R/R Ratio 미달 (${rrRatio.toFixed(2)}x < 1.5x). ATR 기반 목표가가 리스크 대비 충분한 수익 구간에 형성되지 않음. 진입 회피 권고.`;
+  }
+  if (stopPrice >= currentPrice) {
+    rejectReason = `손절가(${stopPrice.toFixed(4)})가 현재가(${currentPrice.toFixed(4)}) 이상으로 설정 불가. 진입 회피 권고.`;
   }
 
   return {
     targetPrice: Number(targetPrice.toFixed(4)),
     stopPrice: Number(stopPrice.toFixed(4)),
     effectiveATR,
-    isTrailing: trailingStop > initialStop
+    isTrailing: trailingStop > initialStop,
+    rrRatio: Number(rrRatio.toFixed(2)),
+    rejectReason,
   };
 }
 

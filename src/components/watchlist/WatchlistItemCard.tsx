@@ -1,4 +1,4 @@
-import React from 'react';
+// WatchlistItemCard.tsx
 import { 
   Trash2, ShieldCheck, Activity, Clock, HelpCircle, Zap, TrendingUp
 } from 'lucide-react';
@@ -125,10 +125,15 @@ export const WatchlistItemCard = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className={clsx(
-                    "px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border",
-                    action === 'HOLD' ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-rose-50 text-rose-600 border-rose-100"
-                  )}>
+                  <div 
+                    className={clsx(
+                      "px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border",
+                      action === 'HOLD' ? "bg-emerald-50 text-emerald-600 border-emerald-100" 
+                        : action === 'REJECT' ? "bg-amber-50 text-amber-600 border-amber-200" 
+                        : "bg-rose-50 text-rose-600 border-rose-100"
+                    )}
+                    title={action === 'REJECT' ? (dna.rejectReason || 'R/R Ratio 미달 — 진입 회피 권고') : ''}
+                  >
                     {action}
                   </div>
                   <button 
@@ -265,10 +270,15 @@ export const WatchlistItemCard = ({
                     </p>
                   </div>
 
-                  <div className={clsx(
-                    "px-3 py-1 rounded-lg text-[10px] font-black uppercase border",
-                    action === 'HOLD' ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-rose-50 text-rose-600 border-rose-100"
-                  )}>
+                   <div 
+                    className={clsx(
+                      "px-3 py-1 rounded-lg text-[10px] font-black uppercase border",
+                      action === 'HOLD' ? "bg-emerald-50 text-emerald-600 border-emerald-100" 
+                        : action === 'REJECT' ? "bg-amber-50 text-amber-600 border-amber-200"
+                        : "bg-rose-50 text-rose-600 border-rose-100"
+                    )}
+                    title={action === 'REJECT' ? (dna.rejectReason || 'R/R Ratio 미달') : ''}
+                  >
                     {action}
                   </div>
 
