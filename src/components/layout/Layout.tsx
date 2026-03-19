@@ -11,7 +11,7 @@ export const Layout = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 selection:text-blue-900">
-      <Toaster position="top-right" theme="light" />
+      <Toaster position="bottom-right" theme="dark" richColors />
 
       {/* ⚡ Realtime Pulse Indicator (Global) */}
       <div className="fixed top-20 right-4 z-[90] flex items-center gap-2 pointer-events-none">

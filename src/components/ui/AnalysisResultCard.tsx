@@ -3,7 +3,7 @@ import { Target, Zap } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { StockTerminalModal } from '../dashboard/StockTerminalModal';
 import { addToWatchlist } from '../../services/watchlistService';
-
+import { toast } from 'sonner';
 import clsx from 'clsx';
 
 interface AnalysisResultCardProps {
@@ -143,8 +143,17 @@ export const AnalysisResultCard = ({
                 }}
 
                 onAddToWatchlist={async () => {
-                    await addToWatchlist(ticker, undefined, 'WATCHING', price, undefined, undefined, dnaScore);
-                    alert(`${ticker}가 관심 종목에 추가되었습니다.`);
+                    try {
+                        await addToWatchlist(ticker, undefined, 'WATCHING', price, undefined, undefined, dnaScore);
+                        toast.success(`${ticker} — 관심 종목에 추가되었습니다`, {
+                            description: `DNA Score: ${dnaScore}점`,
+                            duration: 3000,
+                        });
+                    } catch (error) {
+                        toast.error('관심 종목 추가에 실패했습니다', {
+                            description: '잠시 후 다시 시도해 주세요.',
+                        });
+                    }
                 }}
             />
         </>
