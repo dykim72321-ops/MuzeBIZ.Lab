@@ -15,7 +15,7 @@ interface AnalysisResultCardProps {
     matchedLegend: { ticker: string; similarity: number };
     riskLevel: string;
     className?: string;
-    aiSummary?: string;
+    quantSummary?: string;
     price?: number;
 }
 
@@ -28,7 +28,7 @@ export const AnalysisResultCard = ({
     matchedLegend,
     riskLevel,
     className,
-    aiSummary,
+    quantSummary,
     price
 }: AnalysisResultCardProps) => {
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -109,7 +109,7 @@ export const AnalysisResultCard = ({
                     {/* System Logic Verdict */}
                     <div className="flex-1 flex flex-col justify-center min-h-[48px] mt-2 mb-4">
                         <p className="text-[12px] text-slate-400 font-medium leading-relaxed line-clamp-3 italic opacity-80 group-hover:opacity-100 transition-opacity">
-                            "{(aiSummary || bullPoints[0] || "").split(';')[0]}..."
+                            "{(quantSummary || bullPoints[0] || "").split(';')[0]}..."
                         </p>
                     </div>
 
@@ -139,7 +139,7 @@ export const AnalysisResultCard = ({
                     bearPoints: bearPoints.length > 0 ? bearPoints : ["리스크 요인 스캔 중", "시장 변동성 확인 중"],
                     matchedLegend: matchedLegend || { ticker: 'N/A', similarity: 0 },
                     riskLevel,
-                    aiSummary: aiSummary || `${ticker}는 현재 시스템 분석 점수 ${dnaScore}점으로 평가되고 있습니다.`
+                    quantSummary: quantSummary || `${ticker}는 현재 시스템 분석 점수 ${dnaScore}점으로 평가되고 있습니다.`
                 }}
 
                 onAddToWatchlist={async () => {

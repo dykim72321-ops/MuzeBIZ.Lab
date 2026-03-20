@@ -245,7 +245,8 @@ const pendingRequests = new Map<string, Promise<Stock | null>>();
 
 export async function fetchMultipleStocksOptimized(tickers: string[], historyRange?: string): Promise<Stock[]> {
   // Dynamically adjust chunk size based on API provider limits
-  const CHUNK_SIZE = FINNHUB_API_KEY ? 8 : 4; 
+  // Dynamically adjust chunk size - increased for better performance
+  const CHUNK_SIZE = FINNHUB_API_KEY ? 20 : 12; 
   const results: Stock[] = [];
   
   // Deduplicate and filter out empty tickers
@@ -275,9 +276,9 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
       console.error(`[Fetch Optimization] Chunk failed for ${chunk.join(',')}:`, err);
     }
     
-    // Minimal delay between chunks to be safe (Increase if Yahoo is 429ing)
+    // Minimal delay between chunks to be safe but fast
     if (i + CHUNK_SIZE < uniqueTickers.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Increase to 1s
+      await new Promise(resolve => setTimeout(resolve, 200)); 
     }
   }
   
@@ -422,7 +423,7 @@ export async function fetchStockHistory(ticker: string, resolution: string = 'D'
 
 
 
-export async function getTopStocks(historical: boolean = false): Promise<Stock[]> {
+export async function getTopStocks(historical: boolean = false, limit: number = 30): Promise<Stock[]> {
   try {
     // 1. 데이터 조회 (historical이면 시간 제한 해제)
     let query = supabase
@@ -436,7 +437,7 @@ export async function getTopStocks(historical: boolean = false): Promise<Stock[]
 
     const { data: discoveryData, error: discoveryError } = await query
       .order('updated_at', { ascending: false })
-      .limit(historical ? 100 : 30);
+      .limit(historical ? 100 : limit);
 
 
     if (discoveryError) throw discoveryError;
@@ -504,31 +505,40 @@ export async function getTopStocks(historical: boolean = false): Promise<Stock[]
 }
 
 function calculateDnaScore(price: number, change: number, volume: number): number {
-  // 1. Baseline: 퀀트 터미널은 50점을 '중립'으로 시작한다.
+  // 1. Baseline: Quant terminal starts at a neutral 50.
   let score = 50;
   
-  // 2. 가격 기반 가산점: 페니스탁($5 미만)에 대한 변동성 프리미엄 반영
-  // 하지만 무조건적인 가산이 아니라, $1 미만 극위험군은 15점으로 하향 조정 (기존 30점)
-  if (price < 1.0) score += 15;
-  else if (price < 5.0) score += 10;
+  // 2. Balanced Penny Stock Boost: 
+  // ONLY apply the volatility premium if the stock isn't in a severe downtrend (Falling Knife).
+  if (change >= -5) {
+    if (price < 1.0) score += 15;
+    else if (price < 5.0) score += 10;
+  }
   
-  // 3. 변동성 페널티 (핵심 수정): 급락에 대한 강력한 감점 (Falling Knife 방지)
-  if (change < -30) score -= 50;      // -30% 이상 폭락: 회복 불능 수준의 타격
-  else if (change < -15) score -= 30; // -15% 이상 급락: 기술적 손실
-  else if (change < -5) score -= 10;  // -5% 하락: 단기 조정
+  // 3. Crash Penalty (Aggressive Negative Changes): 
+  // Escalated penalties to protect against death spirals.
+  if (change < -40) score -= 60;      // Catastrophic crash
+  else if (change < -30) score -= 50; // Severe gap down
+  else if (change < -15) score -= 30; // Technical breakdown
+  else if (change < -5) score -= 15;  // Short-term correction
   
-  // 4. 상승 모멘텀 가산점: 상승 추세일 때만 점수 부여
+  // 4. Upward Momentum:
   if (change > 20) score += 20;
   else if (change > 10) score += 15;
   else if (change > 3) score += 5;
   
-  // 5. 유동성(Volume) 보정: 거래량이 실린 움직임에 신뢰도 부여
-  if (volume > 10000000) {
-    if (change > 0) score += 10;      // 거래량 실린 상승
-    else if (change < 0) score -= 10; // 거래량 실린 하락 (투매 확인)
+  // 5. Liquidity Indicator (Dollar Volume): 
+  // Volume relative to price is a more accurate metric for penny stock liquidity.
+  const dollarVolume = price * volume;
+  
+  if (dollarVolume > 5000000) { // High Liquidity (> $5M traded)
+    if (change > 0) score += 10;      // High liquidity + Upward momentum = Strong Conviction
+    else if (change < 0) score -= 15; // High liquidity + Downward momentum = Distribution/Institutional Dumping
+  } else if (dollarVolume > 0 && dollarVolume < 500000) {
+    score -= 10; // Illiquidity penalty (Dangerous to enter/exit)
   }
 
-  // 6. 결과 클램핑
+  // 6. Result Clamping: strictly bound between 0 and 100
   return Math.min(100, Math.max(0, score));
 }
 

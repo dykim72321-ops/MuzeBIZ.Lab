@@ -1,14 +1,15 @@
-import { usePulseSocket, type PulseData } from '../hooks/usePulseSocket';
+import { useMarketEngine } from '../hooks/useMarketEngine';
 import { QuantSignalCard } from '../components/ui/QuantSignalCard';
 import { BacktestChart } from '../components/ui/BacktestChart';
-import { Activity, Rocket, Loader2, CheckCircle, TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { useState } from 'react';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import clsx from 'clsx';
+import { MarketCommandHeader } from '../components/layout/MarketCommandHeader';
+import { processSignal } from '../utils/signalProcessor';
 
 // ─────────────────────────────────────────────────────────
 // NORMAL 강도 전용 미니 카드 (축약형 정보 표시)
 // ─────────────────────────────────────────────────────────
-const NormalSignalMiniCard = ({ rawData }: { rawData: PulseData }) => {
+const NormalSignalMiniCard = ({ rawData }: { rawData: any }) => {
   const signalIcon = rawData.signal === 'BUY'
     ? <TrendingUp className="w-4 h-4 text-emerald-600" />
     : rawData.signal === 'SELL'
@@ -18,7 +19,7 @@ const NormalSignalMiniCard = ({ rawData }: { rawData: PulseData }) => {
   const signalColor = rawData.signal === 'BUY' ? 'text-emerald-600' : rawData.signal === 'SELL' ? 'text-rose-600' : 'text-slate-500';
 
   return (
-    <div className="flex items-center justify-between px-6 py-4 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all group">
+    <div className="flex items-center justify-between px-6 py-4 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-md transition-all group shadow-sm">
       <div className="flex items-center gap-4">
         <div className="w-1 h-10 bg-slate-200 rounded-full group-hover:bg-blue-400 transition-colors" />
         <div>
@@ -54,99 +55,40 @@ const NormalSignalMiniCard = ({ rawData }: { rawData: PulseData }) => {
 };
 
 // ─────────────────────────────────────────────────────────
-// 메인 대시보드 컴포넌트
+// 메인 대시보드 컴포넌트 (Monitoring Orbit)
 // ─────────────────────────────────────────────────────────
 const PulseDashboard: React.FC = () => {
-  const { pulseMap, isConnected } = usePulseSocket(`ws://${window.location.host}/py-api/ws/pulse`);
+  const { pulseMap, isConnected, isHunting, huntStatus, triggerHunt } = useMarketEngine();
 
   // STRONG / NORMAL 분류
   const allTickers = Object.keys(pulseMap);
   const strongTickers = allTickers.filter(t => pulseMap[t].strength === 'STRONG');
   const normalTickers = allTickers.filter(t => pulseMap[t].strength === 'NORMAL');
 
-  const [isHunting, setIsHunting] = useState(false);
-  const [huntStatus, setHuntStatus] = useState<'success' | 'error' | null>(null);
-
-  const handleTriggerHunt = async () => {
-    setIsHunting(true);
-    setHuntStatus(null);
-    try {
-      const adminKey = import.meta.env.VITE_ADMIN_SECRET_KEY || 'muze_secret_key_2024';
-      const response = await fetch('/py-api/api/hunt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
-      });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      setHuntStatus('success');
-      setTimeout(() => setHuntStatus(null), 3000);
-    } catch (error) {
-      setHuntStatus('error');
-      setTimeout(() => setHuntStatus(null), 3000);
-    } finally {
-      setIsHunting(false);
-    }
-  };
-
   return (
     <div className="max-w-[1600px] mx-auto px-6 py-8 space-y-10 animate-in fade-in duration-700 bg-slate-50 min-h-screen">
 
-      {/* ─── Header ────────────────────────────────────────────── */}
-      <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-        <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tighter flex items-center gap-3">
-            <div className="p-2 bg-indigo-50 rounded-lg">
-              <Activity className="w-7 h-7 text-indigo-600 animate-pulse" />
-            </div>
-            Quant Pulse <span className="text-slate-300 font-bold">/ Terminal</span>
-          </h1>
-          <p className="text-slate-500 font-medium mt-1">실시간 퀀트 데이터 스트리밍 및 AI 시그널 터미널</p>
-        </div>
-
-        <div className="flex items-center gap-5">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleTriggerHunt}
-              disabled={isHunting}
-              className={clsx(
-                "flex items-center gap-2 px-6 py-2.5 rounded-md font-black text-sm transition-all shadow-md active:scale-95",
-                isHunting
-                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                  : 'bg-[#0176d3] hover:bg-[#014486] text-white'
-              )}
-            >
-              {isHunting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
-              {isHunting ? '엔진 가동 중...' : '딥 헌팅 실행'}
-            </button>
-
-            {huntStatus === 'success' && (
-              <span className="flex items-center gap-1.5 text-xs text-emerald-600 font-black uppercase tracking-tight bg-emerald-50 px-3 py-1.5 rounded-md border border-emerald-100 animate-in fade-in slide-in-from-bottom-2">
-                <CheckCircle className="w-3.5 h-3.5" /> 탐색 시작됨
-              </span>
-            )}
-          </div>
-
-          <div className="h-10 w-px bg-slate-200 hidden md:block" />
-
-          <div className={clsx(
-            "px-4 py-2 rounded-full text-[10px] font-black tracking-widest flex items-center gap-2 border transition-all duration-500 shadow-sm",
-            isConnected
-              ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
-              : 'bg-rose-50 text-rose-600 border-rose-100'
-          )}>
-            <span className={clsx("w-2 h-2 rounded-full", isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} />
-            {isConnected ? 'SYSTEM ONLINE' : 'OFFLINE'}
-          </div>
-        </div>
-      </header>
+      {/* ─── 통합 헤더 (Market Monitoring Orbit) ────────────────── */}
+      <MarketCommandHeader 
+        title="Quant Pulse"
+        subtitle="실시간 퀀트 데이터 스트리밍 및 AI 시그널 터미널 | Terminal"
+        isConnected={isConnected}
+        isHunting={isHunting}
+        huntStatus={huntStatus}
+        onTriggerHunt={triggerHunt}
+      />
 
       {/* ─── Empty state ────────────────────────────────────────── */}
       {allTickers.length === 0 && (
         <div className="flex flex-col items-center justify-center h-[50vh] bg-white border-2 border-dashed border-slate-200 rounded-3xl gap-4 text-slate-400 shadow-inner">
           <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-2">
-            <Activity className="w-8 h-8 opacity-20" />
+            <TrendingUp className="w-8 h-8 opacity-20" />
           </div>
           <p className="font-black text-xl tracking-tight text-slate-900">백엔드 펄스 엔진 수신 대기 중</p>
-          <p className="text-sm font-medium">상단의 '딥 헌팅 실행' 버튼을 눌러 시장 발굴을 시작해 보세요.</p>
+          <p className="text-sm font-medium text-center">
+            실시간 시장 데이터를 분석하고 있습니다.<br/>
+            상단의 '하이브리드 헌팅 트리거'를 눌러 발굴을 가속화하세요.
+          </p>
         </div>
       )}
 
@@ -157,7 +99,7 @@ const PulseDashboard: React.FC = () => {
             <div className="flex items-center gap-3">
               <div className="h-6 w-1.5 bg-[#0176d3] rounded-full shadow-sm" />
               <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">
-                ⚡ STRONG SIGNALS — AI Analysis Matrix
+                ⚡ STRONG SIGNALS — Intelligence Matrix
               </h2>
             </div>
             <span className="text-[10px] font-black text-white bg-[#0176d3] px-3 py-1 rounded-full shadow-md">
@@ -168,12 +110,14 @@ const PulseDashboard: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-10">
             {strongTickers.map((ticker) => {
               const rawData = pulseMap[ticker];
+              const displaySignal = processSignal(rawData);
+
               const cardData = {
-                dna_score: rawData.ai_metadata?.dna_score ?? null,
-                bull_case: rawData.ai_metadata?.bull_case || '상승 분석 데이터 생성 중...',
-                bear_case: rawData.ai_metadata?.bear_case || '리스크 분석 데이터 생성 중...',
-                reasoning_ko: rawData.ai_metadata?.reasoning_ko || rawData.ai_report,
-                tags: rawData.ai_metadata?.tags || [ticker, 'STRONG'],
+                dna_score: displaySignal.dnaScore,
+                bull_case: displaySignal.bullPoints.join(", "),
+                bear_case: displaySignal.bearPoints.join(", "),
+                reasoning_ko: displaySignal.reasoning,
+                tags: displaySignal.tags,
               };
 
               return (

@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { Stock } from '../types';
 
-export interface AIAnalysis {
+export interface QuantAnalysis {
   matchReasoning: string;
   bullCase: string[];
   bearCase: string[];
@@ -32,7 +32,7 @@ export interface AIAnalysis {
   };
 }
 
-export async function fetchStockAnalysis(stock: Stock): Promise<AIAnalysis | null> {
+export async function fetchStockAnalysis(stock: Stock): Promise<QuantAnalysis | null> {
   try {
     // 1. Try to fetch from "Zero-Cost" tables first
     const { data: auditData, error: auditError } = await supabase
@@ -46,16 +46,16 @@ export async function fetchStockAnalysis(stock: Stock): Promise<AIAnalysis | nul
     // 406 에러나 권한 문제는 경고만 표시하고 fallback
     if (auditError) {
       if (auditError.code === 'PGRST116') {
-        console.log(`ℹ️ No cached audit for ${stock.ticker}, using AI analysis`);
+        console.log(`ℹ️ No cached audit for ${stock.ticker}, using Quant analysis`);
       } else if (auditError.message?.includes('406') || auditError.message?.includes('Not Acceptable')) {
-        console.warn(`⚠️ RLS policy blocked access to risk_audits for ${stock.ticker}, using AI`);
+        console.warn(`⚠️ RLS policy blocked access to risk_audits for ${stock.ticker}, using Quant analysis`);
       } else {
         console.error(`❌ Failed to fetch risk_audit for ${stock.ticker}:`, auditError);
       }
     } else if (auditData) {
       console.log(`✅ Using Zero-Cost Risk Audit for ${stock.ticker}`);
       
-      // Map Zero-Cost data to AIAnalysis interface
+      // Map Zero-Cost data to QuantAnalysis interface
       return {
         matchReasoning: auditData.audit_reason,
         bullCase: [], // Heuristically empty or could be derived
@@ -72,7 +72,7 @@ export async function fetchStockAnalysis(stock: Stock): Promise<AIAnalysis | nul
       };
     }
 
-    // 2. Fallback to AI Edge Function
+    // 2. Fallback to Quant Edge Function
     const { data, error } = await supabase.functions.invoke('analyze-stock', {
       body: {
         ticker: stock.ticker,
@@ -99,9 +99,20 @@ export async function fetchStockAnalysis(stock: Stock): Promise<AIAnalysis | nul
     });
 
     if (error) throw error;
-    return data as AIAnalysis;
+    return data as QuantAnalysis;
   } catch (error) {
-    console.warn('AI Analysis failed, falling back to heuristic:', error);
+    console.warn('Quant Analysis failed, falling back to heuristic:', error);
+    return null;
+  }
+}
+
+export async function getStrategyStats() {
+  try {
+    const response = await fetch('/py-api/api/strategy/stats');
+    if (!response.ok) throw new Error('Failed to fetch strategy stats');
+    return await response.json();
+  } catch (err) {
+    console.error('Error fetching strategy stats:', err);
     return null;
   }
 }

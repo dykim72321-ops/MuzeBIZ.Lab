@@ -7,7 +7,9 @@ import { addToWatchlist } from '../services/watchlistService';
 import { useNavigate } from 'react-router-dom';
 import { calculateDNATargets } from '../utils/dnaMath';
 
-// New Components
+import { processSignal } from '../utils/signalProcessor';
+
+// Components
 import { ScannerHeader } from '../components/scanner/ScannerHeader';
 import { ScannerControls } from '../components/scanner/ScannerControls';
 import { ScannerTopFive } from '../components/scanner/ScannerTopFive';
@@ -83,52 +85,28 @@ export const ScannerPage = () => {
   };
 
   const handleDeepDive = (stock: Stock) => {
+    const displaySignal = processSignal(stock);
     const cache = (stock as { stock_analysis_cache?: Array<{ analysis: any }> }).stock_analysis_cache?.[0]?.analysis;
     const rawSummary = stock.rawAiSummary || "";
 
-    let bullPoints = ["No details available"];
-    let bearPoints = ["No details available"];
-    let aiSummaryStr = "해당 자산에 대한 최신 시장 Narrative를 분석 중입니다...";
     let quantData: any = undefined;
-
     if (rawSummary && rawSummary.trim().startsWith('{')) {
       try {
         quantData = JSON.parse(rawSummary);
-        aiSummaryStr = "순수 퀀트(수학적) 알고리즘 분석 결과가 적용되었습니다.";
-        bullPoints = [
-          `이동평균선(20일) 이격도: ${quantData.ma20_distance_pct ?? 'N/A'}%`,
-          `RSI (14일): ${quantData.rsi_14 ?? 'N/A'}`
-        ];
-        bearPoints = [
-          `최근 20일 변동성: ${quantData.volatility_20d_pct ?? 'N/A'}%`,
-          `거래량 급증 배수: ${quantData.volume_surge_multiplier ?? 'N/A'}x`
-        ];
       } catch (e) {
         console.warn(`Failed to parse raw summary for ${stock.ticker}:`, e);
       }
-    } else if (cache && Object.keys(cache).length > 0) {
-      bullPoints = cache.bullCase || bullPoints;
-      bearPoints = cache.bearCase || bearPoints;
-      aiSummaryStr = cache.aiSummary || aiSummaryStr;
-    } else if (rawSummary) {
-      const bullMatch = rawSummary.match(/🐂 Bull: (.*)/);
-      const bearMatch = rawSummary.match(/🐻 Bear: (.*)/);
-      const reasoningMatch = rawSummary.match(/💡\s*([\s\S]*)/); 
-
-      if (bullMatch) bullPoints = [bullMatch[1]];
-      if (bearMatch) bearPoints = [bearMatch[1]];
-      if (reasoningMatch) aiSummaryStr = reasoningMatch[1].trim();
     }
 
     setTerminalData({
       ticker: stock.ticker,
       dnaScore: stock.dnaScore,
       popProbability: cache?.popProbability || quantData?.historical_win_rate_pct || 0,
-      bullPoints,
-      bearPoints,
+      bullPoints: displaySignal.bullPoints,
+      bearPoints: displaySignal.bearPoints,
       matchedLegend: cache?.matchedLegend || { ticker: 'None', similarity: 0 },
       riskLevel: cache?.riskLevel || 'Medium',
-      aiSummary: aiSummaryStr,
+      aiSummary: displaySignal.reasoning,
       price: stock.price,
       change: `${stock.changePercent.toFixed(2)}%`,
       quantData

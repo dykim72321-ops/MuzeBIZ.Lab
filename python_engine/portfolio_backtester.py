@@ -328,49 +328,48 @@ class DNAValidator:
 
         self.report(all_trades)
 
-    def report(self, trades):
-        if not trades:
-            print("❌ 시뮬레이션 결과 거래 내역이 없습니다.")
-            return
+        # MDD 및 회복력 계산 (Equity Curve 기반)
+        if len(df) > 0:
+            df = df.sort_index() if hasattr(df, "index") else df
+            # 단순 누적 수익률로 Equity Curve 근사치 계산
+            df["cum_pnl"] = (1 + df["pnl"]).cumprod()
+            df["peak"] = df["cum_pnl"].cummax()
+            df["drawdown"] = (df["cum_pnl"] - df["peak"]) / df["peak"]
+            mdd = df["drawdown"].min() * 100
+            
+            # 회복력 (평균 보유일 기반 추정 또는 실제 데이터)
+            recovery_days = df["days"].mean() * 1.5 # 보수적 추정치
+        else:
+            mdd = 0
+            recovery_days = 0
 
-        df = pd.DataFrame(trades)
-        win_rate = (
-            (len(df[df["result"] == "WIN"]) / len(df)) * 100 if len(df) > 0 else 0
-        )
-        avg_pnl = df["pnl"].mean() * 100
-        avg_win = df[df["result"] == "WIN"]["pnl"].mean() * 100
-        avg_loss = df[df["result"] == "LOSS"]["pnl"].mean() * 100
-        profit_factor = (
-            abs(
-                df[df["result"] == "WIN"]["pnl"].sum()
-                / df[df["result"] == "LOSS"]["pnl"].sum()
-            )
-            if df[df["result"] == "LOSS"]["pnl"].sum() != 0
-            else float("inf")
-        )
+        stats = {
+            "total_trades": len(df),
+            "win_rate": round(win_rate, 2),
+            "avg_pnl": round(avg_pnl, 2),
+            "avg_win": round(avg_win, 2),
+            "avg_loss": round(avg_loss, 2),
+            "profit_factor": round(profit_factor, 2) if profit_factor != float("inf") else 99,
+            "mdd": round(mdd, 2),
+            "recovery_days": round(recovery_days, 1),
+            "avg_days": round(df["days"].mean(), 1) if not df.empty else 0
+        }
 
         print("\n" + "=" * 60)
         print("  🧬 DNA Scoring Engine | Statistical Backtest Report")
         print("=" * 60)
-        print(f"  총 거래 횟수 : {len(df)}회")
-        print(f"  📈 승률 (Win Rate) : {win_rate:.2f}%")
-        print(f"  💰 평균 수익률 : {avg_pnl:+.2f}%")
-        print(f"  🚀 평균 익절률 : {avg_win:.2f}%")
-        print(f"  🛡️ 평균 손절률 : {avg_loss:.2f}%")
-        print(f"  📊 손익비 (Profit Factor) : {profit_factor:.2f}x")
-        print(f"  ⏱️ 평균 보유일 : {df['days'].mean():.1f}일")
+        print(f"  총 거래 횟수 : {stats['total_trades']}회")
+        print(f"  📈 승률 (Win Rate) : {stats['win_rate']}%")
+        print(f"  💰 평균 수익률 : {stats['avg_pnl']}%")
+        print(f"  🚀 평균 익절률 : {stats['avg_win']}%")
+        print(f"  🛡️ 평균 손절률 : {stats['avg_loss']}%")
+        print(f"  📊 손익비 (Profit Factor) : {stats['profit_factor']}x")
+        print(f"  📉 MDD (최대 낙폭) : {stats['mdd']}%")
+        print(f"  ⏱️ 평균 보유일 : {stats['avg_days']}일")
         print("-" * 60)
 
-        # 판정
-        if win_rate > 55 and profit_factor > 1.5:
-            print("  🏆 [판정] 최적화 성공: 통계적 우위와 강력한 하방 방어 증명됨.")
-        elif win_rate > 50:
-            print(
-                "  🟡 [판정] 유효함: 수익 모델로서의 가치는 있으나 파라미터 미세 조정 권장."
-            )
-        else:
-            print("  🔴 [판정] 경고: 현재 파라미터는 페니 스탁의 노이즈에 취약함.")
         print("=" * 60 + "\n")
+        return stats
 
     def walk_forward_optimization(self, train_months=6, test_months=2):
         """Walk-Forward Analysis (완전 전진 분석)"""

@@ -21,9 +21,9 @@ const AlphaFundView = lazy(() => import('./pages/AlphaFundView').then(m => ({ de
 const DnaMatchView = lazy(() => import('./components/analysis/DnaMatchView').then(m => ({ default: m.DnaMatchView })));
 const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
 const MuzepartSearchPage = lazy(() => import('./pages/MuzepartSearchPage').then(m => ({ default: m.MuzepartSearchPage })));
-const CrmDashboard = lazy(() => import('./pages/CrmDashboard').then(m => ({ default: m.CrmDashboard })));
-const ContactsPage = lazy(() => import('./pages/ContactsPage').then(m => ({ default: m.ContactsPage })));
-const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
+const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const UnifiedDashboard = lazy(() => import('./pages/UnifiedDashboard').then(m => ({ default: m.UnifiedDashboard })));
+
 
 const SimulatorView = lazy(() => import('./components/dashboard/SimulatorView').then(m => ({ default: m.SimulatorView })));
 const PersonaPerformance = lazy(() => import('./components/dashboard/PersonaPerformance').then(m => ({ default: m.PersonaPerformance })));
@@ -50,12 +50,10 @@ function App() {
           <Suspense fallback={<PageLoadingFallback />}>
             <Routes>
               <Route path="/" element={<Layout />}>
-                {/* 1. 홈: CRM 허브 */}
-                <Route index element={<CrmDashboard />} />
-
-                {/* CRM 부속 라우트 */}
-                <Route path="crm/contacts" element={<ContactsPage />} />
-                <Route path="crm/projects" element={<ProjectsPage />} />
+                {/* 1. 홈: 통합 지휘 통제실 (Unified Command Center) */}
+                <Route index element={<UnifiedDashboard />} />
+                <Route path="command" element={<Navigate to="/" replace />} />
+                <Route path="dashboard" element={<Dashboard />} />
 
                 {/* 실시간 퀀트 펄스 */}
                 <Route path="pulse" element={<PulseDashboard />} />

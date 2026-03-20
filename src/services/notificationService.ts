@@ -102,7 +102,7 @@ export const sendDnaScoreSurge = (ticker: string, oldScore: number, newScore: nu
 export const sendAnalysisComplete = (ticker: string, verdict: string, score: number) => {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
-  new Notification(`🤖 ${ticker} AI 분석 완료`, {
+  new Notification(`🔢 ${ticker} 시스템 퀀트 분석 완료`, {
     body: `판정: ${verdict} | DNA 점수: ${score}`,
     icon: '/logo.png',
     tag: `analysis-${ticker}`,

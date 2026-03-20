@@ -27,7 +27,7 @@ interface StockTerminalModalProps {
         bearPoints: string[];
         matchedLegend: { ticker: string; similarity: number };
         riskLevel: string;
-        aiSummary: string;
+        quantSummary: string;
         price?: number;
         change?: string;
         kellyWeight?: number;
@@ -87,7 +87,7 @@ export const StockTerminalModal = ({
                         ...prev,
                         bullPoints: analysis.bullCase || ["강세 요인 데이터가 부족합니다."],
                         bearPoints: analysis.bearCase || ["약세 요인 데이터가 부족합니다."],
-                        aiSummary: analysis.aiSummary || prev.aiSummary,
+                        quantSummary: analysis.aiSummary || prev.quantSummary,
                         popProbability: analysis.popProbability || prev.popProbability,
                         matchedLegend: analysis.matchedLegend || prev.matchedLegend,
                         riskLevel: analysis.riskLevel || prev.riskLevel,
@@ -98,7 +98,7 @@ export const StockTerminalModal = ({
                         ...prev,
                         bullPoints: ["기술적 강세 시그널이 아직 포착되지 않았습니다.", "시스템 스캔을 다시 실행해 보세요."],
                         bearPoints: ["리스크 요인 분석 중입니다."],
-                        aiSummary: "해당 종목에 대한 시스템 분석 데이터가 존재하지 않습니다."
+                        quantSummary: "해당 종목에 대한 시스템 분석 데이터가 존재하지 않습니다."
                     }));
                 }
             } catch (err) {
@@ -269,17 +269,17 @@ export const StockTerminalModal = ({
                         </div>
 
                         {/* Right Column: Narrative & Evidence */}
-                        <div className="flex-1 p-4 md:p-8 bg-black/20 flex flex-col overflow-y-auto w-full min-w-0
+                        <div className="flex-1 p-4 md:p-8 bg-black/20 flex flex-col overflow-y-auto w-full min-w-0 relative z-10
                                         [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent 
                                         [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/20">
                             <div className="space-y-6 md:space-y-10">
-                                {/* AI Summary Section */}
+                                {/* Strategic Result Section */}
                                 <div>
                                     <h3 className="text-[10px] md:text-xs font-black text-indigo-400 uppercase tracking-[0.2em] mb-3 md:mb-4 flex items-center gap-2">
                                         <Zap className="w-4 h-4 fill-indigo-400" />
-                                        시스템 정밀 분석 리포트 (System Verdict)
+                                        시스템 전략 리포트 (System Verdict)
                                     </h3>
-                                    {(!liveData.aiSummary || liveData.aiSummary.includes("해당 자산에 대한") || liveData.aiSummary.includes("평가지가 존재하지")) ? (
+                                    {(!liveData.quantSummary || liveData.quantSummary.includes("해당 자산에 대한") || liveData.quantSummary.includes("평가지가 존재하지")) ? (
                                         <div className="flex gap-4 mb-4">
                                             {liveData.quantData ? (
                                                 <>
@@ -294,13 +294,13 @@ export const StockTerminalModal = ({
                                                 </>
                                             ) : (
                                                 <p className="text-sm text-slate-400 font-medium italic mb-4 mt-2 px-2">
-                                                    {liveData.aiSummary}
+                                                    {liveData.quantSummary}
                                                 </p>
                                             )}
                                         </div>
                                     ) : (
                                         <p className="text-sm sm:text-base md:text-lg lg:text-xl text-slate-200 font-medium leading-relaxed tracking-tight">
-                                            {liveData.aiSummary}
+                                            {liveData.quantSummary}
                                         </p>
                                     )}
                                 </div>
@@ -353,7 +353,7 @@ export const StockTerminalModal = ({
 
 
                                 {/* Action Footer */}
-                                <div className="pt-6 flex flex-col sm:flex-row gap-4">
+                                <div className="pt-6 flex flex-col sm:flex-row gap-4 relative z-20">
                                     <button 
                                         onClick={async () => {
                                             if (onAddToWatchlist) {

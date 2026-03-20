@@ -15,8 +15,8 @@ export interface PulseData {
   price: number | null;
   signal: 'BUY' | 'SELL' | 'HOLD';
   strength: 'STRONG' | 'NORMAL';
-  ai_report: string;
-  ai_metadata?: {
+  quant_report: string;
+  quant_metadata?: {
     dna_score: number;
     bull_case: string;
     bear_case: string;

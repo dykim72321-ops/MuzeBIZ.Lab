@@ -28,7 +28,7 @@ export const QuantSignalCard: React.FC<QuantSignalCardProps> = ({ data }) => {
 
     const { dna_score, bull_case, bear_case, reasoning_ko, tags } = data;
 
-    const isAIPending = !bull_case || bull_case.includes('분석 중') || bull_case.includes('데이터');
+    const isComputing = !bull_case || bull_case.includes('분석 중') || bull_case.includes('데이터');
     const showDNA = dna_score !== null && dna_score > 0;
 
     const getScoreColor = (score: number | null) => {
@@ -105,7 +105,7 @@ export const QuantSignalCard: React.FC<QuantSignalCardProps> = ({ data }) => {
 
                 {/* Analysis Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    {isAIPending ? (
+                    {isComputing ? (
                         <div className="col-span-2 flex flex-col items-center justify-center py-12 gap-3 rounded-2xl border border-dashed border-white/10 bg-white/5">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Computing Quantitative Data...</p>
                             <p className="text-[9px] text-slate-500 font-medium">Validating mathematical vectors against historical cases</p>
@@ -140,15 +140,15 @@ export const QuantSignalCard: React.FC<QuantSignalCardProps> = ({ data }) => {
                         <Zap className="w-12 h-12 text-indigo-400" />
                     </div>
                     <h3 className="text-indigo-300 font-black text-[9px] uppercase tracking-[0.2em] flex items-center gap-2 mb-3 relative z-10">
-                        <AlertCircle className="w-3.5 h-3.5" /> System Logic Verdict
+                        <AlertCircle className="w-3.5 h-3.5" /> System Formula Verdict
                     </h3>
                     <p className="text-sm text-slate-300 leading-relaxed font-bold break-keep relative z-10 group-hover/report:text-slate-100 transition-colors">
-                        {isAIPending
+                        {isComputing
                             ? 'Computing high-fidelity quantitative analysis for this asset...'
                             : reasoning_ko}
                     </p>
                     
-                    {!isAIPending && (
+                    {!isComputing && (
                         <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between text-[8px] font-black text-slate-500 uppercase tracking-tighter">
                             <span>System Confidence: High</span>
                             <span className="flex items-center gap-1">Live Technical Verification</span>

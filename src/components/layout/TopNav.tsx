@@ -1,9 +1,8 @@
 import { NavLink } from 'react-router-dom';
 import { 
   Search, 
-  Zap, 
   Dna, 
-  Users, 
+  LayoutDashboard, 
   Bell,
   Menu,
   ChevronDown
@@ -11,8 +10,7 @@ import {
 import clsx from 'clsx';
 
 const NAVIGATION = [
-  { name: 'CRM Hub', icon: Users, path: '/' },
-  { name: '퀀트 핫 아이템', icon: Zap, path: '/scanner', isHot: true },
+  { name: '통합 지휘소', icon: LayoutDashboard, path: '/' },
   { name: '제품 검색', icon: Search, path: '/parts-search' }
 ];
 
@@ -47,9 +45,6 @@ export const TopNav = () => {
               >
                 <item.icon className="w-4 h-4" />
                 <span>{item.name}</span>
-                {item.isHot && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
-                )}
               </NavLink>
             ))}
           </div>

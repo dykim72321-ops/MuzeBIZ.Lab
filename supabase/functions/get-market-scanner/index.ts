@@ -69,22 +69,21 @@ serve(async (req) => {
       })
     }
 
-    // 청크 사이즈 축소 (Finnhub Burst Limit 대비 더 안전한 병렬 처리)
-    const CHUNK_SIZE = 3; 
+    // 최적화된 청크 사이즈와 딜레이 (Finnhub Tier에 따라 조절 가능)
+    const CHUNK_SIZE = 10; 
     const results = [];
     
     for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
       const chunk = tickers.slice(i, i + CHUNK_SIZE);
       
-      // 재시도 로직이 내장된 독립적인 Promise 실행
       const chunkPromises = chunk.map(ticker => fetchQuoteWithRetry(ticker));
       const chunkResults = await Promise.all(chunkPromises);
       
       results.push(...chunkResults);
 
-      // 청크 간 기본 딜레이 (Rate Limit 도달 자체를 늦춤)
+      // 초당 제한을 넘지 않는 선에서 최소한의 딜레이만 적용
       if (i + CHUNK_SIZE < tickers.length) {
-        await new Promise(resolve => setTimeout(resolve, 333)); // 초당 약 9개 호출 수준으로 통제
+        await new Promise(resolve => setTimeout(resolve, 100)); 
       }
     }
 
