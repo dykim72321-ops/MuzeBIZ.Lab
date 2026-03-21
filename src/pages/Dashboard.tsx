@@ -5,6 +5,7 @@ import { useMarketEngine } from '../hooks/useMarketEngine';
 import { QuantSignalCard } from '../components/ui/QuantSignalCard';
 import { BacktestChart } from '../components/ui/BacktestChart';
 import { PortfolioStatus } from '../components/ui/PortfolioStatus';
+import { CommandSettings } from '../components/dashboard/CommandSettings';
 import { MarketCommandHeader } from '../components/layout/MarketCommandHeader';
 import { processSignal } from '../utils/signalProcessor';
 import { fetchStrategyStats, type StrategyStats } from '../services/pythonApiService';
@@ -107,6 +108,9 @@ export const Dashboard = () => {
 
       {/* 가상 포트폴리오 상태 */}
       <PortfolioStatus />
+
+      {/* 시스템 관제 설정 */}
+      <CommandSettings />
 
       {/* 3. 실시간 시그널 피드 */}
       <div className="pt-4">

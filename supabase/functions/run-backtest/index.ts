@@ -82,16 +82,24 @@ serve(async (req: Request) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
-    // 1. Check Cache (valid for 24 hours)
-    const yesterday = new Date();
-    yesterday.setHours(yesterday.getHours() - 24);
+    // 0. Fetch Settings
+    const { data: settings } = await supabase
+      .from('system_settings')
+      .select('cache_ttl_hours')
+      .single();
+    
+    const CACHE_TTL_HOURS = settings?.cache_ttl_hours ?? 24;
+
+    // 1. Check Cache
+    const ttlDate = new Date();
+    ttlDate.setHours(ttlDate.getHours() - CACHE_TTL_HOURS);
     
     const { data: cacheData } = await supabase
       .from('backtest_cache')
       .select('result_json')
       .eq('ticker', ticker)
       .eq('period', period)
-      .gte('updated_at', yesterday.toISOString())
+      .gte('updated_at', ttlDate.toISOString())
       .single();
       
     if (cacheData) {

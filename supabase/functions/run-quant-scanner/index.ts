@@ -9,6 +9,26 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+async function sendDiscordNotification(content: string, type: 'INFO' | 'SUCCESS' | 'ALERT' | 'ERROR' = 'INFO') {
+  const webhookUrl = Deno.env.get('DISCORD_WEBHOOK_URL');
+  if (!webhookUrl) return;
+
+  const emoji = { INFO: 'ℹ️', SUCCESS: '✅', ALERT: '🚨', ERROR: '❌' }[type];
+
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: `${emoji} **[MuzeBIZ-Bot]** ${content}`,
+        username: 'Muze Quant Scanner'
+      })
+    });
+  } catch (err) {
+    console.error('[Discord] Failed to send notification:', err);
+  }
+}
+
 interface Candle {
   date: string;
   open: number;
@@ -102,9 +122,20 @@ serve(async (req: Request) => {
   try {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     
+    // 0. Fetch Settings from DB
+    const { data: settings } = await supabase
+      .from('system_settings')
+      .select('alert_threshold, webhook_url')
+      .single();
+      
+    const ALERT_THRESHOLD = settings?.alert_threshold ?? 85;
+    const DISCORD_WEBHOOK = settings?.webhook_url ?? Deno.env.get('DISCORD_WEBHOOK_URL');
+
     const { tickers = ['SNDL', 'MULN', 'IDEX', 'ZOM', 'FCEL', 'AMC', 'BB', 'BNGO', 'CLOV', 'CTXR', 'GME', 'LCID', 'NKLA', 'OCGN', 'OPEN', 'SOFI'] } = await req.json().catch(() => ({}));
     
     console.log(`[SCANNER] Starting robust quant scan for ${tickers.length} tickers...`);
+    await sendDiscordNotification(`Starting robust quant scan for ${tickers.length} tickers.`, 'INFO');
+
     const signals = [];
 
     for (const ticker of tickers) {
@@ -149,30 +180,30 @@ serve(async (req: Request) => {
                 status: 'PENDING'
             });
 
-            // [Webhook] Score >= 85 "Strong Buy"
-            if (dnaScore >= 85) {
-              const webhookUrl = Deno.env.get('DISCORD_WEBHOOK_URL');
-              if (webhookUrl) {
+            // [Webhook] Dynamic Threshold
+            if (dnaScore >= ALERT_THRESHOLD) {
+              if (DISCORD_WEBHOOK) {
                 const payload = {
                   embeds: [{
-                    title: `🚀 STRONG BUY SIGNAL: ${ticker}`,
-                    color: 3447003, // Blue
+                    title: `🚀 ${ALERT_THRESHOLD <= 75 ? 'SURGE' : 'STRONG BUY'} SIGNAL: ${ticker}`,
+                    color: dnaScore >= 90 ? 15277667 : 3447003, // Gold if >= 90
                     fields: [
                       { name: "DNA Score", value: dnaScore.toFixed(0), inline: true },
                       { name: "Current Price", value: `$${current.close.toFixed(2)}`, inline: true },
                       { name: "RVOL", value: `${rvol.toFixed(2)}x`, inline: true },
                       { name: "Volatility (ATR)", value: `${(atrPercent*100).toFixed(2)}%`, inline: true }
                     ],
-                    footer: { text: "MuzeStock.Lab Quant Engine" },
+                    footer: { text: `MuzeStock.Lab Quant Engine (Threshold: ${ALERT_THRESHOLD})` },
                     timestamp: new Date().toISOString()
                   }]
                 };
-                await sendDiscordWebhook(webhookUrl, payload);
+                await sendDiscordWebhook(DISCORD_WEBHOOK, payload);
               }
             }
         }
       } catch (err) {
         console.warn(`[SCANNER] Error processing ${ticker}:`, err);
+        await sendDiscordNotification(`Error processing ${ticker}: ${err.message}`, 'ERROR');
       }
     }
 
@@ -181,8 +212,14 @@ serve(async (req: Request) => {
         .from('quant_signals')
         .upsert(signals, { onConflict: 'ticker,signal_date' });
       
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       console.log(`✅ [SCANNER] Successfully queued ${signals.length} signals.`);
+      await sendDiscordNotification(`Successfully queued ${signals.length} new signals.`, 'SUCCESS');
+    } else {
+      console.log(`[SCANNER] No new signals found.`);
+      await sendDiscordNotification(`No new signals found during this scan.`, 'INFO');
     }
 
     return new Response(JSON.stringify({ success: true, signals_found: signals.length, data: signals }), {
@@ -190,6 +227,7 @@ serve(async (req: Request) => {
     });
   } catch (error: any) {
     console.error('[SCANNER] Critical Error:', error);
+    await sendDiscordNotification(`Critical Error during scan: ${error.message}`, 'ERROR');
     return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
   }
 })
