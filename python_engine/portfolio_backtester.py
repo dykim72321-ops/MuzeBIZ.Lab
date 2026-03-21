@@ -18,7 +18,7 @@ class DNAValidator:
         gamma: float = 0.8,  # 수익 모멘텀
         delta: float = 1.5,  # 손실 공포
         lambda_val: float = 2.0,  # 시간 감가
-        slippage_rate: float = 0.002,  # 슬리피지 (0.2%)
+        slippage_rate: float = 0.01,  # [Optimized] 0.2% -> 1.0% (Penny Stock Reality)
         deviation_threshold: float = -0.07,  # [Optimized] 이격도 진입 장벽
         target_atr: float = 5.0,  # [Optimized] 목표 ATR 멀티플라이어
     ):

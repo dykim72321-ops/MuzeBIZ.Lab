@@ -15,7 +15,14 @@ from typing import Optional, List, Dict
 import yfinance as yf
 import ta
 import os
+import gc
 from dotenv import load_dotenv
+
+# --- Alpaca Trade API Imports ---
+from alpaca.data.live import StockDataStream
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 
 # --- Rare Source Imports ---
 import uuid
@@ -97,6 +104,83 @@ async def get_api_key(header_value: str = Security(api_key_header)):
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN, detail="Could not validate credentials"
     )
+
+
+# --- [STATEFUL DATA QUEUE] ---
+class TickerDataState:
+    """실시간 지표 계산을 위한 1분봉 히스토리 유지 클래스"""
+
+    def __init__(self, max_bars: int = 150):
+        self.max_bars = max_bars
+        self.history: Dict[str, pd.DataFrame] = {}
+
+    def update(self, ticker: str, bar) -> pd.DataFrame:
+        """새로운 캔들을 히스토리에 병합"""
+        # Multi-index or complex object handling if needed
+        new_row = {
+            "Open": float(bar.open),
+            "High": float(bar.high),
+            "Low": float(bar.low),
+            "Close": float(bar.close),
+            "Volume": float(bar.volume),
+        }
+        # Alpaca bar.timestamp는 timezone-aware (UTC)
+        df_new = pd.DataFrame([new_row], index=[pd.to_datetime(bar.timestamp)])
+
+        if ticker not in self.history:
+            self.history[ticker] = df_new
+        else:
+            # 중복 체크 (동일 타임스탬프면 업데이트)
+            if df_new.index[0] in self.history[ticker].index:
+                self.history[ticker].loc[df_new.index[0]] = new_row
+            else:
+                self.history[ticker] = pd.concat([self.history[ticker], df_new])
+
+            # 최신 N개만 유지
+            if len(self.history[ticker]) > self.max_bars:
+                self.history[ticker] = self.history[ticker].iloc[-self.max_bars :]
+
+        return self.history[ticker]
+
+    async def warm_up(self, tickers: List[str]):
+        """시스템 시작 시 최근 1분봉 100개를 Alpaca에서 가져와 채움"""
+        print(f"🔥 [Warm-up] Fetching initial history for {len(tickers)} tickers...")
+        client = StockHistoricalDataClient(
+            os.getenv("APCA_API_KEY_ID"), os.getenv("APCA_API_SECRET_KEY")
+        )
+
+        for ticker in tickers:
+            try:
+                request_params = StockBarsRequest(
+                    symbol_or_symbols=ticker,
+                    timeframe=TimeFrame.Minute,
+                    limit=self.max_bars,
+                )
+                bars = await asyncio.to_thread(client.get_stock_bars, request_params)
+                df = bars.df
+                if not df.empty:
+                    # Alpaca multi-index (symbol, timestamp) handling
+                    if isinstance(df.index, pd.MultiIndex):
+                        df = df.xs(ticker, level=0)
+
+                    # 지표 계산을 위해 yfinance와 동일한 컬럼 포맷 유지
+                    df = df[["open", "high", "low", "close", "volume"]].rename(
+                        columns={
+                            "open": "Open",
+                            "high": "High",
+                            "low": "Low",
+                            "close": "Close",
+                            "volume": "Volume",
+                        }
+                    )
+                    self.history[ticker] = df
+                    print(f"✅ {ticker} warmed up with {len(df)} bars.")
+            except Exception as e:
+                print(f"⚠️ {ticker} warm-up failed: {e}")
+
+
+# 전역 상태 인스턴스
+candle_state = TickerDataState(max_bars=100)
 
 
 # Global instances
@@ -1103,99 +1187,119 @@ except Exception:
     supabase = None
 
 
-async def process_ticker_pulse(ticker_symbol: str):
+async def on_minute_bar_closed(bar):
+    """
+    Alpaca에서 1분봉이 완성(Close)될 때마다 즉시 푸시(Push)해주는 콜백 함수.
+    이곳이 새로운 Pulse Engine의 심장이 됩니다.
+    """
+    ticker_symbol = bar.symbol
     try:
-        # 지터(Jitter): 실시간 병렬 요청 분산
-        await asyncio.sleep(random.uniform(0.1, 1.0))
+        # 1. 상태 업데이트 및 히스토리 획득 (Stateful Queue)
+        df_hist = candle_state.update(ticker_symbol, bar)
 
-        # 1. 1분봉 데이터로 실시간성 확보 (충분한 계산을 위해 1일치 로드) - 별도 스레드에서 I/O 실행
-        tk = yf.Ticker(ticker_symbol)
-        hist = await asyncio.to_thread(tk.history, period="1d", interval="1m")
+        # 2. 충분한 데이터가 쌓였는지 확인 (MACD/RSI 계산을 위해 최소 35개 필요)
+        if len(df_hist) < 35:
+            # print(f"⏳ {ticker_symbol} 데이터 축적 중... ({len(df_hist)}/35)")
+            return
 
-        if (
-            hist is not None and not hist.empty and len(hist) > 30
-        ):  # MACD 26+9를 위해 충분한 데이터 필요
-            # 2. 고도화된 페이로드 생성 (수학적 및 AI 로직을 스레드로 분리하여 이벤트 루프 보호)
-            payload = await asyncio.to_thread(run_pulse_engine, ticker_symbol, hist)
+        # 3. 고도화된 페이로드 생성 (수학적 및 AI 로직 오프홀딩)
+        # run_pulse_engine은 내부적으로 ta 라이브러리를 사용함
+        payload = await asyncio.to_thread(run_pulse_engine, ticker_symbol, df_hist)
 
-            # 3. WebSocket 프론트엔드 실시간 전송
-            await manager.broadcast(payload)
+        # 4. WebSocket 프론트엔드 실시간 전송
+        await manager.broadcast(payload)
 
-            # 4. Supabase DB 전송 (비동기 I/O 오프로드)
-            if supabase:
-                try:
-                    await asyncio.to_thread(
-                        supabase.table("realtime_signals").insert(payload).execute
-                    )
-                    print(
-                        f"📡 Pulse Sent: {ticker_symbol} RSI={payload.get('rsi')} "
-                        f"({payload.get('signal')} - {payload.get('strength')})"
-                    )
-
-                    # 5. Discord Webhook 전송 (강력한 신호일 때만 모바일 알림 푸시)
-                    if payload.get("strength") == "STRONG":
-                        color = 0x2ECC71 if payload.get("signal") == "BUY" else 0xE74C3C
-                        action = (
-                            "🟢 STRONG BUY"
-                            if payload.get("signal") == "BUY"
-                            else "🔴 STRONG SELL / SCALE_OUT"
-                        )
-                        title = f"[MuzeBIZ Pulse] {ticker_symbol} {action}"
-                        desc = (
-                            f"현재가: ${payload.get('price'):.2f} | RSI: {payload.get('rsi')}\n\n"
-                            f"💡 {payload.get('ai_report', '')}"
-                        )
-                        await webhook.send_alert(
-                            title=title, description=desc, color=color
-                        )
-
-                    # 6. Paper Trading 자동 실행 (v2.0)
-                    if paper_engine:
-                        await paper_engine.process_signal(
-                            ticker=ticker_symbol,
-                            price=payload.get("price"),
-                            signal_type=payload.get("signal"),
-                            strength=payload.get("strength"),
-                            rsi=payload.get("rsi"),
-                            ai_report=payload.get("ai_report", ""),
-                        )
-
-                except Exception as db_err:
-
-                    print(f"⚠️ DB Push Error (Realtime Signal): {db_err}")
-            else:
-                print(
-                    f"⚠️ Supabase credentials missing (Pulse Engine). "
-                    f"Pulse simulated for {ticker_symbol}"
+        # 5. 서비스 연동 (DB, Discord, Paper Trading)
+        if supabase:
+            try:
+                # DB 저장
+                await asyncio.to_thread(
+                    supabase.table("realtime_signals").insert(payload).execute
                 )
+
+                # 강력한 신호 시 Discord 알림
+                if payload.get("strength") == "STRONG":
+                    color = 0x2ECC71 if payload.get("signal") == "BUY" else 0xE74C3C
+                    action = (
+                        "🟢 STRONG BUY"
+                        if payload.get("signal") == "BUY"
+                        else "🔴 STRONG SELL / SCALE_OUT"
+                    )
+                    title = f"[MuzeBIZ Pulse] {ticker_symbol} {action}"
+                    desc = (
+                        f"현재가: ${payload.get('price'):.2f} | RSI: {payload.get('rsi')}\n\n"
+                        f"💡 {payload.get('ai_report', '')}"
+                    )
+                    await webhook.send_alert(title=title, description=desc, color=color)
+
+                # Paper Trading 자동 실행
+                if paper_engine:
+                    await paper_engine.process_signal(
+                        ticker=ticker_symbol,
+                        price=payload.get("price"),
+                        signal_type=payload.get("signal"),
+                        strength=payload.get("strength"),
+                        rsi=payload.get("rsi"),
+                        ai_report=payload.get("ai_report", ""),
+                    )
+
+                print(
+                    f"⚡ [Alpaca Stream] {ticker_symbol} processed: {payload.get('signal')} ({payload.get('strength')})"
+                )
+
+            except Exception as service_err:
+                print(f"⚠️ Service Integration Error for {ticker_symbol}: {service_err}")
+
     except Exception as e:
-        print(f"❌ Pulse Error for {ticker_symbol}: {e}")
+        print(f"❌ Pulse Stream Error for {ticker_symbol}: {e}")
+    finally:
+        # 가비지 컬렉터 강제 호출 (OOM 방지)
+        gc.collect()
 
 
-async def market_pulse_check():
-    """10초마다 여러 종목의 지표를 병렬로 체크하여 실시간 방출 (논블로킹 의사결정 엔진)"""
-    print("💓 Advanced Market Pulse Engine Started...")
+async def start_alpaca_stream():
+    """Alpaca WebSocket 스트림 데몬 시작"""
+    print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
 
-    while True:
-        try:
-            # DB에서 관리중인 리스트 로드 (별도 스레드 오프로드)
-            active_tickers = await asyncio.to_thread(db.get_active_tickers, limit=5)
+    # 1. 감시 유니버스 로드
+    try:
+        active_tickers = await asyncio.to_thread(db.get_active_tickers, limit=15)
+        if not active_tickers:
+            print("⚠️ No active tickers to monitor. Pulse engine standby.")
+            return
 
-            # 티커들을 동시에 비동기 처리
-            tasks = [process_ticker_pulse(ticker) for ticker in active_tickers]
-            if tasks:
-                await asyncio.gather(*tasks)
+        # 2. 히스토리 웜업 (지표 계산을 위한 초기 데이터 채우기)
+        await candle_state.warm_up(active_tickers)
 
-        except Exception as e:
-            print(f"❌ Pulse Engine Core Error: {e}")
+        # 3. Alpaca 스트림 설정
+        api_key = os.getenv("APCA_API_KEY_ID")
+        api_secret = os.getenv("APCA_API_SECRET_KEY")
 
-        await asyncio.sleep(10)  # 10초 대기
+        if not api_key or not api_secret:
+            print("❌ Alpaca API Key missing. Stream cannot start.")
+            return
+
+        stream = StockDataStream(api_key, api_secret)
+
+        # 4. 구독 설정 (1분봉 닫힘 이벤트)
+        stream.subscribe_bars(on_minute_bar_closed, *active_tickers)
+
+        print(f"🚀 [Pulse Engine] Live: Monitoring {active_tickers}")
+
+        # 5. 스트림 실행 (무한 루프)
+        await stream._run_forever()
+
+    except Exception as e:
+        print(f"❌ Alpaca Stream Lifecycle Error: {e}")
+        print("⏳ 30초 후 재연결을 시도합니다...")
+        await asyncio.sleep(30)
+        asyncio.create_task(start_alpaca_stream())
 
 
 @app.on_event("startup")
 async def start_pulse():
     # 백그라운드 태스크로 실행
-    asyncio.create_task(market_pulse_check())
+    asyncio.create_task(start_alpaca_stream())
 
 
 # --- REALTIME PULSE ENGINE (End) ---
