@@ -16,18 +16,95 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 
+// 🆕 TechnicalGauge Component
+const TechnicalGauge = ({ 
+    label, 
+    value, 
+    min = 0, 
+    max = 100, 
+    type = 'linear',
+    unit = '',
+    zones = { low: 30, high: 70 }
+}: { 
+    label: string, 
+    value: number, 
+    min?: number, 
+    max?: number, 
+    type?: 'linear' | 'surge',
+    unit?: string,
+    zones?: { low: number, high: number }
+}) => {
+    const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+    
+    if (type === 'surge') {
+        const isSurge = value >= 2.0;
+        return (
+            <div className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:border-indigo-500/30 transition-all group/surge">
+                <div className="flex justify-between items-center mb-2">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
+                    {isSurge && <Zap className="w-3 h-3 text-amber-400 animate-pulse" />}
+                </div>
+                <div className="flex items-baseline gap-2">
+                    <span className={clsx(
+                        "text-3xl font-black italic tracking-tighter transition-all",
+                        isSurge ? "text-amber-400 drop-shadow-[0_0_10px_rgba(245,158,11,0.4)]" : "text-slate-300"
+                    )}>
+                        {value.toFixed(1)}{unit}
+                    </span>
+                    {isSurge && <span className="text-[10px] font-black text-amber-500/80 uppercase animate-bounce">🔥 SURGE</span>}
+                </div>
+                <div className="mt-2 w-full h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                    <div 
+                        className={clsx("h-full transition-all duration-1000 rounded-full", isSurge ? "bg-gradient-to-r from-amber-600 to-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.5)]" : "bg-slate-700")}
+                        style={{ width: `${Math.min(100, (value / 5) * 100)}%` }}
+                    />
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:border-indigo-500/30 transition-all">
+            <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
+                <span className="text-xs font-black text-white">{value.toFixed(1)}{unit}</span>
+            </div>
+            <div className="relative w-full h-2 bg-black/40 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                {/* Zones Indicators */}
+                <div className="absolute inset-0 flex">
+                    <div className="h-full bg-emerald-500/10" style={{ width: `${zones.low}%` }} />
+                    <div className="h-full border-x border-white/5" style={{ width: `${zones.high - zones.low}%` }} />
+                    <div className="h-full bg-rose-500/10" style={{ width: `${100 - zones.high}%` }} />
+                </div>
+                
+                {/* Progress Bar */}
+                <div 
+                    className={clsx(
+                        "h-full transition-all duration-1000 ease-out rounded-full shadow-[0_0_10px_rgba(255,255,255,0.1)]",
+                        value <= zones.low ? "bg-gradient-to-r from-emerald-600 to-emerald-400" : value >= zones.high ? "bg-gradient-to-r from-rose-600 to-rose-400" : "bg-gradient-to-r from-indigo-600 to-indigo-400"
+                    )}
+                    style={{ width: `${percentage}%` }}
+                />
+            </div>
+            <div className="flex justify-between mt-1 opacity-20 text-[8px] font-black uppercase text-slate-500 tracking-tighter">
+                <span>OS</span>
+                <span>Neutral</span>
+                <span>OB</span>
+            </div>
+        </div>
+    );
+};
+
 interface StockTerminalModalProps {
     isOpen: boolean;
     onClose: () => void;
     data: {
         ticker: string;
         dnaScore: number;
-        popProbability: number;
         bullPoints: string[];
         bearPoints: string[];
-        matchedLegend: { ticker: string; similarity: number };
         riskLevel: string;
-        quantSummary: string;
+        formulaVerdict: string;
         price?: number;
         change?: string;
         kellyWeight?: number;
@@ -87,9 +164,7 @@ export const StockTerminalModal = ({
                         ...prev,
                         bullPoints: analysis.bullCase || ["강세 요인 데이터가 부족합니다."],
                         bearPoints: analysis.bearCase || ["약세 요인 데이터가 부족합니다."],
-                        quantSummary: analysis.aiSummary || prev.quantSummary,
-                        popProbability: analysis.popProbability || prev.popProbability,
-                        matchedLegend: analysis.matchedLegend || prev.matchedLegend,
+                        formulaVerdict: analysis.matchReasoning || prev.formulaVerdict,
                         riskLevel: analysis.riskLevel || prev.riskLevel,
                     }));
                 } else if (isMounted.current) {
@@ -98,7 +173,7 @@ export const StockTerminalModal = ({
                         ...prev,
                         bullPoints: ["기술적 강세 시그널이 아직 포착되지 않았습니다.", "시스템 스캔을 다시 실행해 보세요."],
                         bearPoints: ["리스크 요인 분석 중입니다."],
-                        quantSummary: "해당 종목에 대한 시스템 분석 데이터가 존재하지 않습니다."
+                        formulaVerdict: "해당 종목에 대한 시스템 분석 데이터가 존재하지 않습니다."
                     }));
                 }
             } catch (err) {
@@ -198,7 +273,7 @@ export const StockTerminalModal = ({
                                         </span>
                                         <span className="text-4xl md:text-5xl font-black text-white">{liveData.dnaScore}</span>
                                     </div>
-                                    <div className="w-full h-8 md:h-10 flex gap-1 relative">
+                                    <div className="w-full h-8 md:h-10 flex gap-[2px] md:gap-1 relative">
                                         {[...Array(20)].map((_, i) => {
                                             const threshold = (i + 1) * 5;
                                             const isActive = liveData.dnaScore >= threshold;
@@ -206,12 +281,16 @@ export const StockTerminalModal = ({
                                                 <div
                                                     key={i}
                                                     className={clsx(
-                                                        "flex-1 rounded-sm shadow-[0_0_15px_rgba(0,0,0,0.2)]",
+                                                        "flex-1 rounded-[2px] transition-all duration-500",
                                                         isActive 
-                                                            ? (liveData.dnaScore >= 70 ? 'bg-[#10b981]' : liveData.dnaScore >= 50 ? 'bg-[#f59e0b]' : 'bg-[#f43f5e]') 
-                                                            : 'opacity-10 bg-white'
+                                                            ? (liveData.dnaScore >= 70 ? 'bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : liveData.dnaScore >= 50 ? 'bg-gradient-to-t from-amber-600 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : 'bg-gradient-to-t from-rose-600 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.3)]') 
+                                                            : 'bg-white/5 border border-white/5'
                                                     )}
-                                                    style={{ transform: isActive ? 'scaleY(1)' : 'scaleY(0.8)' }}
+                                                    style={{ 
+                                                        transform: isActive ? 'scaleY(1)' : 'scaleY(0.7)',
+                                                        opacity: isActive ? 1 : 0.5,
+                                                        transitionDelay: `${i * 20}ms`
+                                                    }}
                                                 />
                                             );
                                         })}
@@ -225,26 +304,9 @@ export const StockTerminalModal = ({
                                     </div>
                                 </div>
 
-                                {/* Advanced Quant Metrics Pills */}
-                                <div className="grid grid-cols-2 gap-3 md:gap-4 mt-4">
-                                    <div className="bg-white/5 p-3 md:p-4 rounded-2xl md:rounded-3xl border border-white/5 hover:bg-white/10 transition-colors group/er relative cursor-help">
-                                        <p className="text-[9px] md:text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 flex items-center gap-1">
-                                            Efficiency Ratio (ER)
-                                            <HelpCircle className="w-2.5 h-2.5 opacity-30" />
-                                        </p>
-                                        <div className="flex items-end gap-1 md:gap-2 text-2xl md:text-3xl font-black text-emerald-400">
-                                            {liveData.efficiencyRatio || '0.00'}
-                                            <Activity className="w-4 h-4 md:w-5 md:h-5 mb-0.5 md:mb-1" />
-                                        </div>
-                                        <div className="absolute bottom-full left-0 mb-3 w-72 bg-slate-900/95 backdrop-blur-xl text-white text-[11px] p-4 rounded-xl shadow-2xl opacity-0 group-hover/er:opacity-100 transition-all z-50 pointer-events-none border border-white/10 leading-relaxed font-normal normal-case tracking-normal">
-                                            <span className="text-emerald-400 font-bold block mb-1 uppercase tracking-widest text-[10px]">Trend Purity (ER)</span>
-                                            추세의 방향성을 측정합니다. 1.0에 가까울수록 가격 변동의 노이즈가 적고 한 방향으로의 힘이 강력함을 수학적으로 증명합니다.
-                                        </div>
-                                    </div>
-                                </div>
 
                                 <div 
-                                    className="mt-4 bg-indigo-500/10 p-5 rounded-2xl border border-indigo-500/30 group/kelly relative cursor-help shadow-[inset_0_0_20px_rgba(99,102,241,0.1)]"
+                                    className="mt-auto bg-indigo-500/10 p-5 rounded-2xl border border-indigo-500/30 group/kelly relative cursor-help shadow-[inset_0_0_20px_rgba(99,102,241,0.1)]"
                                 >
                                     <p className="text-[10px] text-indigo-300 uppercase font-black tracking-[0.2em] mb-2 flex items-center gap-1">
                                         <ShieldCheck className="w-3 h-3" />
@@ -279,7 +341,7 @@ export const StockTerminalModal = ({
                                         <Zap className="w-4 h-4 fill-indigo-400" />
                                         시스템 전략 리포트 (System Verdict)
                                     </h3>
-                                    {(!liveData.quantSummary || liveData.quantSummary.includes("해당 자산에 대한") || liveData.quantSummary.includes("평가지가 존재하지")) ? (
+                                    {(!liveData.formulaVerdict || liveData.formulaVerdict.includes("해당 자산에 대한") || liveData.formulaVerdict.includes("평가지가 존재하지")) ? (
                                         <div className="flex gap-4 mb-4">
                                             {liveData.quantData ? (
                                                 <>
@@ -294,15 +356,49 @@ export const StockTerminalModal = ({
                                                 </>
                                             ) : (
                                                 <p className="text-sm text-slate-400 font-medium italic mb-4 mt-2 px-2">
-                                                    {liveData.quantSummary}
+                                                    {liveData.formulaVerdict}
                                                 </p>
                                             )}
                                         </div>
                                     ) : (
                                         <p className="text-sm sm:text-base md:text-lg lg:text-xl text-slate-200 font-medium leading-relaxed tracking-tight">
-                                            {liveData.quantSummary}
+                                            {liveData.formulaVerdict}
                                         </p>
                                     )}
+                                </div>
+
+                                {/* Advanced Quant Metrics Pills (Moved to right column for balance) */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mt-2">
+                                    <div className="sm:col-span-2 bg-white/5 p-3 md:p-4 rounded-2xl md:rounded-3xl border border-white/5 hover:bg-white/10 transition-colors group/er relative cursor-help">
+                                        <p className="text-[9px] md:text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 flex items-center gap-1">
+                                            Efficiency Ratio (ER)
+                                            <HelpCircle className="w-2.5 h-2.5 opacity-30" />
+                                        </p>
+                                        <div className="flex items-end gap-1 md:gap-2 text-2xl md:text-3xl font-black text-emerald-400">
+                                            {liveData.efficiencyRatio || '0.00'}
+                                            <Activity className="w-4 h-4 md:w-5 md:h-5 mb-0.5 md:mb-1" />
+                                        </div>
+                                        <div className="absolute bottom-full left-0 mb-3 w-72 bg-slate-900/95 backdrop-blur-xl text-white text-[11px] p-4 rounded-xl shadow-2xl opacity-0 group-hover/er:opacity-100 transition-all z-50 pointer-events-none border border-white/10 leading-relaxed font-normal normal-case tracking-normal">
+                                            <span className="text-emerald-400 font-bold block mb-1 uppercase tracking-widest text-[10px]">Trend Purity (ER)</span>
+                                            추세의 방향성을 측정합니다. 1.0에 가까울수록 가격 변동의 노이즈가 적고 한 방향으로의 힘이 강력함을 수학적으로 증명합니다.
+                                        </div>
+                                    </div>
+                                    
+                                    {/* RVOL & RSI Gauges */}
+                                    <div className="sm:col-span-2 grid grid-cols-2 gap-3">
+                                        <TechnicalGauge 
+                                            label="RVOL (Relative Vol)" 
+                                            value={liveData.quantData?.volume_surge_multiplier || 1.0} 
+                                            type="surge" 
+                                            unit="x"
+                                        />
+                                        <TechnicalGauge 
+                                            label="RSI (Daily)" 
+                                            value={liveData.quantData?.rsi_14 || 50} 
+                                            unit=""
+                                            zones={{ low: 30, high: 70 }}
+                                        />
+                                    </div>
                                 </div>
 
                                 {/* Bull vs Bear Grid */}
@@ -315,15 +411,15 @@ export const StockTerminalModal = ({
                                         <ul className="space-y-3">
                                             {liveData.bullPoints && liveData.bullPoints.length > 0 && liveData.bullPoints[0] !== "No details" && liveData.bullPoints[0] !== "모멘텀 지표 분석 중" ? (
                                                 liveData.bullPoints.map((point, i) => (
-                                                    <li key={i} className="flex gap-2 text-slate-400 text-sm font-medium leading-snug">
-                                                        <ChevronRight className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                                                    <li key={i} className="flex gap-3 text-slate-300 text-sm font-medium leading-relaxed bg-white/5 p-3 rounded-xl border border-white/5 hover:border-emerald-500/30 transition-colors shadow-sm">
+                                                        <ChevronRight className="w-5 h-5 text-emerald-400 shrink-0" />
                                                         {point}
                                                     </li>
                                                 ))
                                             ) : (
-                                                <div className="py-6 px-4 rounded-2xl border border-white/5 bg-white/5 flex flex-col items-center justify-center gap-2 opacity-50">
-                                                    <Loader2 className="w-6 h-6 text-slate-500 animate-spin" />
-                                                    <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest text-center">Identifying Bullish<br/>Confirmation...</span>
+                                                <div className="py-6 px-4 rounded-xl border border-white/5 bg-white/5 flex flex-col items-center justify-center gap-2 opacity-60 shadow-inner">
+                                                    <Loader2 className="w-6 h-6 text-slate-400 animate-spin" />
+                                                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center">Identifying Bullish<br/>Confirmation...</span>
                                                 </div>
                                             )}
                                         </ul>
@@ -336,15 +432,15 @@ export const StockTerminalModal = ({
                                         <ul className="space-y-3">
                                             {liveData.bearPoints && liveData.bearPoints.length > 0 && liveData.bearPoints[0] !== "No details" && liveData.bearPoints[0] !== "리스크 요인 스캔 중" ? (
                                                 liveData.bearPoints.map((point, i) => (
-                                                    <li key={i} className="flex gap-2 text-slate-400 text-sm font-medium leading-snug">
-                                                        <ChevronRight className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                                                    <li key={i} className="flex gap-3 text-slate-300 text-sm font-medium leading-relaxed bg-white/5 p-3 rounded-xl border border-white/5 hover:border-rose-500/30 transition-colors shadow-sm">
+                                                        <ChevronRight className="w-5 h-5 text-rose-400 shrink-0" />
                                                         {point}
                                                     </li>
                                                 ))
                                             ) : (
-                                                <div className="py-6 px-4 rounded-2xl border border-white/5 bg-white/5 flex flex-col items-center justify-center gap-2 opacity-50">
-                                                    <Activity className="w-6 h-6 text-slate-500" />
-                                                    <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest text-center">Scanning Risk<br/>Vectors...</span>
+                                                <div className="py-6 px-4 rounded-xl border border-white/5 bg-white/5 flex flex-col items-center justify-center gap-2 opacity-60 shadow-inner">
+                                                    <Activity className="w-6 h-6 text-slate-400" />
+                                                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center">Scanning Risk<br/>Vectors...</span>
                                                 </div>
                                             )}
                                         </ul>
@@ -365,7 +461,7 @@ export const StockTerminalModal = ({
                                             }
                                         }}
                                         disabled={isAddingWatchlist}
-                                        className="flex-1 bg-white/5 text-white font-black py-4 rounded-2xl border border-white/10 hover:bg-white/10 transition-colors uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50"
+                                        className="flex-1 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 hover:from-indigo-500/20 hover:to-purple-500/20 text-white font-black py-4 rounded-2xl border border-indigo-500/20 hover:border-indigo-500/40 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50 shadow-[0_0_20px_rgba(99,102,241,0.1)] hover:shadow-[0_0_30px_rgba(99,102,241,0.2)] hover:-translate-y-0.5"
                                     >
                                         {isAddingWatchlist ? <Loader2 className="w-4 h-4 animate-spin" /> : <List className="w-4 h-4" />}
                                         관심 종목 추가

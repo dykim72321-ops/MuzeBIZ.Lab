@@ -90,12 +90,10 @@ export const WatchlistItemCard = ({
           efficiencyRatio,
           kellyWeight,
           // StockTerminalModal 필수 필드
-          popProbability: Math.round(dnaScore * 0.8),
-          bullPoints: ["모멘텀 지표 분석 중"],
-          bearPoints: ["리스크 요인 스캔 중"],
-          matchedLegend: { ticker: 'N/A', similarity: 0 },
+          bullPoints: stock?.stock_analysis_cache?.[0]?.analysis?.bullCase || ["모멘텀 지표 분석 중"],
+          bearPoints: stock?.stock_analysis_cache?.[0]?.analysis?.bearCase || ["리스크 요인 스캔 중"],
           riskLevel,
-          aiSummary: "해당 종목에 대한 시스템 분석 데이터가 존재하지 않습니다.",
+          quantSummary: stock?.stock_analysis_cache?.[0]?.analysis?.quantSummary || "해당 종목에 대한 시스템 분석 데이터가 존재하지 않습니다.",
         });
       }}
       className="cursor-pointer group"

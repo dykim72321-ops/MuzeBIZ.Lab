@@ -4,8 +4,11 @@ import clsx from 'clsx';
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { QuantSignalCard } from '../components/ui/QuantSignalCard';
 import { BacktestChart } from '../components/ui/BacktestChart';
+import { PortfolioStatus } from '../components/ui/PortfolioStatus';
 import { MarketCommandHeader } from '../components/layout/MarketCommandHeader';
 import { processSignal } from '../utils/signalProcessor';
+import { fetchStrategyStats, type StrategyStats } from '../services/pythonApiService';
+import { useState, useEffect } from 'react';
 
 /**
  * Dashboard (작전 지휘소)
@@ -14,6 +17,18 @@ import { processSignal } from '../utils/signalProcessor';
  */
 export const Dashboard = () => {
   const { pulseMap, isConnected, lastUpdatedTicker, isHunting, huntStatus, triggerHunt } = useMarketEngine();
+  const [stats, setStats] = useState<StrategyStats | null>(null);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      const data = await fetchStrategyStats();
+      if (data) setStats(data);
+    };
+    loadStats();
+    // 1분마다 통계 업데이트
+    const timer = setInterval(loadStats, 60000);
+    return () => clearInterval(timer);
+  }, []);
   
   // 전체 종목 맵 중 BUY 시그널만 필터링
   const buyTickers = Object.keys(pulseMap).filter(
@@ -43,7 +58,9 @@ export const Dashboard = () => {
           <div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-1">시스템 방어력</p>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900 tabular-nums">-2.95%</span>
+              <span className="text-2xl font-black text-slate-900 tabular-nums">
+                {stats ? `${stats.mdd.toFixed(2)}%` : '-2.95%'}
+              </span>
               <span className="text-xs font-bold text-emerald-600">vs MKT -29.1%</span>
             </div>
             <p className="text-[10px] text-slate-400 mt-1 font-medium">퀀트 엔진 백테스트 기준</p>
@@ -57,8 +74,12 @@ export const Dashboard = () => {
           <div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-1">엔진 승률</p>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900 tabular-nums">68.7%</span>
-              <span className="text-xs font-bold text-purple-600">PF: 1.14x</span>
+              <span className="text-2xl font-black text-slate-900 tabular-nums">
+                {stats ? `${stats.win_rate.toFixed(1)}%` : '68.7%'}
+              </span>
+              <span className="text-xs font-bold text-purple-600">
+                PF: {stats ? stats.profit_factor.toFixed(2) : '1.14'}x
+              </span>
             </div>
             <p className="text-[10px] text-slate-400 mt-1 font-medium">퀀트 엔진 백테스트 기준</p>
           </div>
@@ -83,6 +104,9 @@ export const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* 가상 포트폴리오 상태 */}
+      <PortfolioStatus />
 
       {/* 3. 실시간 시그널 피드 */}
       <div className="pt-4">

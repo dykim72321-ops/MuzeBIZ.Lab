@@ -19,6 +19,6 @@ export const useStockAnalysisQuery = (ticker: string) => {
       return fetchStockAnalysis(stock);
     },
     enabled: !!ticker,
-    staleTime: 60 * 60 * 1000, // 1시간 (AI 분석은 덜 자주 갱신)
+    staleTime: 60 * 60 * 1000, // 1시간 (시스템 분석은 덜 자주 갱신)
   });
 };

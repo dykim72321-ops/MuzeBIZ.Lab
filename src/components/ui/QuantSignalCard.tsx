@@ -108,7 +108,7 @@ export const QuantSignalCard: React.FC<QuantSignalCardProps> = ({ data }) => {
                     {isComputing ? (
                         <div className="col-span-2 flex flex-col items-center justify-center py-12 gap-3 rounded-2xl border border-dashed border-white/10 bg-white/5">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Computing Quantitative Data...</p>
-                            <p className="text-[9px] text-slate-500 font-medium">Validating mathematical vectors against historical cases</p>
+                            <p className="text-[9px] text-slate-500 font-medium">Validating mathematical vectors and momentum signals</p>
                         </div>
                     ) : (
                         <>

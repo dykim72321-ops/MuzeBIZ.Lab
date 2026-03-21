@@ -32,7 +32,7 @@ import random
 from webhook_manager import WebhookManager
 from paper_engine import PaperTradingManager
 from utils import PartNormalizer
-from backtester import run_backtest
+# from backtester import run_backtest (Removed for modern TS engine)
 from cache_manager import get_cache_manager
 from inventory_service import inventory_service
 

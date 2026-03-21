@@ -40,6 +40,15 @@ export interface DiscoveryItem {
   created_at: string;
 }
 
+export interface StrategyStats {
+  win_rate: number;
+  profit_factor: number;
+  mdd: number;
+  recovery_days: number;
+  avg_pnl: number;
+  total_trades: number;
+}
+
 /**
  * 기술적 지표 분석 요청
  */
@@ -140,6 +149,25 @@ export async function fetchBacktestData(
     return await response.json();
   } catch (error) {
     console.error(`[PythonAPI] Backtest error for ${ticker}:`, error);
+    return null;
+  }
+}
+
+/**
+ * 전략 통계 데이터 조회
+ */
+export async function fetchStrategyStats(): Promise<StrategyStats | null> {
+  try {
+    const response = await fetch(`${PY_API_BASE}/api/strategy/stats`);
+
+    if (!response.ok) {
+      console.warn(`[PythonAPI] Strategy stats fetch failed: ${response.status}`);
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[PythonAPI] Strategy stats error:', error);
     return null;
   }
 }

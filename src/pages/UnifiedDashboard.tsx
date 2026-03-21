@@ -16,8 +16,11 @@ import clsx from 'clsx';
 // Hooks & Services
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { getWatchlist, addToWatchlist, type WatchlistItem } from '../services/watchlistService';
-import { getTopStocks, fetchMultipleStocksOptimized } from '../services/stockService';
-import { fetchStockAnalysis, getStrategyStats } from '../services/analysisService.ts';
+import { 
+  getTopStocks, 
+  fetchMultipleStocksOptimized
+} from '../services/stockService';
+import { getStrategyStats } from '../services/analysisService.ts';
 import { processSignal } from '../utils/signalProcessor';
 import { toast } from 'sonner';
 
@@ -26,6 +29,7 @@ import { MarketCommandHeader } from '../components/layout/MarketCommandHeader';
 import { QuantSignalCard } from '../components/ui/QuantSignalCard';
 import { BacktestChart } from '../components/ui/BacktestChart';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
+import { QuantLiveTerminal } from '../components/dashboard/QuantLiveTerminal';
 import { Card } from '../components/ui/Card';
 
 export const UnifiedDashboard = () => {
@@ -89,12 +93,10 @@ export const UnifiedDashboard = () => {
     setTerminalData({
       ticker: stock.ticker,
       dnaScore: stock.dnaScore,
-      popProbability: Math.round(stock.dnaScore * 0.8),
       bullPoints: displaySignal.bullPoints,
       bearPoints: displaySignal.bearPoints,
-      matchedLegend: { ticker: 'N/A', similarity: 0 },
       riskLevel: stock.dnaScore >= 70 ? 'Low' : 'Medium',
-      quantSummary: displaySignal.reasoning,
+      formulaVerdict: displaySignal.reasoning,
       price: stock.price,
       change: `${stock.changePercent.toFixed(2)}%`,
     });
@@ -128,9 +130,12 @@ export const UnifiedDashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* LEFT COLUMN: Main Signals & Discovery (8/12) */}
-        <div className="lg:col-span-8 space-y-8">
+        <div className="lg:col-span-8 space-y-12">
           
-          {/* A. Live Signal Matrix (Dashboard Part) */}
+          {/* A. Quant Portfolio Performance (NEW) */}
+          <QuantLiveTerminal />
+
+          {/* B. Live Signal Matrix (Dashboard Part) */}
           <section className="space-y-6">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">

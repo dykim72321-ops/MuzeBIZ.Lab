@@ -63,7 +63,6 @@ export function sendStockNotification(
 
   notification.onclick = () => {
     window.focus();
-    window.location.href = `/analysis/${ticker}`;
   };
 }
 
@@ -97,7 +96,7 @@ export const sendDnaScoreSurge = (ticker: string, oldScore: number, newScore: nu
 };
 
 /**
- * AI 분석 완료 알림
+ * 시스템 분석 완료 알림
  */
 export const sendAnalysisComplete = (ticker: string, verdict: string, score: number) => {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;

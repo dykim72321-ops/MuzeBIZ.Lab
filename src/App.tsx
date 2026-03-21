@@ -18,7 +18,6 @@ import { queryClient } from './lib/queryClient';
 const PulseDashboard = lazy(() => import('./pages/PulseDashboard'));
 const ScannerPage = lazy(() => import('./pages/ScannerPage').then(m => ({ default: m.ScannerPage })));
 const AlphaFundView = lazy(() => import('./pages/AlphaFundView').then(m => ({ default: m.AlphaFundView })));
-const DnaMatchView = lazy(() => import('./components/analysis/DnaMatchView').then(m => ({ default: m.DnaMatchView })));
 const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
 const MuzepartSearchPage = lazy(() => import('./pages/MuzepartSearchPage').then(m => ({ default: m.MuzepartSearchPage })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
@@ -75,9 +74,7 @@ function App() {
                 {/* 백테스팅 */}
                 <Route path="backtesting" element={<BacktestingDashboard />} />
 
-                {/* 심층 분석 (내부 링크용) */}
-                <Route path="analysis/:id" element={<DnaMatchView />} />
-                <Route path="stock/:id" element={<Navigate to="/analysis/:id" replace />} />
+
 
                 {/* 기타 도구 */}
                 <Route path="simulator" element={<SimulatorView />} />

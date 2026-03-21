@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import type { Stock } from '../types';
+import { calculateDnaScore } from '../utils/dnaMath';
 
 // Focused Penny Stock Watchlist
 export const WATCHLIST_TICKERS = [
@@ -58,7 +59,7 @@ async function fetchFromFinnhub(ticker: string): Promise<Stock | null> {
       changePercent: data.dp || 0,
       volume: 0, // Finnhub quote doesn't include volume, would need separate call
       marketCap: 'N/A',
-      dnaScore: calculateDnaScore(data.c, data.dp || 0, 0),
+      dnaScore: calculateDnaScore(data.c, data.dp || 0, 0, 0),
       currentHigh: data.h || data.c,
       sector: getSector(ticker),
       description: '',
@@ -95,7 +96,7 @@ async function fetchFromYahoo(ticker: string): Promise<Stock | null> {
     }
 
     // Calculate enhanced DNA score using Yahoo data
-    let dnaScore = calculateDnaScore(data.price, data.changePercent, data.volume);
+    let dnaScore = calculateDnaScore(data.price, data.changePercent, data.volume, data.averageVolume10d || 0);
 
     // Boost score based on analyst recommendations
     if (data.recommendationScore >= 4) dnaScore += 15; // Buy/Strong Buy
@@ -202,7 +203,7 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
       changePercent: data.changePercent || 0,
       volume: data.volume || 0,
       marketCap: formatMarketCap(data.marketCap),
-      dnaScore: data.dnaScore || calculateDnaScore(data.price, data.changePercent, data.volume),
+      dnaScore: data.dnaScore || calculateDnaScore(data.price, data.changePercent, data.volume, data.averageVolume10d || 0),
       currentHigh: data.high || data.price,
       sector: getSector(ticker),
       description: getDescription(ticker),
@@ -280,6 +281,25 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
     if (i + CHUNK_SIZE < uniqueTickers.length) {
       await new Promise(resolve => setTimeout(resolve, 200)); 
     }
+  }
+  
+  // 🆕 Batch fetch analysis cache for similarity/pattern match
+  try {
+    const { data: analysisCache } = await supabase
+      .from('stock_analysis_cache')
+      .select('ticker, analysis')
+      .in('ticker', results.map(s => s.ticker));
+    
+    if (analysisCache) {
+      results.forEach(stock => {
+        const cache = analysisCache.filter(c => c.ticker === stock.ticker);
+        if (cache.length > 0) {
+          stock.stock_analysis_cache = cache;
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('[Fetch Optimization] Failed to fetch analysis cache:', err);
   }
   
   return results;
@@ -467,7 +487,7 @@ export async function getTopStocks(historical: boolean = false, limit: number = 
         changePercent,
         volume,
         marketCap: discoveryInfo?.market_cap || 'N/A',
-        dnaScore: calculateDnaScore(price, changePercent, volume),
+        dnaScore: calculateDnaScore(price, changePercent, volume, discoveryInfo?.average_volume_10d || 0),
         sector: discoveryInfo?.sector || getSector(rtItem.ticker),
         description: discoveryInfo?.description || getDescription(rtItem.ticker),
         relevantMetrics: {
@@ -504,43 +524,37 @@ export async function getTopStocks(historical: boolean = false, limit: number = 
   }
 }
 
-function calculateDnaScore(price: number, change: number, volume: number): number {
-  // 1. Baseline: Quant terminal starts at a neutral 50.
-  let score = 50;
+export async function fetchQuantSignals() {
+  const { data, error } = await supabase
+    .from('quant_signals')
+    .select('*')
+    .order('created_at', { ascending: false });
   
-  // 2. Balanced Penny Stock Boost: 
-  // ONLY apply the volatility premium if the stock isn't in a severe downtrend (Falling Knife).
-  if (change >= -5) {
-    if (price < 1.0) score += 15;
-    else if (price < 5.0) score += 10;
-  }
-  
-  // 3. Crash Penalty (Aggressive Negative Changes): 
-  // Escalated penalties to protect against death spirals.
-  if (change < -40) score -= 60;      // Catastrophic crash
-  else if (change < -30) score -= 50; // Severe gap down
-  else if (change < -15) score -= 30; // Technical breakdown
-  else if (change < -5) score -= 15;  // Short-term correction
-  
-  // 4. Upward Momentum:
-  if (change > 20) score += 20;
-  else if (change > 10) score += 15;
-  else if (change > 3) score += 5;
-  
-  // 5. Liquidity Indicator (Dollar Volume): 
-  // Volume relative to price is a more accurate metric for penny stock liquidity.
-  const dollarVolume = price * volume;
-  
-  if (dollarVolume > 5000000) { // High Liquidity (> $5M traded)
-    if (change > 0) score += 10;      // High liquidity + Upward momentum = Strong Conviction
-    else if (change < 0) score -= 15; // High liquidity + Downward momentum = Distribution/Institutional Dumping
-  } else if (dollarVolume > 0 && dollarVolume < 500000) {
-    score -= 10; // Illiquidity penalty (Dangerous to enter/exit)
-  }
-
-  // 6. Result Clamping: strictly bound between 0 and 100
-  return Math.min(100, Math.max(0, score));
+  if (error) throw error;
+  return data;
 }
+
+export async function fetchActivePositions() {
+  const { data, error } = await supabase
+    .from('active_positions')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchTradeHistory() {
+  const { data, error } = await supabase
+    .from('trade_history')
+    .select('*')
+    .order('exit_date', { ascending: false });
+  
+  if (error) throw error;
+  return data;
+}
+
+
 
 // ... (Keep existing helper functions getCompanyName, getSector, getDescription at the bottom)
 export function getCompanyName(ticker: string): string {

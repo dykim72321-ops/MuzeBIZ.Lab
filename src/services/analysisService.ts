@@ -24,12 +24,6 @@ export interface QuantAnalysis {
     key_event: string | null;
     summary: string;
   };
-  // 🆕 Master Algorithm Fields
-  popProbability?: number;
-  matchedLegend?: {
-    ticker: string;
-    similarity: number;
-  };
 }
 
 export async function fetchStockAnalysis(stock: Stock): Promise<QuantAnalysis | null> {

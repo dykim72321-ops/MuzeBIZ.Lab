@@ -101,12 +101,10 @@ export const ScannerPage = () => {
     setTerminalData({
       ticker: stock.ticker,
       dnaScore: stock.dnaScore,
-      popProbability: cache?.popProbability || quantData?.historical_win_rate_pct || 0,
       bullPoints: displaySignal.bullPoints,
       bearPoints: displaySignal.bearPoints,
-      matchedLegend: cache?.matchedLegend || { ticker: 'None', similarity: 0 },
       riskLevel: cache?.riskLevel || 'Medium',
-      aiSummary: displaySignal.reasoning,
+      formulaVerdict: displaySignal.reasoning,
       price: stock.price,
       change: `${stock.changePercent.toFixed(2)}%`,
       quantData

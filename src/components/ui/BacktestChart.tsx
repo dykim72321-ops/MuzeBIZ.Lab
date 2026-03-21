@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { Activity, TrendingUp } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 interface BacktestChartProps {
   ticker: string;
@@ -11,44 +12,60 @@ interface BacktestChartProps {
 export const BacktestChart: React.FC<BacktestChartProps> = ({ ticker }) => {
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ strategyReturn: number; benchmarkReturn: number; alpha: number } | null>(null);
 
-  useEffect(() => {
-    const fetchBacktestData = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch('/py-api/api/backtest', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ticker: ticker, period: '1y', initial_capital: 10000 })
+  const fetchBacktestData = useCallback(async () => {
+    if (!ticker) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('run-backtest', {
+        body: { ticker: ticker, period: '1y', initial_capital: 10000 }
+      });
+      
+      if (invokeError) throw invokeError;
+      
+      if (data && data.chart_data) {
+        setChartData(data.chart_data);
+        setStats({
+          strategyReturn: data.total_return_pct,
+          benchmarkReturn: data.benchmark_return_pct,
+          alpha: data.outperformance
         });
-        
-        const data = await response.json();
-        if (data.chart_data) {
-          setChartData(data.chart_data);
-          setStats({
-            strategyReturn: data.total_return_pct,
-            benchmarkReturn: data.benchmark_return_pct,
-            alpha: data.outperformance
-          });
-        }
-      } catch (error) {
-        console.error("Backtest fetch error:", error);
-      } finally {
-        setLoading(false);
       }
-    };
-
-    if (ticker) {
-      fetchBacktestData();
+    } catch (err: any) {
+      console.error("Backtest fetch error:", err);
+      setError(err.message || "Failed to load backtest data");
+    } finally {
+      setLoading(false);
     }
   }, [ticker]);
+
+  useEffect(() => {
+    fetchBacktestData();
+  }, [fetchBacktestData]);
 
   if (loading) {
     return (
       <div className="h-64 flex flex-col items-center justify-center text-slate-400 mt-4 bg-slate-50 rounded-xl border border-slate-200 border-dashed animate-pulse">
         <Activity className="w-8 h-8 opacity-20 mb-2" />
         <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Simulating Backtest Matrix...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-64 flex flex-col items-center justify-center text-rose-400 mt-4 bg-rose-50 rounded-xl border border-rose-100 border-dashed">
+        <Activity className="w-8 h-8 opacity-20 mb-2" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-rose-500">{error}</span>
+        <button 
+          onClick={() => fetchBacktestData()} 
+          className="mt-4 px-4 py-2 bg-rose-600 text-white text-[10px] font-black rounded-lg hover:bg-rose-700 transition-colors uppercase tracking-widest"
+        >
+          Retry Matrix Simulation
+        </button>
       </div>
     );
   }
