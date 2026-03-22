@@ -101,6 +101,7 @@ interface StockTerminalModalProps {
     data: {
         ticker: string;
         dnaScore: number;
+        popProbability?: number;
         bullPoints: string[];
         bearPoints: string[];
         riskLevel: string;
@@ -109,6 +110,8 @@ interface StockTerminalModalProps {
         change?: string;
         kellyWeight?: number;
         efficiencyRatio?: number;
+        matchedLegend?: { ticker: string; similarity: number };
+        quantSummary?: string;
         quantData?: {
             math_mode: boolean;
             ma20_distance_pct: number;

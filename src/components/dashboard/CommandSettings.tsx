@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Settings, Bell, Database, Save, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
-import { motion } from 'framer-motion';
-import clsx from 'clsx';
 
 export const CommandSettings: React.FC = () => {
   const [dnaThreshold, setDnaThreshold] = useState<number>(85);
@@ -13,7 +11,7 @@ export const CommandSettings: React.FC = () => {
   // 컴포넌트 마운트 시 DB에서 기존 설정값 불러오기
   useEffect(() => {
     const fetchSettings = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('system_settings')
         .select('*')
         .single();

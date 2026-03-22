@@ -11,8 +11,7 @@ export function calculateDNATargets(
   atr: number,
   daysHeld: number = 0,
   currentPrice: number = 0,
-  currentHigh: number = 0,
-  volatilityStdDev: number = 0
+  currentHigh: number = 0
 ): {
   targetPrice: number;
   stopPrice: number;

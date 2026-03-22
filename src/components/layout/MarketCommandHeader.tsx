@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Rocket, Loader2, CheckCircle } from 'lucide-react';
+import { Rocket, Loader2, CheckCircle } from 'lucide-react';
 import clsx from 'clsx';
 
 interface MarketCommandHeaderProps {

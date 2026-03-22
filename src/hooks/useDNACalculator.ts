@@ -46,14 +46,6 @@ export function useDNACalculator({
     const historicalPrices = history.map(h => h.price);
     const efficiencyRatio = calculateEfficiencyRatio(historicalPrices);
     
-    // 2. 변동성 StdDev 계산
-    const volatilityStdDev = history.length > 1 
-      ? Math.sqrt(history.reduce((acc, h, i, arr) => {
-          if (i === 0) return 0;
-          return acc + Math.pow(h.price - arr[i-1].price, 2);
-        }, 0) / history.length)
-      : buyPrice * 0.05;
-
     // 3. 보유 기간 계산 (거래일 기준, 주말 제외)
     const added = new Date(buyDate);
     const now = new Date();
@@ -90,8 +82,7 @@ export function useDNACalculator({
       atr5 || 0,
       daysHeld,
       currentPrice, 
-      currentHigh, 
-      volatilityStdDev
+      currentHigh
     );
     
     const GAMMA = 0.8; 

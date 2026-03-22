@@ -139,6 +139,7 @@ export const AnalysisResultCard = ({
                     bearPoints: bearPoints.length > 0 ? bearPoints : ["리스크 요인 스캔 중", "시장 변동성 확인 중"],
                     matchedLegend: matchedLegend || { ticker: 'N/A', similarity: 0 },
                     riskLevel,
+                    formulaVerdict: quantSummary || `${ticker}는 현재 시스템 분석 점수 ${dnaScore}점으로 평가되고 있습니다.`,
                     quantSummary: quantSummary || `${ticker}는 현재 시스템 분석 점수 ${dnaScore}점으로 평가되고 있습니다.`
                 }}
 
