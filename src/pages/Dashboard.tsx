@@ -3,7 +3,6 @@ import { Server, BarChart3, Rocket } from 'lucide-react';
 import clsx from 'clsx';
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { QuantSignalCard } from '../components/ui/QuantSignalCard';
-import { BacktestChart } from '../components/ui/BacktestChart';
 import { PortfolioStatus } from '../components/ui/PortfolioStatus';
 import { CommandSettings } from '../components/dashboard/CommandSettings';
 import { MarketCommandHeader } from '../components/layout/MarketCommandHeader';
@@ -226,11 +225,6 @@ export const Dashboard = () => {
                   
                   {/* 시그널 렌더링 카드 */}
                   <QuantSignalCard data={cardData} />
-                  
-                  {/* 백테스트 차트 */}
-                  <div className="h-80 w-full mt-2 rounded-xl border border-slate-100 overflow-hidden bg-slate-50/50 p-4 shadow-inner">
-                    <BacktestChart ticker={ticker} />
-                  </div>
                 </motion.div>
               );
             })}

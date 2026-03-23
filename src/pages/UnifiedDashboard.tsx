@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import { 
   List, 
   Zap, 
-  BarChart3, 
   TrendingUp, 
   Activity, 
   ArrowRight,
@@ -27,7 +26,6 @@ import { MarketCommandHeader } from '../components/layout/MarketCommandHeader';
 import { QuantSignalCard } from '../components/ui/QuantSignalCard';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { LiveExecutionCenter } from '../components/dashboard/LiveExecutionCenter';
-import { Card } from '../components/ui/Card';
 
 export const UnifiedDashboard = () => {
   const navigate = useNavigate();
@@ -40,13 +38,11 @@ export const UnifiedDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [terminalData, setTerminalData] = useState<any | null>(null);
   const [strategyStats, setStrategyStats] = useState<any | null>(null);
-  const [statsLoading, setStatsLoading] = useState(true);
   const [pulseStatus, setPulseStatus] = useState<any>(null);
 
   // 2. Fetch Data
   const loadData = async () => {
       setLoading(true);
-      setStatsLoading(true);
       try {
         // Fetch Watchlist & Discovery in Parallel
         const items = await getWatchlist();
@@ -72,7 +68,6 @@ export const UnifiedDashboard = () => {
         console.error('Failed to load unified data:', err);
       } finally {
         setLoading(false);
-        setStatsLoading(false);
       }
     };
 
@@ -299,7 +294,6 @@ export const UnifiedDashboard = () => {
                   const stock = watchlistStocks.find(s => s.ticker === item.ticker);
                   const buyPrice = item.buyPrice || stock?.price || 0;
                   const currentReturnPct = buyPrice > 0 ? ((stock?.price || 0) - buyPrice) / buyPrice * 100 : 0;
-                  const isProfit = currentReturnPct > 0;
                   
                   return (
                     <motion.div 

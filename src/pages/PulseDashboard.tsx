@@ -1,6 +1,5 @@
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { QuantSignalCard } from '../components/ui/QuantSignalCard';
-import { BacktestChart } from '../components/ui/BacktestChart';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import clsx from 'clsx';
 import { MarketCommandHeader } from '../components/layout/MarketCommandHeader';
@@ -135,9 +134,6 @@ const PulseDashboard: React.FC = () => {
                     </span>
                   </div>
                   <QuantSignalCard data={cardData} />
-                  <div className="mt-8 pt-8 border-t border-slate-100 p-2 bg-slate-50/50 rounded-xl shadow-inner">
-                    <BacktestChart ticker={ticker} />
-                  </div>
                 </div>
               );
             })}
