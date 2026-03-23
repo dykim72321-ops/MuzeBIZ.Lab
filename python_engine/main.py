@@ -1065,7 +1065,7 @@ async def get_strategy_stats():
     # 💡 Core Philosophy: "검증은 연구실(Lab)에서, 터미널(Terminal)은 오직 실행(Execution)만"
     # 주말에 동작하는 배치(Batch) 백테스팅 결과(strategy_metrics DB)를 단 0.01초 만에 반환합니다.
     # 더 이상 장중에 브라우저 로딩이나 라이브 연산을 유발하지 않습니다.
-    
+
     return {
         "win_rate": 61.2,
         "profit_factor": 1.52,
@@ -1075,7 +1075,7 @@ async def get_strategy_stats():
         "total_trades": 342,
         "is_simulated": False,
         "message": "System Edge Confirmed (Weekend Batch)",
-        "badge": "🛡️ System Edge: 승률 61.2% (검증됨)"
+        "badge": "🛡️ System Edge: 승률 61.2% (검증됨)",
     }
 
 
