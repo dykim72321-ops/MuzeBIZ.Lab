@@ -3,7 +3,7 @@ import {
   Trash2, ShieldCheck, Activity, Clock, HelpCircle, Zap, TrendingUp, Calendar
 } from 'lucide-react';
 import { useMemo } from 'react';
-import { ResponsiveContainer, AreaChart, Area, Tooltip, ReferenceLine, YAxis } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip, ReferenceLine, YAxis } from 'recharts';
 import { Card } from '../ui/Card';
 import { useDNACalculator } from '../../hooks/useDNACalculator';
 import type { Stock } from '../../types';
@@ -233,6 +233,7 @@ export const WatchlistItemCard = ({
                         <stop offset="95%" stopColor="#0176d3" stopOpacity={0} />
                       </linearGradient>
                     </defs>
+                    <XAxis dataKey="date" hide />
                     <YAxis hide domain={['auto', 'auto']} />
                     <Tooltip 
                       contentStyle={{ 

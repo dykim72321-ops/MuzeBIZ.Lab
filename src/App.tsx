@@ -18,7 +18,7 @@ import { queryClient } from './lib/queryClient';
 const PulseDashboard = lazy(() => import('./pages/PulseDashboard'));
 const ScannerPage = lazy(() => import('./pages/ScannerPage').then(m => ({ default: m.ScannerPage })));
 const AlphaFundView = lazy(() => import('./pages/AlphaFundView').then(m => ({ default: m.AlphaFundView })));
-// const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
+const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
 const MuzepartSearchPage = lazy(() => import('./pages/MuzepartSearchPage').then(m => ({ default: m.MuzepartSearchPage })));
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const UnifiedDashboard = lazy(() => import('./pages/UnifiedDashboard').then(m => ({ default: m.UnifiedDashboard })));
@@ -64,6 +64,9 @@ function App() {
 
                 {/* 알파 펀드 */}
                 <Route path="portfolio" element={<AlphaFundView />} />
+
+                {/* 관심 종목 */}
+                <Route path="watchlist" element={<WatchlistPage />} />
 
                 {/* 기타 도구 */}
                 <Route path="personas" element={<PersonaPerformance />} />

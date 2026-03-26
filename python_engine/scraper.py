@@ -241,6 +241,55 @@ class FinvizHunter:
             print(f"❌ Scraper critical failure: {e}")
             return []
 
+    async def _scrape_finviz_news(self, ticker: str) -> list:
+        """
+        [Opt-4] Finviz 종목 상세 페이지에서 직접 뉴스 헤드라인 스크래핑.
+        Playwright stealth 모드를 사용하여 봇 탐지를 우회합니다.
+        반환: 최대 8개의 헤드라인 문자열 리스트
+        """
+        url = f"https://finviz.com/quote.ashx?t={ticker}&ty=c&ta=1&p=d"
+        headlines = []
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent=self.user_agent,
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                )
+                page = await context.new_page()
+                await Stealth().apply_stealth_async(page)
+
+                # 랜덤 딜레이: Finviz 봇 탐지 우회 (0.8~2.5초)
+                await asyncio.sleep(random.uniform(0.8, 2.5))
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+                # Finviz 뉴스 테이블: .news-table 내 각 tr의 td:last-child > a
+                try:
+                    await page.wait_for_selector("table.news-table", timeout=8000)
+                    headlines = await page.evaluate("""
+                        () => {
+                            const rows = Array.from(document.querySelectorAll('table.news-table tr'));
+                            return rows
+                                .map(row => {
+                                    const link = row.querySelector('td:last-child a');
+                                    return link ? link.innerText.trim() : null;
+                                })
+                                .filter(h => h && h.length > 5)
+                                .slice(0, 8);
+                        }
+                    """)
+                    print(f"📰 [Finviz News] {ticker}: {len(headlines)} headlines scraped")
+                except Exception:
+                    print(f"⚠️ [Finviz News] {ticker}: news table not found (market may be closed)")
+
+                await browser.close()
+        except Exception as e:
+            print(f"❌ [Finviz News] {ticker} scraping failed: {e}")
+
+        return headlines
+
     async def scrape(self):
         print("⚙️ Starting Hybrid Quant Funnel (Dual-Track Stage 1)...")
 
@@ -310,8 +359,12 @@ class FinvizHunter:
                 print(f"⚠️ Failed to get technicals for {ticker_symbol}: {e}")
                 continue
 
-            # 2. Fetch News (Optional, can be used for sentiment later)
-            self.news.fetch_company_news(ticker_symbol)
+            # 2. Fetch News: [Opt-4] Finviz + Finnhub 뉴스 결합
+            finnhub_headlines = self.news.fetch_company_news(ticker_symbol)
+            finviz_headlines = await self._scrape_finviz_news(ticker_symbol)
+            # 중복 제거 후 최대 10개 결합 (Finviz 우선)
+            all_headlines = list({h: True for h in (finviz_headlines + finnhub_headlines)}.keys())[:10]
+            print(f"📰 [News] {ticker_symbol}: {len(finviz_headlines)} Finviz + {len(finnhub_headlines)} Finnhub = {len(all_headlines)} total")
 
             # 3. Mathematical Quant Analysis
             ma20 = df["Close"].rolling(window=20).mean().iloc[-1]
@@ -379,6 +432,7 @@ class FinvizHunter:
                 "dna_score": dna_score,
                 "ai_summary": ai_summary_text,
                 "backtest_return": backtest_return,
+                "news_headlines": json.dumps(all_headlines),  # [Opt-4] 뉴스 DB 저장
                 "updated_at": datetime.now().isoformat(),
             }
 

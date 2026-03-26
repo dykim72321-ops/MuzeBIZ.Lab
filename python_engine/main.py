@@ -115,16 +115,23 @@ class TickerDataState:
     def __init__(self, max_bars: int = 150):
         self.max_bars = max_bars
         self.history: Dict[str, pd.DataFrame] = {}
+        # [Opt-1] IEX는 전체 시장 거래량의 2~5%만 반영 → yfinance 비율로 교정
+        self.volume_multiplier: Dict[str, float] = {}
 
     def update(self, ticker: str, bar) -> pd.DataFrame:
-        """새로운 캔들을 히스토리에 병합"""
-        # Multi-index or complex object handling if needed
+        """새로운 캔들을 히스토리에 병합 (거래량 교정 포함)"""
+        # [Opt-1] IEX 거래량에 교정 배수 적용
+        raw_vol = float(bar.volume)
+        multiplier = self.volume_multiplier.get(ticker, 1.0)
+        calibrated_vol = raw_vol * multiplier
+
         new_row = {
             "Open": float(bar.open),
             "High": float(bar.high),
             "Low": float(bar.low),
             "Close": float(bar.close),
-            "Volume": float(bar.volume),
+            "Volume": calibrated_vol,  # 교정된 거래량 사용
+            "_raw_iex_volume": raw_vol,  # 원본 IEX 거래량 디버깅용 보존
         }
         # Alpaca bar.timestamp는 timezone-aware (UTC)
         df_new = pd.DataFrame([new_row], index=[pd.to_datetime(bar.timestamp)])
@@ -145,7 +152,8 @@ class TickerDataState:
         return self.history[ticker]
 
     async def warm_up(self, tickers: List[str]):
-        """시스템 시작 시 최근 1분봉 100개를 Alpaca에서 가져와 채움"""
+        """시스템 시작 시 최근 1분봉 100개를 Alpaca에서 가져와 채우고
+        [Opt-1] yfinance 전일 총거래량과의 비율로 Volume Multiplier 계산"""
         # Try Alpaca first if credentials exist
         api_key = os.getenv("APCA_API_KEY_ID")
         api_secret = os.getenv("APCA_API_SECRET_KEY")
@@ -178,8 +186,32 @@ class TickerDataState:
                                 "volume": "Volume",
                             }
                         )
+
+                        # [Opt-1] Volume Calibration: IEX vs yfinance 총거래량 비율 계산
+                        try:
+                            iex_total_vol = df["Volume"].sum()
+                            tk = yf.Ticker(ticker)
+                            yf_hist = await asyncio.to_thread(
+                                tk.history, period="1d", interval="1m"
+                            )
+                            yf_total_vol = (
+                                yf_hist["Volume"].sum() if not yf_hist.empty else 0
+                            )
+                            if iex_total_vol > 0 and yf_total_vol > 0:
+                                multiplier = min(yf_total_vol / iex_total_vol, 20.0)
+                                self.volume_multiplier[ticker] = multiplier
+                                # 히스토리 거래량에도 소급 적용
+                                df["Volume"] = df["Volume"] * multiplier
+                                print(f"📊 [VolMul] {ticker}: {multiplier:.1f}x calibrated (IEX→Full Market)")
+                            else:
+                                self.volume_multiplier[ticker] = 1.0
+                                print(f"⚠️ [VolMul] {ticker}: calibration skipped (vol=0), using 1.0x")
+                        except Exception as e:
+                            self.volume_multiplier[ticker] = 1.0
+                            print(f"⚠️ [VolMul] {ticker}: calibration error: {e}")
+
                         self.history[ticker] = df
-                        print(f"✅ [Alpaca] {ticker} warmed up.")
+                        print(f"✅ [Alpaca/IEX] {ticker} warmed up ({len(df)} bars, data_source=alpaca_iex).")
                 if len(self.history) >= len(tickers):
                     return  # Successfully warmed up all via Alpaca
             except Exception as e:
@@ -197,7 +229,9 @@ class TickerDataState:
                 if not df.empty:
                     df = df.tail(self.max_bars)
                     self.history[ticker] = df
-                    print(f"✅ [yfinance] {ticker} warmed up.")
+                    # [Opt-1] yfinance 폴백 시 배수 1.0 (이미 전체 시장 데이터)
+                    self.volume_multiplier[ticker] = 1.0
+                    print(f"✅ [yfinance] {ticker} warmed up (data_source=yfinance_1m).")
             except Exception as e:
                 print(f"⚠️ {ticker} yfinance warm-up failed: {e}")
 
@@ -1298,6 +1332,10 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         )
         payload["ai_metadata"] = None
 
+    # [Opt-3] 데이터 출처 명시적 태깅
+    payload["data_source"] = "alpaca_iex"
+    payload["volume_multiplier"] = candle_state.volume_multiplier.get(ticker.upper(), 1.0)
+
     return payload
 
 
@@ -1378,7 +1416,7 @@ async def on_minute_bar_closed(bar):
                     )
 
                 print(
-                    f"⚡ [Alpaca Stream] {ticker_symbol} processed: {payload.get('signal')} ({payload.get('strength')})"
+                    f"⚡ [Alpaca Stream] {ticker_symbol} processed: {payload.get('signal')} ({payload.get('strength')}) | vol_mul={payload.get('volume_multiplier', 1.0):.1f}x"
                 )
 
             except Exception as service_err:
@@ -1488,6 +1526,9 @@ async def run_startup_sequence():
             try:
                 payload = await asyncio.to_thread(run_pulse_engine, ticker, df)
                 payload["indicator"] = "Snapshot (Last Close)"
+                payload["data_source"] = (
+                    "alpaca_iex" if ticker in candle_state.volume_multiplier else "yfinance_snapshot"
+                )
 
                 # WebSocket 전송
                 await manager.broadcast(payload)

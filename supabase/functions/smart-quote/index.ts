@@ -286,6 +286,9 @@ async function fetchAlphaFinancials(ticker: string, supabase: any) {
   return null;
 }
 
+// [Opt-2] 스마트 캐시 TTL 설정
+const SMART_CACHE_TTL_MS = 60 * 1000; // 1분 (Finnhub 60 calls/min 제한 방어)
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -298,6 +301,28 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
+
+    // [Opt-2] 캐시 READ 로직: 1분 TTL 이내면 DB 캐시 반환 (Finnhub API 호출 절약)
+    // includeFinancials=true 요청은 캐시를 바이패스하여 항상 최신 데이터 제공
+    if (!includeFinancials) {
+      const { data: cached } = await supabase
+        .from('stock_cache')
+        .select('*')
+        .eq('ticker', ticker.toUpperCase())
+        .single();
+
+      if (cached?.updated_at) {
+        const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+        if (ageMs < SMART_CACHE_TTL_MS) {
+          console.log(`⚡ [SmartCache HIT] ${ticker}: ${Math.round(ageMs / 1000)}s old`);
+          return new Response(
+            JSON.stringify({ ...cached, _cache_source: 'supabase', _cache_age_s: Math.round(ageMs / 1000) }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+          );
+        }
+        console.log(`🔄 [SmartCache MISS] ${ticker}: ${Math.round(ageMs / 1000)}s old (> ${SMART_CACHE_TTL_MS / 1000}s TTL)`);
+      }
+    }
 
     // Get Yahoo Session first as it is needed by multiple fetchers
     let session = null;
