@@ -18,3 +18,4 @@ urllib3
 yfinance
 numpy
 alpaca-py>=0.17.0
+black==24.1.0

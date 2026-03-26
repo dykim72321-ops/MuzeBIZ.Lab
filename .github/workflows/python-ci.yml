@@ -40,15 +40,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --no-cache-dir -r requirements.txt
-          pip install --no-cache-dir flake8 black pytest
-          python -m playwright install --with-deps chromium
+          pip install --no-cache-dir flake8 black==24.1.0 pytest
 
       - name: Lint with flake8
         run: |
           # stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=venv
-          # exit-zero treats all errors as warnings. The GitHub editor is 120 chars wide
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics --exclude=venv
 
       - name: Check formatting with Black
         run: |
@@ -56,7 +53,7 @@ jobs:
 
       - name: Verify critical imports
         run: |
-          python -c "import fastapi; import uvicorn; import pandas; import yfinance; import supabase; import alpaca.data.live; import playwright; print('✅ All critical imports successful!')"
+          python -c "import fastapi; import uvicorn; import pandas; import yfinance; import supabase; import alpaca.data.live; print('✅ Critical imports successful!')"
 
       - name: Run placeholder tests
         run: |

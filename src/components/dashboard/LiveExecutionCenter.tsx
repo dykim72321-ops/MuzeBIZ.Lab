@@ -212,49 +212,58 @@ export const LiveExecutionCenter = () => {
           </div>
 
           {/* Center/Right: Action Buttons */}
-          <div className="flex items-center gap-4">
-              {/* KILL SWITCH */}
-              <Tooltip content="사용 중인 모든 포지션을 즉시 시장가로 매도하고 모든 미체결 주문을 취소합니다. (Panic Sell)">
-                <button 
-                  onClick={handlePanicSell}
-                  disabled={isPanicking}
-                  className="flex items-center gap-2 px-4 py-3 bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg active:scale-95 group"
-                >
-                  <AlertOctagon className={clsx("w-4 h-4", isPanicking && "animate-spin")} />
-                  {isPanicking ? 'LIQUIDATING...' : 'Panic Liquidate All'}
-                </button>
-              </Tooltip>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-4">
+                {/* KILL SWITCH */}
+                <Tooltip position="left" content="🚨 EMERGENCY KILL SWITCH: 사용 중인 모든 포지션을 즉시 시장가로 매도하고 모든 미체결 주문을 취소합니다.">
+                  <button 
+                    onClick={handlePanicSell}
+                    disabled={isPanicking}
+                    className="flex items-center gap-2 px-4 py-3 bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg active:scale-95 group"
+                  >
+                    <AlertOctagon className={clsx("w-4 h-4", isPanicking && "animate-spin")} />
+                    {isPanicking ? 'LIQUIDATING...' : 'Panic Liquidate All'}
+                  </button>
+                </Tooltip>
 
-              {/* Master Switch */}
-              <Tooltip content={isArmed ? "시스템을 대기 상태로 전환합니다. 자동 매매가 중단됩니다." : "시스템을 무장합니다. 이후 발생하는 강력한 퀀트 신호에 따라 자동 매매가 실행됩니다."}>
-                <button 
-                  onClick={() => setIsArmed(!isArmed)}
-                  className={clsx(
-                    "group relative px-8 py-3 rounded-2xl flex items-center gap-3 transition-all duration-300 active:scale-95 shadow-2xl overflow-hidden",
-                    isArmed 
-                      ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20" 
-                      : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/20"
-                  )}
-                >
-                  {isArmed ? (
-                    <>
-                      <Lock className="w-4 h-4" />
-                      <div className="text-left">
-                        <div className="text-[9px] font-black uppercase tracking-tighter opacity-70">Trading Armed</div>
-                        <div className="text-xs font-black uppercase tracking-widest">DISARM</div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <Unlock className="w-4 h-4" />
-                      <div className="text-left">
-                        <div className="text-[9px] font-black uppercase tracking-tighter opacity-70">Standby</div>
-                        <div className="text-xs font-black uppercase tracking-widest">ARM SYSTEM</div>
-                      </div>
-                    </>
-                  )}
-                </button>
-              </Tooltip>
+                {/* Master Switch */}
+                <Tooltip position="bottom" content={isArmed ? "SAFE MODE: 시스템을 대기 상태로 전환합니다. 자동 매매가 중지됩니다." : "COMBAT MODE: 시스템을 무장합니다. 스코어링된 신호에 따라 자동 매매가 실행됩니다."}>
+                  <button 
+                    onClick={() => setIsArmed(!isArmed)}
+                    className={clsx(
+                      "group relative px-8 py-3 rounded-2xl flex items-center gap-3 transition-all duration-300 active:scale-95 shadow-2xl overflow-hidden",
+                      isArmed 
+                        ? "bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20" 
+                        : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/20"
+                    )}
+                  >
+                    {isArmed ? (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        <div className="text-left">
+                          <div className="text-[9px] font-black uppercase tracking-tighter opacity-70">Trading Armed</div>
+                          <div className="text-xs font-black uppercase tracking-widest">DISARM</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Unlock className="w-4 h-4" />
+                        <div className="text-left">
+                          <div className="text-[9px] font-black uppercase tracking-tighter opacity-70">Standby</div>
+                          <div className="text-xs font-black uppercase tracking-widest">ARM SYSTEM</div>
+                        </div>
+                      </>
+                    )}
+                  </button>
+                </Tooltip>
+            </div>
+            {/* [NEW] Persistent Tip Box for visibility */}
+            <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-lg border border-white/5">
+               <Zap className="w-2.5 h-2.5 text-amber-500" />
+               <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">
+                 Tip: <span className="text-slate-400">ARM 후 DNA 85점 이상 신호 시 자동 매수 실행. 긴급 상황 시 Panic Liquidate 사용.</span>
+               </span>
+            </div>
           </div>
         </div>
       </div>

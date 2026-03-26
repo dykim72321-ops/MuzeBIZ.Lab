@@ -25,7 +25,7 @@ async def test_virtual_trading():
     print(f"Equity: ${account.equity}")
     print(f"Buying Power: ${account.buying_power}")
 
-    symbol = "NVDA"
+    symbol = "AMC"
     print(f"\n--- 🚀 Step 2: Placing Market Buy Order for {symbol} (1 share) ---")
 
     buy_request = MarketOrderRequest(

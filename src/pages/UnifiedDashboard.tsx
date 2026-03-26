@@ -158,8 +158,8 @@ export const UnifiedDashboard = () => {
             <div className="flex-1">
               <h3 className="text-sm font-black text-indigo-900 uppercase tracking-tight mb-1">Commander's Intelligence Brief</h3>
               <p className="text-xs text-indigo-700/80 leading-relaxed font-medium">
-                현재 알고리즘 v4.2가 활성화되어 있습니다. **DNA Score 85점 이상**의 종목은 즉각적인 타격 신호로 간주되며, 
-                Matrix Cache는 12시간마다 자동 갱신됩니다. 실전 매매 전 반드시 **Live Execution Center**의 모드를 확인하십시오.
+                현재 알고리즘 v4.2가 활성화되어 있습니다. **DNA Score 85점 이상**의 종목은 즉각적인 타격 신호로 간주됩니다. 
+                신속한 진입을 위해 **ARM SYSTEM**을 활성화하고, 긴급 상황 시 **Panic Liquidate All** 버튼으로 모든 포지션을 즉시 청산하십시오.
               </p>
             </div>
             <div className="flex gap-2">
