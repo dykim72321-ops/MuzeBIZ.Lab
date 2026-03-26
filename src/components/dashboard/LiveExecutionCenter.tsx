@@ -111,30 +111,44 @@ export const LiveExecutionCenter = () => {
   }, []);
 
   const handlePanicSell = async () => {
-    const confirmed = window.confirm('🚨 [점검] 모든 미체결 주문을 취소하고 활성 포지션을 시장가로 청산합니다. 사령관님, 진행하시겠습니까?');
-    if (!confirmed) return;
+    // [Fix] window.confirm이 브라우저에서 차단되거나 보이지 않는 이슈 대응
+    // toast를 사용하여 사용자에게 명시적으로 확인을 요청합니다.
+    toast('🚨 전량 청산 확인', {
+      description: '모든 미체결 주문을 취소하고 활성 포지션을 시장가로 청산하시겠습니까?',
+      action: {
+        label: '청산 실행',
+        onClick: async () => {
+          setIsPanicking(true);
+          const toastId = toast.loading('DEFCON 1: 전량 청산 명령 전송 중...');
 
-    setIsPanicking(true);
-    const toastId = toast.loading('DEFCON 1: 전량 청산 명령 전송 중...');
-
-    try {
-      const result = await apiFetch('/api/broker/liquidate-all', 'POST', { confirm: true });
-      if (result.status === 'success') {
-        toast.success('전량 청산 성공', {
-            description: '모든 주문이 취소되고 청산 절차가 시작되었습니다.',
-            id: toastId
-        });
-        setIsArmed(false); // 리스크 방지를 위해 무장 해제
-        loadAllData(); // 데이터 갱신
+          try {
+            // [Fix] Body(..., embed=True) 형식에 맞춰 페이로드 전송
+            const result = await apiFetch('/api/broker/liquidate-all', 'POST', { confirm: true });
+            
+            if (result.status === 'success') {
+              toast.success('전량 청산 성공', {
+                  description: '모든 주문이 취소되고 청산 절차가 시작되었습니다.',
+                  id: toastId
+              });
+              setIsArmed(false); 
+              loadAllData();
+            } else if (result.error) {
+              throw new Error(result.error);
+            }
+          } catch (error) {
+            toast.error('청산 명령 실패', {
+                description: error instanceof Error ? error.message : '네트워크 오류가 발생했습니다.',
+                id: toastId
+            });
+          } finally {
+            setIsPanicking(false);
+          }
+        }
+      },
+      cancel: {
+        label: '취소'
       }
-    } catch (error) {
-      toast.error('청산 명령 실패', {
-          description: error instanceof Error ? error.message : '네트워크 오류가 발생했습니다.',
-          id: toastId
-      });
-    } finally {
-      setIsPanicking(false);
-    }
+    });
   };
 
   if (loading) return (

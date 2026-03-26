@@ -7,6 +7,7 @@ from fastapi import (
     WebSocketDisconnect,
     Query,
     HTTPException,
+    Body,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
@@ -52,8 +53,16 @@ paper_engine = None
 
 
 # .env 파일에서 환경변수 로드
-# .env 파일에서 환경변수 로드 (Updated for Realtime Pulse) (Verified)
 load_dotenv()
+
+# --- Alpaca Clients Initialization ---
+APCA_API_KEY = os.getenv("APCA_API_KEY_ID")
+APCA_API_SECRET = os.getenv("APCA_API_SECRET_KEY")
+APCA_PAPER = os.getenv("APCA_PAPER", "true").lower() == "true"
+
+trading_client = None
+if APCA_API_KEY and APCA_API_SECRET:
+    trading_client = TradingClient(APCA_API_KEY, APCA_API_SECRET, paper=APCA_PAPER)
 
 app = FastAPI(
     title="MuzeBIZ Technical Analysis API",
@@ -1074,6 +1083,65 @@ async def validate_candidates(
 
 
 
+
+# --- Broker & Account API ---
+
+@app.get("/api/broker/account")
+async def get_broker_account(api_key: str = Security(get_api_key)):
+    """Alpaca 계좌 현황 조회 (Buying Power, PnL 등)"""
+    if not trading_client:
+        return {"error": "Trading client not initialized"}
+
+    try:
+        acc = await asyncio.to_thread(trading_client.get_account)
+        
+        # PnL 및 자산 정보 추출
+        equity = float(acc.equity)
+        last_equity = float(acc.last_equity)
+        today_pnl = equity - last_equity
+        today_pnl_pct = (today_pnl / last_equity * 100) if last_equity > 0 else 0
+        
+        # 하락폭 (Drawdown) 계산 (임시: 당일 기준)
+        drawdown = 0.0
+        if equity < last_equity:
+            drawdown = round(((last_equity - equity) / last_equity) * 100, 2)
+
+        return {
+            "buying_power": float(acc.buying_power),
+            "equity": equity,
+            "today_pnl": round(today_pnl, 2),
+            "today_pnl_pct": round(today_pnl_pct, 2),
+            "current_drawdown": drawdown,
+            "currency": acc.currency,
+            "status": acc.status
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/broker/liquidate-all")
+async def liquidate_all_positions(confirm: bool = Body(..., embed=True), api_key: str = Security(get_api_key)):
+    """🚨 긴급 버튼: 모든 미체결 주문 취소 및 모든 포지션 시장가 청산"""
+    if not trading_client:
+        return {"error": "Trading client not initialized"}
+    
+    if not confirm:
+        return {"error": "Confirmation required"}
+
+    try:
+        # 1. 모든 주문 취소
+        await asyncio.to_thread(trading_client.cancel_orders)
+        # 2. 모든 포지션 청산
+        await asyncio.to_thread(trading_client.close_all_positions, cancel_orders=True)
+        
+        await webhook.send_alert(
+            title="⚠️ [PANIC] 역대급 긴급 전량 청산 실행",
+            description="사령관 명령에 의해 모든 포지션이 시장가로 청산되었습니다.",
+            color=0xFF0000
+        )
+        
+        return {"status": "success", "message": "All positions liquidated and orders cancelled."}
+    except Exception as e:
+        return {"error": str(e)}
 
 # Backtesting endpoint
 
