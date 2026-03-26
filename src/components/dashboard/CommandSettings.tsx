@@ -51,28 +51,40 @@ export const CommandSettings: React.FC = () => {
   };
 
   const handleClearCache = async () => {
-    if (!window.confirm('정말 백테스트 캐시를 모두 초기화하시겠습니까? 다음 호출 시 연산 부하가 발생할 수 있습니다.')) return;
-    
-    setIsClearing(true);
-    try {
-      // backtest_cache 테이블의 모든 데이터 삭제
-      const { error } = await supabase
-        .from('backtest_cache')
-        .delete()
-        .neq('ticker', 'dummy'); // 조건 없이 삭제 (또는 TRUNCATE RPC 호출)
+    toast('💣 Cache Flush Confirmation', {
+      description: '정말 백테스트 캐시를 모두 초기화하시겠습니까? 다음 호출 시 연산 부하가 발생할 수 있습니다.',
+      action: {
+        label: '캐시 초기화',
+        onClick: async () => {
+          setIsClearing(true);
+          const toastId = toast.loading('Purging backtest memory tables...');
+          try {
+            const { error } = await supabase
+              .from('backtest_cache')
+              .delete()
+              .neq('ticker', 'dummy'); 
 
-      if (error) throw error;
-      toast.success('Cache Flushed', {
-        description: 'All backtest data has been cleared.',
-      });
-    } catch (error) {
-      console.error('Cache clear error:', error);
-      toast.error('Flush Error', {
-        description: 'Could not purge memory tables.',
-      });
-    } finally {
-      setIsClearing(false);
-    }
+            if (error) throw error;
+            toast.success('Cache Flushed', {
+              description: 'All backtest data has been cleared.',
+              id: toastId
+            });
+          } catch (error) {
+            console.error('Cache clear error:', error);
+            toast.error('Flush Error', {
+              description: 'Could not purge memory tables.',
+              id: toastId
+            });
+          } finally {
+            setIsClearing(false);
+          }
+        }
+      },
+      cancel: {
+        label: '취소',
+        onClick: () => {}
+      }
+    });
   };
 
   return (
