@@ -222,7 +222,8 @@ class FinvizHunter:
                     await browser.close()
                     return []
 
-                stocks = await page.evaluate("""() => {
+                stocks = await page.evaluate(
+                    """() => {
                     const rows = Array.from(document.querySelectorAll('table[width="100%"] tr[valign="top"]'));
                     return rows.slice(0, 5).map(row => { // 5개로 축소하여 Anomaly와 합칠 여유 확보
                         const cells = row.querySelectorAll('td');
@@ -233,7 +234,8 @@ class FinvizHunter:
                             reason: "Finviz Screened"
                         };
                     }).filter(item => item !== null);
-                }""")
+                }"""
+                )
                 results = stocks
                 await browser.close()
                 return results
@@ -268,7 +270,8 @@ class FinvizHunter:
                 # Finviz 뉴스 테이블: .news-table 내 각 tr의 td:last-child > a
                 try:
                     await page.wait_for_selector("table.news-table", timeout=8000)
-                    headlines = await page.evaluate("""
+                    headlines = await page.evaluate(
+                        """
                         () => {
                             const rows = Array.from(document.querySelectorAll('table.news-table tr'));
                             return rows
@@ -279,10 +282,15 @@ class FinvizHunter:
                                 .filter(h => h && h.length > 5)
                                 .slice(0, 8);
                         }
-                    """)
-                    print(f"📰 [Finviz News] {ticker}: {len(headlines)} headlines scraped")
+                    """
+                    )
+                    print(
+                        f"📰 [Finviz News] {ticker}: {len(headlines)} headlines scraped"
+                    )
                 except Exception:
-                    print(f"⚠️ [Finviz News] {ticker}: news table not found (market may be closed)")
+                    print(
+                        f"⚠️ [Finviz News] {ticker}: news table not found (market may be closed)"
+                    )
 
                 await browser.close()
         except Exception as e:
@@ -363,8 +371,12 @@ class FinvizHunter:
             finnhub_headlines = self.news.fetch_company_news(ticker_symbol)
             finviz_headlines = await self._scrape_finviz_news(ticker_symbol)
             # 중복 제거 후 최대 10개 결합 (Finviz 우선)
-            all_headlines = list({h: True for h in (finviz_headlines + finnhub_headlines)}.keys())[:10]
-            print(f"📰 [News] {ticker_symbol}: {len(finviz_headlines)} Finviz + {len(finnhub_headlines)} Finnhub = {len(all_headlines)} total")
+            all_headlines = list(
+                {h: True for h in (finviz_headlines + finnhub_headlines)}.keys()
+            )[:10]
+            print(
+                f"📰 [News] {ticker_symbol}: {len(finviz_headlines)} Finviz + {len(finnhub_headlines)} Finnhub = {len(all_headlines)} total"
+            )
 
             # 3. Mathematical Quant Analysis
             ma20 = df["Close"].rolling(window=20).mean().iloc[-1]

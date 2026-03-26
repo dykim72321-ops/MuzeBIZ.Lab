@@ -13,6 +13,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 PASS = "✅ PASS"
@@ -55,17 +56,25 @@ async def test_smart_cache_ttl():
 
     # 케이스 A: 30초 전 → 캐시 HIT
     recent_update = (datetime.utcnow() - timedelta(seconds=30)).isoformat()
-    age_ms = (datetime.utcnow() - datetime.fromisoformat(recent_update)).total_seconds() * 1000
+    age_ms = (
+        datetime.utcnow() - datetime.fromisoformat(recent_update)
+    ).total_seconds() * 1000
     is_hit = age_ms < SMART_CACHE_TTL_MS
     assert is_hit, f"Expected HIT for 30s old data, age_ms={age_ms:.0f}"
-    print(f"  {PASS}: 30s old cache → HIT (age={age_ms:.0f}ms < TTL={SMART_CACHE_TTL_MS}ms)")
+    print(
+        f"  {PASS}: 30s old cache → HIT (age={age_ms:.0f}ms < TTL={SMART_CACHE_TTL_MS}ms)"
+    )
 
     # 케이스 B: 90초 전 → 캐시 MISS
     old_update = (datetime.utcnow() - timedelta(seconds=90)).isoformat()
-    age_ms_old = (datetime.utcnow() - datetime.fromisoformat(old_update)).total_seconds() * 1000
+    age_ms_old = (
+        datetime.utcnow() - datetime.fromisoformat(old_update)
+    ).total_seconds() * 1000
     is_miss = age_ms_old >= SMART_CACHE_TTL_MS
     assert is_miss, f"Expected MISS for 90s old data, age_ms={age_ms_old:.0f}"
-    print(f"  {PASS}: 90s old cache → MISS (age={age_ms_old:.0f}ms >= TTL={SMART_CACHE_TTL_MS}ms)")
+    print(
+        f"  {PASS}: 90s old cache → MISS (age={age_ms_old:.0f}ms >= TTL={SMART_CACHE_TTL_MS}ms)"
+    )
     return True
 
 
@@ -82,26 +91,38 @@ async def test_data_source_tagging():
     n = 50
     dates = pd.date_range("2025-01-01", periods=n, freq="1min")
     prices = 100 + np.cumsum(np.random.randn(n) * 0.5)
-    df = pd.DataFrame({
-        "Open": prices * 0.999,
-        "High": prices * 1.005,
-        "Low": prices * 0.995,
-        "Close": prices,
-        "Volume": np.random.randint(10000, 50000, n).astype(float),
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "Open": prices * 0.999,
+            "High": prices * 1.005,
+            "Low": prices * 0.995,
+            "Close": prices,
+            "Volume": np.random.randint(10000, 50000, n).astype(float),
+        },
+        index=dates,
+    )
 
     # volume_multiplier 등록
     from main import candle_state, run_pulse_engine
+
     candle_state.volume_multiplier["TEST"] = 14.2
 
     payload = run_pulse_engine("TEST", df)
 
     assert "data_source" in payload, "data_source field missing from payload"
-    assert payload["data_source"] == "alpaca_iex", f"Expected 'alpaca_iex', got '{payload['data_source']}'"
-    assert "volume_multiplier" in payload, "volume_multiplier field missing from payload"
-    assert payload["volume_multiplier"] == 14.2, f"Expected 14.2, got {payload['volume_multiplier']}"
+    assert (
+        payload["data_source"] == "alpaca_iex"
+    ), f"Expected 'alpaca_iex', got '{payload['data_source']}'"
+    assert (
+        "volume_multiplier" in payload
+    ), "volume_multiplier field missing from payload"
+    assert (
+        payload["volume_multiplier"] == 14.2
+    ), f"Expected 14.2, got {payload['volume_multiplier']}"
 
-    print(f"  {PASS}: data_source='{payload['data_source']}', volume_multiplier={payload['volume_multiplier']:.1f}x")
+    print(
+        f"  {PASS}: data_source='{payload['data_source']}', volume_multiplier={payload['volume_multiplier']:.1f}x"
+    )
     return True
 
 
@@ -114,8 +135,12 @@ async def test_finviz_news_method():
     import inspect
 
     hunter = FinvizHunter()
-    assert hasattr(hunter, "_scrape_finviz_news"), "_scrape_finviz_news method not found on FinvizHunter"
-    assert inspect.iscoroutinefunction(hunter._scrape_finviz_news), "_scrape_finviz_news is not async"
+    assert hasattr(
+        hunter, "_scrape_finviz_news"
+    ), "_scrape_finviz_news method not found on FinvizHunter"
+    assert inspect.iscoroutinefunction(
+        hunter._scrape_finviz_news
+    ), "_scrape_finviz_news is not async"
 
     print(f"  {PASS}: _scrape_finviz_news is present and is async coroutine")
 
@@ -125,7 +150,9 @@ async def test_finviz_news_method():
         print("  🔄 [LIVE] Running live Finviz scrape for AAPL...")
         headlines = await hunter._scrape_finviz_news("AAPL")
         assert isinstance(headlines, list), "Expected list from _scrape_finviz_news"
-        print(f"  {PASS if len(headlines) > 0 else FAIL}: Got {len(headlines)} headlines for AAPL")
+        print(
+            f"  {PASS if len(headlines) > 0 else FAIL}: Got {len(headlines)} headlines for AAPL"
+        )
     else:
         print("  ⏭️ Live scrape skipped (set TEST_LIVE_SCRAPE=true to enable)")
 
