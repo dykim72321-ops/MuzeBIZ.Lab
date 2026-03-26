@@ -14,7 +14,7 @@ jinja2
 python-multipart
 playwright
 playwright-stealth
-urllib3<2.0.0
+urllib3
 yfinance
 numpy
 alpaca-py>=0.17.0
