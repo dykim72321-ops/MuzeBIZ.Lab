@@ -1,6 +1,5 @@
 import asyncio
 from playwright.async_api import async_playwright
-from playwright_stealth import Stealth
 import re
 from typing import List, Dict
 from utils import PartNormalizer

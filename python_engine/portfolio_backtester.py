@@ -221,8 +221,8 @@ class DNAValidator:
 
                         bench_ret = (bench_end / bench_start) - 1
                         rs = (stock_ret - bench_ret) * 100
-                    except:
-                        pass
+                    except Exception:
+                        pass  # RS calculation failed, skip
 
                 # [전략 변경] 페니 스탁 전용 타이트닝 (Floor 1.8)
                 multiplier_base = 3.0
@@ -457,10 +457,10 @@ class DNAValidator:
             # IN-SAMPLE TRAINING Loop
             for g in gamma_grid:
                 for d in delta_grid:
-                    for l in lambda_grid:
+                    for lambd in lambda_grid:
                         self.gamma = g
                         self.delta = d
-                        self.lambda_val = l
+                        self.lambda_val = lambd
 
                         is_trades = []
                         for ticker, ticker_data in precalculated_catalog.items():
@@ -472,20 +472,26 @@ class DNAValidator:
                                     t = self.simulate_ticker(ticker, train_slice)
                                     if t:
                                         is_trades.extend(t)
-                            except:
+                            except Exception:
                                 pass
 
                         if is_trades:
                             df_is = pd.DataFrame(is_trades)
-                            sum_win = df_is[df_is["result"] == "WIN"]["pnl"].sum()
-                            sum_loss = df_is[df_is["result"] == "LOSS"]["pnl"].sum()
-                            pf = abs(sum_win / sum_loss) if sum_loss != 0 else sum_win
+                            win_trades = df_is[df_is["result"] == "WIN"]
+                            loss_trades = df_is[df_is["result"] == "LOSS"]
+                            sum_win = win_trades["pnl"].sum()
+                            sum_loss = abs(loss_trades["pnl"].sum())
+                            pf = (sum_win / sum_loss) if sum_loss != 0 else sum_win
 
                             if pf > best_pf:
                                 best_pf = pf
-                                best_params = {"gamma": g, "delta": d, "lambda_val": l}
+                                best_params = {
+                                    "gamma": g,
+                                    "delta": d,
+                                    "lambda_val": lambd,
+                                }
 
-            print(f"   ✓ Train 최고 パラメータ: {best_params} (PF: {best_pf:.2f})")
+            print(f"   ✓ Train 최고 파라미터: {best_params} (PF: {best_pf:.2f})")
 
             # OUT-OF-SAMPLE TESTING (Test Window에 최적 파라미터 적용)
             self.gamma = best_params["gamma"]
@@ -500,7 +506,7 @@ class DNAValidator:
                         t = self.simulate_ticker(ticker, test_slice)
                         if t:
                             oos_trades.extend(t)
-                except:
+                except Exception:
                     pass
 
             if oos_trades:

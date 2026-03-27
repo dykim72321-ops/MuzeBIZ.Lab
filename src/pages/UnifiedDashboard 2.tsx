@@ -290,7 +290,7 @@ export const UnifiedDashboard = () => {
                           <span className="block text-[8px] text-slate-400 font-bold uppercase truncate">{stock.name}</span>
                         </div>
                         <div className="mt-auto pt-4 flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-slate-400 font-mono">${(stock.price || 0).toFixed(1)}</span>
+                          <span className="text-[10px] font-bold text-slate-400 font-mono">${stock.price.toFixed(1)}</span>
                           <div className="flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
                             <Zap className="w-3 h-3 text-indigo-600 fill-current" />
                             <span className="text-[9px] font-black text-indigo-600 font-mono">{stock.dna_score || stock.dnaScore}</span>
@@ -361,6 +361,7 @@ export const UnifiedDashboard = () => {
                                 {currentReturnPct >= 0 ? '+' : ''}{currentReturnPct.toFixed(1)}%
                               </div>
                               {stock && (
+                                <div className="mt-1 text-[10px] font-black text-white/90 font-mono">
                                   ${stock.price.toFixed(2)}
                                 </div>
                               )}
