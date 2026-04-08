@@ -90,32 +90,60 @@ export async function triggerHunt(): Promise<{ success: boolean; message: string
 }
 
 /**
- * 브로커 계좌 현황 조회 (관리자 전용)
+ * Broker API Direct Fetch — Vite 프록시(/py-api)를 통해 FastAPI에 직접 호출.
+ * X-Admin-Key 헤더를 포함하여 인증을 처리합니다.
+ */
+export async function brokerApiFetch(
+  endpoint: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  body: any = null
+): Promise<any> {
+  const adminKey = import.meta.env.VITE_ADMIN_SECRET_KEY;
+  const options: RequestInit = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(adminKey ? { 'X-Admin-Key': adminKey } : {}),
+    },
+  };
+  if (body && (method === 'POST' || method === 'PUT')) {
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(`${PY_API_BASE}${endpoint}`, options);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `HTTP Error: ${response.status}`);
+  }
+  return await response.json();
+}
+
+/**
+ * 브로커 계좌 현황 조회
  */
 export async function fetchBrokerAccount(): Promise<any> {
-  return adminApiFetch('/api/broker/account');
+  return brokerApiFetch('/api/broker/account');
 }
 
 /**
- * 모든 포지션 청산 (관리자 전용 - Panic Sell)
+ * 모든 포지션 청산 (Panic Sell)
  */
 export async function liquidateAllPositions(confirm: boolean = true): Promise<any> {
-  return adminApiFetch('/api/broker/liquidate-all', 'POST', { confirm });
+  return brokerApiFetch('/api/broker/liquidate-all', 'POST', { confirm });
 }
 
 /**
- * 브로커 및 시스템 상태 조회 (관리자 전용)
+ * 브로커 및 시스템 상태 조회
  */
 export async function fetchBrokerStatus(): Promise<any> {
-  return adminApiFetch('/api/broker/status');
+  return brokerApiFetch('/api/broker/status');
 }
 
 /**
- * 브로커 오픈 포지션 조회 (관리자 전용)
+ * 브로커 오픈 포지션 조회
  */
 export async function fetchBrokerPositions(): Promise<any[]> {
   try {
-    const data = await adminApiFetch('/api/broker/positions');
+    const data = await brokerApiFetch('/api/broker/positions');
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('[PythonAPI] Positions fetch error:', error);
@@ -124,11 +152,11 @@ export async function fetchBrokerPositions(): Promise<any[]> {
 }
 
 /**
- * 브로커 최근 주문 내역 조회 (관리자 전용)
+ * 브로커 최근 주문 내역 조회
  */
 export async function fetchBrokerOrders(limit: number = 50): Promise<any[]> {
   try {
-    const data = await adminApiFetch(`/api/broker/orders?limit=${limit}`);
+    const data = await brokerApiFetch(`/api/broker/orders?limit=${limit}`);
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('[PythonAPI] Orders fetch error:', error);
@@ -136,16 +164,15 @@ export async function fetchBrokerOrders(limit: number = 50): Promise<any[]> {
   }
 }
 
-
 /**
- * 시스템 자동 매매 무장/해제 (관리자 전용)
+ * 시스템 자동 매매 무장/해제
  */
 export async function toggleSystemArm(arm: boolean): Promise<any> {
-  return adminApiFetch('/api/broker/arm', 'POST', { arm });
+  return brokerApiFetch('/api/broker/arm', 'POST', { arm });
 }
 
 /**
- * 수동 주문 실행 (관리자 전용)
+ * 수동 주문 실행
  */
 export async function executeManualOrder(orderData: {
   ticker: string;
@@ -154,14 +181,14 @@ export async function executeManualOrder(orderData: {
   type?: 'market' | 'limit';
   price?: number;
 }): Promise<any> {
-  return adminApiFetch('/api/broker/order', 'POST', orderData);
+  return brokerApiFetch('/api/broker/order', 'POST', orderData);
 }
 
 /**
- * 특정 포지션 청산 (관리자 전용)
+ * 특정 포지션 청산
  */
 export async function closePosition(ticker: string): Promise<any> {
-  return adminApiFetch('/api/broker/close-position', 'POST', { ticker });
+  return brokerApiFetch('/api/broker/close-position', 'POST', { ticker });
 }
 
 /**

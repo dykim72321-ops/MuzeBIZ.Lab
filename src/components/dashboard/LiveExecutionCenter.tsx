@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
+import {
   Terminal, Zap, Target, History, ShieldCheck, Clock, Activity,
-  Lock, Unlock, AlertOctagon, TrendingDown, DollarSign
+  Lock, Unlock, AlertOctagon, TrendingDown, DollarSign, PlusCircle,
+  TrendingUp, CheckCircle, XCircle
 } from 'lucide-react';
 import clsx from 'clsx';
 import { fetchQuantSignals } from '../../services/stockService';
@@ -218,7 +219,14 @@ export const LiveExecutionCenter = () => {
           </div>
 
           <div className="flex items-center gap-4">
-              <button 
+              <button
+                onClick={() => { setSelectedTicker(''); setIsManualModalOpen(true); }}
+                className="px-4 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center gap-2"
+              >
+                <PlusCircle className="w-4 h-4" />
+                New Order
+              </button>
+              <button
                 onClick={handlePanicSell}
                 disabled={isPanicking}
                 className="px-4 py-3 bg-rose-600/10 hover:bg-rose-600 text-rose-500 hover:text-white border border-rose-500/30 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all"
@@ -297,8 +305,8 @@ export const LiveExecutionCenter = () => {
           <div className="lg:col-span-8 overflow-y-auto p-6 border-r border-slate-800/50 custom-scrollbar">
             <AnimatePresence mode="wait">
               <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-                {activeTab === 'positions' && positions.length > 0 ? (
-                  positions.map((pos) => (
+                {activeTab === 'positions' && (
+                  positions.length > 0 ? positions.map((pos) => (
                     <div key={pos.ticker} className="bg-white/5 border border-white/5 rounded-2xl p-6 flex justify-between items-center group hover:bg-white/[0.08] transition-all">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center font-black text-indigo-400 border border-indigo-500/20">{pos.ticker.charAt(0)}</div>
@@ -309,14 +317,82 @@ export const LiveExecutionCenter = () => {
                               {(pos.unrealized_plpc || 0).toFixed(2)}%
                             </span>
                           </div>
-                          <div className="text-[10px] text-slate-500 font-bold mt-1">ENTRY: ${pos.entry_price.toFixed(2)} — QTY: {pos.quantity}</div>
+                          <div className="text-[10px] text-slate-500 font-bold mt-1">
+                            ENTRY: ${Number(pos.entry_price).toFixed(2)} · NOW: ${Number(pos.current_price).toFixed(2)} · QTY: {pos.quantity}
+                          </div>
+                          <div className={clsx("text-[10px] font-black mt-0.5", (pos.unrealized_pl || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                            P&L: {(pos.unrealized_pl || 0) >= 0 ? '+' : ''}${Number(pos.unrealized_pl).toFixed(2)}
+                          </div>
                         </div>
                       </div>
-                      <button onClick={() => handleClosePosition(pos.ticker)} className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white text-[10px] font-black rounded-xl border border-rose-500/20 transition-all uppercase tracking-widest">Close</button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { setSelectedTicker(pos.ticker); setIsManualModalOpen(true); }}
+                          className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[10px] font-black rounded-xl border border-indigo-500/20 transition-all uppercase tracking-widest"
+                        >Add</button>
+                        <button onClick={() => handleClosePosition(pos.ticker)} className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white text-[10px] font-black rounded-xl border border-rose-500/20 transition-all uppercase tracking-widest">Close</button>
+                      </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="py-20 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest opacity-30">Awaiting node data...</div>
+                  )) : (
+                    <div className="py-20 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest opacity-30">
+                      {brokerConnected ? 'No open positions' : 'Broker offline — check FastAPI server'}
+                    </div>
+                  )
+                )}
+
+                {activeTab === 'signals' && (
+                  signals.length > 0 ? signals.map((sig: any) => (
+                    <div key={sig.id || sig.ticker} className="bg-white/5 border border-white/5 rounded-2xl p-5 flex justify-between items-center group hover:bg-white/[0.08] transition-all">
+                      <div className="flex items-center gap-4">
+                        <div className={clsx("w-10 h-10 rounded-2xl flex items-center justify-center border", sig.signal === 'BUY' ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20")}>
+                          {sig.signal === 'BUY' ? <TrendingUp className="w-4 h-4 text-emerald-400" /> : <TrendingDown className="w-4 h-4 text-rose-400" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-base font-black text-white">{sig.ticker}</span>
+                            <span className={clsx("text-[10px] font-black px-2 py-0.5 rounded uppercase", sig.signal === 'BUY' ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>{sig.signal}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-bold mt-0.5">
+                            DNA: {sig.dna_score ?? '--'} · RSI: {sig.rsi_2 ? Number(sig.rsi_2).toFixed(1) : '--'}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => { setSelectedTicker(sig.ticker); setIsManualModalOpen(true); }}
+                        className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500 text-indigo-400 hover:text-white text-[10px] font-black rounded-xl border border-indigo-500/20 transition-all uppercase tracking-widest"
+                      >Execute</button>
+                    </div>
+                  )) : (
+                    <div className="py-20 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest opacity-30">No active signals</div>
+                  )
+                )}
+
+                {activeTab === 'history' && (
+                  history.length > 0 ? history.map((order: any) => (
+                    <div key={order.id} className="bg-white/5 border border-white/5 rounded-2xl p-5 flex justify-between items-center">
+                      <div className="flex items-center gap-4">
+                        <div className={clsx("w-10 h-10 rounded-2xl flex items-center justify-center border", order.side === 'buy' ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20")}>
+                          {order.status === 'filled' ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-slate-500" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-base font-black text-white">{order.ticker}</span>
+                            <span className={clsx("text-[10px] font-black px-2 py-0.5 rounded uppercase", order.side === 'buy' ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>{order.side}</span>
+                            <span className="text-[10px] font-bold text-slate-600 uppercase">{order.type}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-bold mt-0.5">
+                            QTY: {order.filled_qty}/{order.quantity} · AVG: ${order.filled_avg_price > 0 ? Number(order.filled_avg_price).toFixed(2) : '--'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className={clsx("text-[10px] font-black uppercase px-2 py-0.5 rounded", order.status === 'filled' ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-800 text-slate-500")}>{order.status}</div>
+                        <div className="text-[9px] text-slate-600 mt-1">{order.created_at ? new Date(order.created_at).toLocaleString() : '--'}</div>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="py-20 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest opacity-30">No order history</div>
+                  )
                 )}
               </motion.div>
             </AnimatePresence>
