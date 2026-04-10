@@ -10,7 +10,8 @@ import { fetchQuantSignals } from '../../services/stockService';
 import { 
   fetchBrokerAccount, fetchBrokerStatus, toggleSystemArm, 
   closePosition as closeBrokerPosition, liquidateAllPositions,
-  fetchBrokerPositions, fetchBrokerOrders
+  fetchBrokerPositions, fetchBrokerOrders,
+  fetchPaperAccount, fetchPaperPositions, fetchPaperHistory
 } from '../../services/pythonApiService';
 import { Tooltip } from '../ui/Tooltip';
 import { toast } from 'sonner';
@@ -57,14 +58,28 @@ export const LiveExecutionCenter = () => {
 
   const loadAllData = async () => {
     try {
-      const [s, p, h] = await Promise.all([
+      // Parallel fetch for broker and internal paper trading data
+      const [s, p, h, pp, ph] = await Promise.all([
         fetchQuantSignals(),
         fetchBrokerPositions(),
-        fetchBrokerOrders(30)
+        fetchBrokerOrders(30),
+        fetchPaperPositions(),
+        fetchPaperHistory()
       ]);
       setSignals(s || []);
-      setPositions(p || []);
-      setHistory(h || []);
+      
+      // Merge or prioritize based on context. For now, we'll show both or prioritize paper positions for the quant engine.
+      // If we have internal paper positions, we'll combine them or show them in the positions tab.
+      const transformedPaperPos = pp.map(p => ({
+        ...p,
+        quantity: p.units,
+        unrealized_pl: (p.current_price - p.entry_price) * p.units,
+        unrealized_plpc: ((p.current_price / p.entry_price) - 1) * 100,
+        is_paper: true
+      }));
+
+      setPositions([...transformedPaperPos, ...(p || [])]);
+      setHistory([...(ph || []), ...(h || [])]);
     } catch (err) {
       console.error('Failed to load terminal data:', err);
     } finally {
@@ -74,6 +89,15 @@ export const LiveExecutionCenter = () => {
 
   const fetchAccount = async () => {
     try {
+      // 1. Try to fetch the internal Paper Account first (for our Quant Engine)
+      const paperAcc = await fetchPaperAccount();
+      if (paperAcc && !paperAcc.error) {
+        setAccount(paperAcc);
+        setBrokerConnected(true);
+        return;
+      }
+
+      // 2. Fallback to Alpaca Broker Account
       const data = await fetchBrokerAccount();
       if (data && !data.error) {
         setAccount(data);
@@ -255,7 +279,9 @@ export const LiveExecutionCenter = () => {
       <div className="p-8 grid grid-cols-1 lg:grid-cols-4 gap-6 relative z-10">
           <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-[#020617]/40 backdrop-blur-md border border-slate-800/80 p-6 rounded-3xl relative overflow-hidden group shadow-lg">
-                  <p className="text-slate-500 text-[9px] font-black uppercase tracking-[0.3em] mb-3">Buying Power</p>
+                  <p className="text-slate-500 text-[9px] font-black uppercase tracking-[0.3em] mb-3">
+                    {account?.is_paper_trading ? 'Paper Buying Power' : 'Broker Buying Power'}
+                  </p>
                   <p className="text-3xl font-black text-white tabular-nums tracking-tighter">${account ? account.buying_power.toLocaleString() : '---'}</p>
               </div>
               <div className="bg-[#020617]/40 backdrop-blur-md border border-slate-800/80 p-6 rounded-3xl relative overflow-hidden group shadow-lg">
@@ -322,6 +348,7 @@ export const LiveExecutionCenter = () => {
                           </div>
                           <div className={clsx("text-[10px] font-black mt-0.5", (pos.unrealized_pl || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             P&L: {(pos.unrealized_pl || 0) >= 0 ? '+' : ''}${Number(pos.unrealized_pl).toFixed(2)}
+                            {pos.is_paper && <span className="ml-2 text-[8px] bg-slate-800 px-1 py-0.5 rounded text-slate-400">QUANT_PAPER</span>}
                           </div>
                         </div>
                       </div>

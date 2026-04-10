@@ -31,7 +31,7 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 
 // 로딩 폴백 컴포넌트
 const PageLoadingFallback = () => (
-  <div className="p-8 space-y-4 bg-slate-950 min-h-screen">
+  <div className="p-8 space-y-4 bg-slate-900 min-h-screen">
     <Skeleton className="h-[60px] w-full bg-slate-800" />
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <Skeleton className="h-[300px] w-full lg:col-span-2 bg-slate-800" />

@@ -13,6 +13,27 @@ class PaperTradingManager:
         res = await asyncio.to_thread(query.execute)
         return res.data[0] if res.data else None
 
+    async def initialize_account(self, initial_cash: float = 100000.0):
+        """계좌가 없으면 초기 자산과 함께 생성합니다."""
+        acc = await self.get_account()
+        if not acc:
+            print(f"💰 [PAPER] No account found. Initializing with ${initial_cash:,.2f}...")
+            new_acc = {
+                "balance": initial_cash,
+                "cash_available": initial_cash,
+                "equity": initial_cash,
+                "currency": "USD",
+                "status": "ACTIVE"
+            }
+            try:
+                res = await asyncio.to_thread(self.supabase.table("paper_account").insert(new_acc).execute)
+                print("✅ [PAPER] Account successfully initialized.")
+                return res.data[0]
+            except Exception as e:
+                print(f"❌ [PAPER] Account initialization failed: {e}")
+                return None
+        return acc
+
     async def get_position(self, ticker: str):
         query = self.supabase.table("paper_positions").select("*").eq("ticker", ticker)
         res = await asyncio.to_thread(query.execute)

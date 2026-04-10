@@ -10,7 +10,7 @@ export const Layout = () => {
   const lastSignal = useMarketPulse();
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-blue-900/40 selection:text-blue-200">
+    <div className="flex flex-col min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-blue-900/40 selection:text-blue-200">
       <Toaster position="bottom-right" theme="dark" richColors />
 
       {/* ⚡ Realtime Pulse Indicator (Global) */}

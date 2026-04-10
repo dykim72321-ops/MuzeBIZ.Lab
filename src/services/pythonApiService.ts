@@ -139,6 +139,39 @@ export async function fetchBrokerStatus(): Promise<any> {
 }
 
 /**
+ * 페이퍼 트레이딩 계좌 현황 조회
+ */
+export async function fetchPaperAccount(): Promise<any> {
+  return brokerApiFetch('/api/broker/paper/account');
+}
+
+/**
+ * 페이퍼 트레이딩 현재 포지션 조회
+ */
+export async function fetchPaperPositions(): Promise<any[]> {
+  try {
+    const data = await brokerApiFetch('/api/broker/paper/positions');
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Paper positions fetch error:', error);
+    return [];
+  }
+}
+
+/**
+ * 페이퍼 트레이딩 매매 이력 조회
+ */
+export async function fetchPaperHistory(): Promise<any[]> {
+  try {
+    const data = await brokerApiFetch('/api/broker/paper/history');
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Paper history fetch error:', error);
+    return [];
+  }
+}
+
+/**
  * 브로커 오픈 포지션 조회
  */
 export async function fetchBrokerPositions(): Promise<any[]> {

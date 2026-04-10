@@ -42,9 +42,9 @@
 
 @layer base {
   body {
-    /* Abyss Dark Theme Base */
-    @apply bg-slate-950 text-slate-200 antialiased font-sans overflow-x-hidden
-      w-full m-0 selection:bg-blue-900/40 selection:text-blue-200;
+    /* Abyss Dark Theme Base - Lightened for better contrast */
+    @apply bg-slate-900 text-slate-100 antialiased font-sans overflow-x-hidden
+      w-full m-0 selection:bg-blue-800/40 selection:text-blue-100;
   }
 
   /* Enterprise Typography Improvement */
@@ -85,13 +85,13 @@
 
   /* Deep Dark Card Base */
   .sfdc-card {
-    @apply bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-lg shadow-xl overflow-hidden
-      transition-all hover:border-slate-700;
+    @apply bg-slate-800/60 backdrop-blur-md border border-slate-700/60 rounded-lg shadow-xl overflow-hidden
+      transition-all hover:border-slate-600;
   }
 
   .sfdc-card-header {
-    @apply p-4 border-b border-slate-800 bg-slate-900/80 flex items-center
-      justify-between;
+    @apply p-4 border-b border-slate-700/60 bg-slate-800/80 flex items-center
+      justify-between text-slate-100;
   }
 
   /* Terminal Mono Font */
@@ -112,7 +112,7 @@
 
   /* Neo-Glassmorphism Panels */
   .glass-panel {
-    @apply bg-slate-900/40 backdrop-blur-xl border border-white/5 shadow-2xl;
+    @apply bg-slate-800/40 backdrop-blur-xl border border-white/10 shadow-2xl;
   }
   
   .glass-card {
