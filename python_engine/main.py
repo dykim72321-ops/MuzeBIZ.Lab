@@ -23,7 +23,11 @@ from alpaca.data.live import StockDataStream
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
+from alpaca.trading.requests import (
+    MarketOrderRequest,
+    LimitOrderRequest,
+    GetOrdersRequest,
+)
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus
 from alpaca.data.enums import DataFeed
 
@@ -1089,7 +1093,11 @@ async def liquidate_all_positions(
 async def get_broker_status(api_key: str = Security(get_api_key)):
     """Returns Alpaca connection status and current system ARM state"""
     if not trading_client:
-        return {"status": "DISCONNECTED", "is_armed": SYSTEM_ARMED, "error": "Trading client not initialized"}
+        return {
+            "status": "DISCONNECTED",
+            "is_armed": SYSTEM_ARMED,
+            "error": "Trading client not initialized",
+        }
     
     try:
         acc = await asyncio.to_thread(trading_client.get_account)
