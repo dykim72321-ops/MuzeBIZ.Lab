@@ -1122,7 +1122,7 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         acc = await paper_engine.get_account()
         if not acc:
             return {"error": "Account not found"}
-        
+
         # paper_account 테이블 컬럼: total_assets, cash_available
         total_assets = float(acc.get("total_assets", 0))
         initial = 100000.0  # 초기 자본금
@@ -1139,7 +1139,7 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
             "current_drawdown": current_drawdown,
             "currency": "USD",
             "status": "ACTIVE",
-            "is_paper_trading": True
+            "is_paper_trading": True,
         }
     except Exception as e:
         return {"error": str(e)}
@@ -1151,7 +1151,9 @@ async def get_paper_positions(api_key: str = Security(get_api_key)):
     if not paper_engine:
         return []
     try:
-        res = await asyncio.to_thread(supabase.table("paper_positions").select("*").execute)
+        res = await asyncio.to_thread(
+            supabase.table("paper_positions").select("*").execute
+        )
         return res.data
     except Exception:
         return []
@@ -1163,24 +1165,32 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
     if not paper_engine:
         return []
     try:
-        res = await asyncio.to_thread(supabase.table("paper_history").select("*").order("created_at", desc=True).limit(30).execute)
+        res = await asyncio.to_thread(
+            supabase.table("paper_history")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(30)
+            .execute
+        )
         # 익숙한 구조로 변환
         history = []
         for item in res.data:
             pnl_pct = item.get("pnl_pct", 0)
-            history.append({
-                "id": str(item.get("id")),
-                "ticker": item.get("ticker"),
-                "side": "buy" if (pnl_pct or 0) >= 0 else "sell",
-                "type": item.get("exit_reason") or "trailing_stop",
-                "quantity": "--",
-                "filled_qty": "--",
-                "filled_avg_price": item.get("exit_price"),
-                "pnl_pct": round(float(pnl_pct or 0), 2),
-                "profit_amt": round(float(item.get("profit_amt") or 0), 2),
-                "status": "filled",
-                "created_at": item.get("closed_at") or item.get("created_at")
-            })
+            history.append(
+                {
+                    "id": str(item.get("id")),
+                    "ticker": item.get("ticker"),
+                    "side": "buy" if (pnl_pct or 0) >= 0 else "sell",
+                    "type": item.get("exit_reason") or "trailing_stop",
+                    "quantity": "--",
+                    "filled_qty": "--",
+                    "filled_avg_price": item.get("exit_price"),
+                    "pnl_pct": round(float(pnl_pct or 0), 2),
+                    "profit_amt": round(float(item.get("profit_amt") or 0), 2),
+                    "status": "filled",
+                    "created_at": item.get("closed_at") or item.get("created_at"),
+                }
+            )
         return history
     except Exception:
         return []
