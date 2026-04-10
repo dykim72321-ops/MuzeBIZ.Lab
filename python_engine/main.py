@@ -1753,6 +1753,26 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
             print("❌ Alpaca API Key missing. Stream cannot start.")
             return
 
+        # 3a. Pre-validate auth before entering the infinite stream loop
+        try:
+            import websockets
+            import json as _json
+            ws_url = "wss://stream.data.alpaca.markets/v2/iex"
+            async with websockets.connect(ws_url) as ws:
+                await ws.recv()  # welcome message
+                await ws.send(_json.dumps({"action": "auth", "key": api_key, "secret": api_secret}))
+                auth_resp = _json.loads(await ws.recv())
+                if isinstance(auth_resp, list):
+                    auth_resp = auth_resp[0]
+                if auth_resp.get("msg") != "authenticated":
+                    print(f"🔑 [Alpaca] Pre-auth check FAILED: {auth_resp}")
+                    print(f"   → API key may be invalid or expired.")
+                    print(f"   → Please check https://app.alpaca.markets/paper/dashboard/overview")
+                    return
+                print("✅ [Alpaca] Pre-auth check passed.")
+        except Exception as pre_auth_err:
+            print(f"⚠️ [Alpaca] Pre-auth check error (continuing anyway): {pre_auth_err}")
+
         # Alpaca Paper Trading vs Live Auto detection (Free keys use 'iex' feed)
         stream = StockDataStream(api_key, api_secret, feed=DataFeed.IEX)
 
@@ -1761,19 +1781,45 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
 
         print(f"🚀 [Pulse Engine] Live: Monitoring {active_tickers}")
 
-        # 5. 스트림 실행 (무한 루프)
-        await stream._run_forever()
+        # 5. 스트림 실행 (무한 루프) — with retry limit to prevent console spam
+        max_auth_failures = 3
+        auth_failure_count = 0
+
+        original_run = stream._run_forever
+
+        async def _guarded_run_forever():
+            nonlocal auth_failure_count
+            while auth_failure_count < max_auth_failures:
+                try:
+                    await stream._start_ws()
+                except ValueError as ve:
+                    if "auth failed" in str(ve).lower():
+                        auth_failure_count += 1
+                        print(f"🔑 [Alpaca] Auth failed ({auth_failure_count}/{max_auth_failures})")
+                        if auth_failure_count >= max_auth_failures:
+                            print("🔑 [Alpaca] Max auth failures reached. Stopping stream.")
+                            print("   → Please check your API keys and restart the server.")
+                            return
+                        await asyncio.sleep(5)
+                    else:
+                        raise
+                except Exception as e:
+                    print(f"⚠️ [Alpaca] Stream error: {e}. Reconnecting in 5s...")
+                    auth_failure_count = 0  # Reset on non-auth errors
+                    await asyncio.sleep(5)
+
+        await _guarded_run_forever()
 
     except Exception as e:
         error_msg = f"❌ Alpaca Stream Lifecycle Error: {e}"
         print(error_msg)
         await webhook.send_alert(
             title="[CRITICAL] Pulse Engine Stream Offline",
-            description=f"스트림 엔진에 치명적 오류가 발생했습니다. 30초 후 재연결을 시도합니다.\nError: {e}",
+            description=f"스트림 엔진에 치명적 오류가 발생했습니다. 60초 후 재연결을 시도합니다.\nError: {e}",
             color=0xFF0000,
         )
-        print("⏳ 30초 후 재연결을 시도합니다...")
-        await asyncio.sleep(30)
+        print("⏳ 60초 후 재연결을 시도합니다...")
+        await asyncio.sleep(60)
         asyncio.create_task(start_alpaca_stream(active_tickers))
 
 
