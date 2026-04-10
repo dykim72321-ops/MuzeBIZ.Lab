@@ -1,8 +1,9 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Target, Sparkles, ShieldCheck, Fingerprint } from 'lucide-react';
 import type { WatchlistItem } from '../../services/watchlistService';
 import clsx from 'clsx';
+import { OrbitChartPanel } from './OrbitChartPanel';
 
 interface MonitoringOrbitProps {
   watchlistItems: WatchlistItem[];
@@ -17,6 +18,16 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
   pulseMap,
   handleDeepDive
 }) => {
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+
+  const handleItemClick = (item: WatchlistItem, stock: any) => {
+    if (selectedTicker === item.ticker) {
+      setSelectedTicker(null); // 토글 닫기
+    } else {
+      setSelectedTicker(item.ticker);
+    }
+  };
+
   return (
     <section className="bg-[#020617]/90 backdrop-blur-3xl rounded-[2.5rem] p-8 border border-slate-800/50 h-full flex flex-col relative overflow-hidden group/orbit shadow-[0_0_80px_rgba(34,211,238,0.03)]">
       {/* HUD Background Elements */}
@@ -44,19 +55,25 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
           watchlistItems.map((item, idx) => {
             const stock = watchlistStocks.find(s => s.ticker === item.ticker);
             const pulseData = pulseMap[item.ticker];
-            
+
             const dnaScore = pulseData?.dna_score || stock?.dna_score || stock?.dnaScore || 0;
             const barColor = dnaScore > 80 ? 'bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.6)]' : dnaScore > 50 ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.6)]' : 'bg-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)]';
             const name = stock?.name || `${item.ticker} Asset`;
-            
+            const isSelected = selectedTicker === item.ticker;
+
             return (
-              <motion.div 
-                key={item.ticker}
+              <div key={item.ticker}>
+              <motion.div
                 initial={{ x: 20, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
                 transition={{ delay: idx * 0.1 }}
-                className="bg-[#020617]/40 backdrop-blur-md border border-slate-800/80 p-5 rounded-3xl hover:bg-[#020617]/60 transition-all group overflow-hidden relative cursor-pointer active:scale-[0.98]"
-                onClick={() => stock && handleDeepDive(stock)}
+                className={clsx(
+                  "backdrop-blur-md border p-5 rounded-3xl transition-all group overflow-hidden relative cursor-pointer active:scale-[0.98]",
+                  isSelected
+                    ? "bg-[#020617]/80 border-cyan-500/40 shadow-[0_0_20px_rgba(34,211,238,0.08)]"
+                    : "bg-[#020617]/40 border-slate-800/80 hover:bg-[#020617]/60"
+                )}
+                onClick={() => handleItemClick(item, stock)}
               >
                 <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Fingerprint className="w-10 h-10 text-white" />
@@ -76,14 +93,26 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
                 </div>
                 
                 <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden border border-white/5">
-                  <motion.div 
+                  <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${Math.min(dnaScore, 100)}%` }}
                     transition={{ duration: 1, delay: idx * 0.1 }}
-                    className={clsx("h-full rounded-full transition-all", barColor)} 
+                    className={clsx("h-full rounded-full transition-all", barColor)}
                   />
                 </div>
               </motion.div>
+
+              {/* 차트 패널 — 선택된 종목에만 표시 */}
+              <AnimatePresence>
+                {isSelected && (
+                  <OrbitChartPanel
+                    item={item}
+                    currentDna={dnaScore}
+                    onClose={() => setSelectedTicker(null)}
+                  />
+                )}
+              </AnimatePresence>
+              </div>
             );
           })
         ) : (

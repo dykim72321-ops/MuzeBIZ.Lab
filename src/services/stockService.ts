@@ -83,6 +83,51 @@ async function fetchFromFinnhub(ticker: string): Promise<Stock | null> {
   }
 }
 
+// Yahoo Finance 직접 프록시 폴백 (Vite /yahoo-api → query1.finance.yahoo.com)
+// Edge Function이 모두 실패했을 때 최후 수단
+async function fetchFromYahooDirect(ticker: string): Promise<Stock | null> {
+  try {
+    const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+
+    const meta = result.meta;
+    const price = meta.regularMarketPrice ?? meta.previousClose ?? 0;
+    const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? price;
+    const changePercent = prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0;
+    const volume = meta.regularMarketVolume ?? 0;
+
+    if (price <= 0) return null;
+
+    const dnaScore = calculateDnaScore(price, changePercent, volume, 0);
+    const stock: Stock = {
+      id: ticker,
+      ticker,
+      name: getCompanyName(ticker),
+      price,
+      changePercent,
+      volume,
+      marketCap: 'N/A',
+      dnaScore,
+      sector: getSector(ticker),
+      description: '',
+      relevantMetrics: { debtToEquity: 0, rndRatio: 0, sentimentScore: 0, institutionalOwnership: 0 },
+      newsHeadlines: [],
+      history: [],
+    };
+
+    console.log(`✅ [YahooDirect] ${ticker}: $${price.toFixed(2)} (${changePercent.toFixed(2)}%)`);
+    cache.set(ticker, { data: stock, timestamp: Date.now() });
+    return stock;
+  } catch (err) {
+    console.warn(`[YahooDirect] Failed for ${ticker}:`, err);
+    return null;
+  }
+}
+
 // Yahoo Finance API fallback (via Edge Function) - provides richer data
 async function fetchFromYahoo(ticker: string): Promise<Stock | null> {
   try {
@@ -182,13 +227,17 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
       if (error) console.warn(`[SmartQuote] Error or Timeout for ${ticker}:`, error);
       else console.warn(`[SmartQuote] No valid price for ${ticker}`);
 
-      // Race fallback APIs
+      // Race fallback APIs (Edge Functions)
       const fallbackData = await Promise.any([
         fetchFromFinnhub(ticker).then(res => res ? res : Promise.reject('Finnhub null')),
         fetchFromYahoo(ticker).then(res => res ? res : Promise.reject('Yahoo null'))
       ]).catch(() => null);
 
       if (fallbackData) return fallbackData;
+
+      // 최후 폴백: Vite 프록시를 통한 Yahoo Finance 직접 호출
+      const directData = await fetchFromYahooDirect(ticker);
+      if (directData) return directData;
 
       // Fallback to stale cache
       if (cached) return cached.data;
@@ -236,6 +285,9 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
     // Final fallback chain
     const finnhubData = await fetchFromFinnhub(ticker);
     if (finnhubData) return finnhubData;
+
+    const directData = await fetchFromYahooDirect(ticker);
+    if (directData) return directData;
 
     if (cached) return cached.data;
     return null;

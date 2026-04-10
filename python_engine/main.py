@@ -1122,22 +1122,24 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         acc = await paper_engine.get_account()
         if not acc:
             return {"error": "Account not found"}
-        
-        # 가상 계좌의 경우 0으로 표시되는 오늘 PnL 계산 (단순화)
-        balance = float(acc.get("balance", 0))
-        initial = 100000.0 # 기본값
-        pnl = balance - initial
+
+        # paper_account 테이블 컬럼: total_assets, cash_available
+        total_assets = float(acc.get("total_assets", 0))
+        initial = 100000.0  # 초기 자본금
+        pnl = total_assets - initial
         pnl_pct = (pnl / initial * 100) if initial > 0 else 0
+        # Drawdown: 초기 자본 대비 손실률 (손실 시만 음수, 수익 시 0)
+        current_drawdown = round(min(pnl_pct, 0), 2)
 
         return {
             "buying_power": float(acc.get("cash_available", 0)),
-            "equity": float(acc.get("equity", balance)),
+            "equity": total_assets,
             "today_pnl": round(pnl, 2),
             "today_pnl_pct": round(pnl_pct, 2),
-            "current_drawdown": 0.0,
-            "currency": acc.get("currency", "USD"),
-            "status": acc.get("status", "ACTIVE"),
-            "is_paper_trading": True
+            "current_drawdown": current_drawdown,
+            "currency": "USD",
+            "status": "ACTIVE",
+            "is_paper_trading": True,
         }
     except Exception as e:
         return {"error": str(e)}
@@ -1149,7 +1151,9 @@ async def get_paper_positions(api_key: str = Security(get_api_key)):
     if not paper_engine:
         return []
     try:
-        res = await asyncio.to_thread(supabase.table("paper_positions").select("*").execute)
+        res = await asyncio.to_thread(
+            supabase.table("paper_positions").select("*").execute
+        )
         return res.data
     except Exception:
         return []
@@ -1161,21 +1165,32 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
     if not paper_engine:
         return []
     try:
-        res = await asyncio.to_thread(supabase.table("paper_history").select("*").order("created_at", desc=True).limit(30).execute)
+        res = await asyncio.to_thread(
+            supabase.table("paper_history")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(30)
+            .execute
+        )
         # 익숙한 구조로 변환
         history = []
         for item in res.data:
-            history.append({
-                "id": str(item.get("id")),
-                "ticker": item.get("ticker"),
-                "side": "sell", # 히스토리는 주로 청산 기록
-                "type": "trailing_stop",
-                "quantity": "--",
-                "filled_qty": "--",
-                "filled_avg_price": item.get("exit_price"),
-                "status": "filled",
-                "created_at": item.get("created_at")
-            })
+            pnl_pct = item.get("pnl_pct", 0)
+            history.append(
+                {
+                    "id": str(item.get("id")),
+                    "ticker": item.get("ticker"),
+                    "side": "buy" if (pnl_pct or 0) >= 0 else "sell",
+                    "type": item.get("exit_reason") or "trailing_stop",
+                    "quantity": "--",
+                    "filled_qty": "--",
+                    "filled_avg_price": item.get("exit_price"),
+                    "pnl_pct": round(float(pnl_pct or 0), 2),
+                    "profit_amt": round(float(item.get("profit_amt") or 0), 2),
+                    "status": "filled",
+                    "created_at": item.get("closed_at") or item.get("created_at"),
+                }
+            )
         return history
     except Exception:
         return []

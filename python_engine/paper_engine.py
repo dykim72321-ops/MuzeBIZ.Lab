@@ -17,16 +17,20 @@ class PaperTradingManager:
         """계좌가 없으면 초기 자산과 함께 생성합니다."""
         acc = await self.get_account()
         if not acc:
-            print(f"💰 [PAPER] No account found. Initializing with ${initial_cash:,.2f}...")
+            print(
+                f"💰 [PAPER] No account found. Initializing with ${initial_cash:,.2f}..."
+            )
             new_acc = {
                 "balance": initial_cash,
                 "cash_available": initial_cash,
                 "equity": initial_cash,
                 "currency": "USD",
-                "status": "ACTIVE"
+                "status": "ACTIVE",
             }
             try:
-                res = await asyncio.to_thread(self.supabase.table("paper_account").insert(new_acc).execute)
+                res = await asyncio.to_thread(
+                    self.supabase.table("paper_account").insert(new_acc).execute
+                )
                 print("✅ [PAPER] Account successfully initialized.")
                 return res.data[0]
             except Exception as e:
