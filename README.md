@@ -240,7 +240,7 @@ supabase functions deploy
 cd python_engine
 pip install -r requirements.txt
 
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
 ### 3b. Run Python Backend (Docker)
@@ -250,7 +250,7 @@ cd python_engine
 docker-compose up --build
 ```
 
-The FastAPI server will be available at `http://localhost:8000`.
+The FastAPI server will be available at `http://localhost:8001`.
 
 ---
 

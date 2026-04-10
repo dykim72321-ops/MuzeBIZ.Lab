@@ -60,27 +60,27 @@ export const PerformanceSummary: React.FC<PerformanceSummaryProps> = ({ stats })
       </div>
 
       <div className="grid grid-cols-2 gap-5 relative z-10">
-        <MetricCard 
-            label="Win Rate" 
-            value={stats.win_rate || 72} 
-            colorClass="text-emerald-400" 
+        <MetricCard
+            label="Win Rate"
+            value={stats.win_rate != null ? stats.win_rate : '--'}
+            colorClass="text-emerald-400"
             icon={TrendingUp}
         />
-        <MetricCard 
-            label="Profit Factor" 
-            value={stats.profit_factor || 2.45} 
+        <MetricCard
+            label="Profit Factor"
+            value={stats.profit_factor != null ? stats.profit_factor : '--'}
             colorClass="text-indigo-400"
             icon={Zap}
         />
-        <MetricCard 
-            label="Avg Return" 
-            value={stats.avg_return ? `${stats.avg_return}%` : '+5.2%'} 
+        <MetricCard
+            label="Avg Return"
+            value={stats.avg_pnl != null ? `+${stats.avg_pnl}%` : '--'}
             colorClass="text-cyan-400"
             icon={Target}
         />
-        <MetricCard 
-            label="Alpha Score" 
-            value={stats.alpha_score || 88} 
+        <MetricCard
+            label="Max Drawdown"
+            value={stats.mdd != null ? `${stats.mdd}%` : '--'}
             colorClass="text-rose-400"
             icon={Fingerprint}
         />

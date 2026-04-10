@@ -35,6 +35,26 @@ export const UnifiedDashboard = () => {
   const [terminalData, setTerminalData] = useState<any | null>(null);
   const [strategyStats, setStrategyStats] = useState<any | null>(null);
   const [lastFetchedTime, setLastFetchedTime] = useState<string>('--:--:--');
+  const [isMarketOpen, setIsMarketOpen] = useState(false);
+
+  // US 시장 개장 여부 체크 (ET 기준 평일 09:30~16:00)
+  useEffect(() => {
+    const checkMarket = () => {
+      const now = new Date();
+      const etOffset = -5 * 60; // EST (DST 고려하지 않은 단순 기준)
+      const localOffset = now.getTimezoneOffset();
+      const etNow = new Date(now.getTime() + (localOffset + etOffset) * 60000);
+      const day = etNow.getDay(); // 0=일, 6=토
+      const hours = etNow.getHours();
+      const minutes = etNow.getMinutes();
+      const timeInMin = hours * 60 + minutes;
+      const open = day >= 1 && day <= 5 && timeInMin >= 570 && timeInMin < 960; // 9:30~16:00
+      setIsMarketOpen(open);
+    };
+    checkMarket();
+    const id = setInterval(checkMarket, 60000);
+    return () => clearInterval(id);
+  }, []);
 
   // 2. Fetch Data
   const loadData = useCallback(async () => {
@@ -142,9 +162,11 @@ export const UnifiedDashboard = () => {
           <div className="flex items-center gap-8">
             <div className="flex flex-col items-end">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Global Market Status</span>
-              <div className="flex items-center gap-3 bg-emerald-500/10 px-4 py-1.5 rounded-full border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] animate-pulse" />
-                <span className="text-xs font-black text-emerald-400 uppercase tracking-widest leading-none">Market Open</span>
+              <div className={`flex items-center gap-3 px-4 py-1.5 rounded-full border shadow-[0_0_15px_rgba(16,185,129,0.1)] ${isMarketOpen ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-slate-800/40 border-slate-700/40'}`}>
+                <div className={`w-2 h-2 rounded-full ${isMarketOpen ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] animate-pulse' : 'bg-slate-600'}`} />
+                <span className={`text-xs font-black uppercase tracking-widest leading-none ${isMarketOpen ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {isMarketOpen ? 'Market Open' : 'Market Closed'}
+                </span>
               </div>
             </div>
             <button className="flex items-center gap-3 px-6 py-3 bg-indigo-900/10 border border-indigo-500/30 rounded-2xl hover:bg-indigo-900/20 transition-all shadow-[0_0_20px_rgba(99,102,241,0.1)] group/guard">
