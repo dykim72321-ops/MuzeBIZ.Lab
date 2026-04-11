@@ -1123,17 +1123,26 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         if not acc:
             return {"error": "Account not found"}
 
-        # paper_account 테이블 컬럼: total_assets, cash_available
-        total_assets = float(acc.get("total_assets", 0))
+        cash_available = float(acc.get("cash_available", 100000.0))
+
+        # 동적 total_assets: 현금 + 보유 포지션 평가액 합산 (DB의 total_assets 오염 방지)
+        pos_res = await asyncio.to_thread(
+            supabase.table("paper_positions").select("current_price,units").execute
+        )
+        positions = pos_res.data or []
+        invested_capital = sum(
+            float(p["current_price"]) * float(p["units"]) for p in positions
+        )
+        total_assets = cash_available + invested_capital
+
         initial = 100000.0  # 초기 자본금
         pnl = total_assets - initial
         pnl_pct = (pnl / initial * 100) if initial > 0 else 0
-        # Drawdown: 초기 자본 대비 손실률 (손실 시만 음수, 수익 시 0)
         current_drawdown = round(min(pnl_pct, 0), 2)
 
         return {
-            "buying_power": float(acc.get("cash_available", 0)),
-            "equity": total_assets,
+            "buying_power": round(cash_available, 2),
+            "equity": round(total_assets, 2),
             "today_pnl": round(pnl, 2),
             "today_pnl_pct": round(pnl_pct, 2),
             "current_drawdown": current_drawdown,
@@ -1472,9 +1481,9 @@ async def get_broker_orders(limit: int = 50, api_key: str = Security(get_api_key
     try:
         # 최근 주문 가져오기 (체결된 것뿐만 아니라 모든 상태)
         from alpaca.trading.requests import GetOrdersRequest
-        from alpaca.trading.enums import OrderStatus
+        from alpaca.trading.enums import QueryOrderStatus
 
-        req = GetOrdersRequest(status=OrderStatus.ALL, limit=limit, nested=True)
+        req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=limit, nested=True)
         orders = await asyncio.to_thread(trading_client.get_orders, filter=req)
         return [
             {

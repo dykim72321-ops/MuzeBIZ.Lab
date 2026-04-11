@@ -21,11 +21,8 @@ class PaperTradingManager:
                 f"💰 [PAPER] No account found. Initializing with ${initial_cash:,.2f}..."
             )
             new_acc = {
-                "balance": initial_cash,
+                "total_assets": initial_cash,
                 "cash_available": initial_cash,
-                "equity": initial_cash,
-                "currency": "USD",
-                "status": "ACTIVE",
             }
             try:
                 res = await asyncio.to_thread(
