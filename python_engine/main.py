@@ -855,7 +855,9 @@ async def get_portfolio():
         )
         positions = pos_res.data
 
-        invested_capital = await paper_engine.calculate_invested_capital(positions=positions)
+        invested_capital = await paper_engine.calculate_invested_capital(
+            positions=positions
+        )
         # DB의 total_assets는 수동 업데이트 전까지 구식일 수 있으므로 여기서 동적으로 계산
         current_total = float(acc.get("cash_available") or 0) + invested_capital
 
