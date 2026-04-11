@@ -2,6 +2,8 @@ from supabase import Client
 from webhook_manager import WebhookManager
 import asyncio
 
+INITIAL_CAPITAL = 100000.0
+
 
 class PaperTradingManager:
     def __init__(self, supabase_client: Client):
@@ -13,7 +15,21 @@ class PaperTradingManager:
         res = await asyncio.to_thread(query.execute)
         return res.data[0] if res.data else None
 
-    async def initialize_account(self, initial_cash: float = 100000.0):
+    async def calculate_invested_capital(self, positions: list = None) -> float:
+        """보유 포지션의 현재 평가액 합산 (positions 미전달 시 DB에서 조회)"""
+        if positions is None:
+            res = await asyncio.to_thread(
+                self.supabase.table("paper_positions")
+                .select("current_price,units")
+                .execute
+            )
+            positions = res.data or []
+        return sum(
+            float(p.get("current_price") or 0) * float(p.get("units") or 0)
+            for p in positions
+        )
+
+    async def initialize_account(self, initial_cash: float = INITIAL_CAPITAL):
         """계좌가 없으면 초기 자산과 함께 생성합니다."""
         acc = await self.get_account()
         if not acc:

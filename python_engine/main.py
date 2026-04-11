@@ -43,7 +43,7 @@ from supabase import create_client, Client
 import pandas as pd
 import numpy as np
 from webhook_manager import WebhookManager
-from paper_engine import PaperTradingManager
+from paper_engine import PaperTradingManager, INITIAL_CAPITAL
 from utils import PartNormalizer
 
 # from backtester import run_backtest (Removed for modern TS engine)
@@ -851,13 +851,16 @@ async def get_portfolio():
         acc = (
             acc_res.data[0]
             if acc_res.data
-            else {"total_assets": 100000.0, "cash_available": 100000.0}
+            else {"total_assets": INITIAL_CAPITAL, "cash_available": INITIAL_CAPITAL}
         )
         positions = pos_res.data
 
-        invested_capital = sum([p["current_price"] * p["units"] for p in positions])
+        invested_capital = sum(
+            float(p.get("current_price") or 0) * float(p.get("units") or 0)
+            for p in positions
+        )
         # DB의 total_assets는 수동 업데이트 전까지 구식일 수 있으므로 여기서 동적으로 계산
-        current_total = acc["cash_available"] + invested_capital
+        current_total = float(acc.get("cash_available") or 0) + invested_capital
 
         return {
             "totalAssets": round(float(current_total), 2),
@@ -1123,21 +1126,14 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         if not acc:
             return {"error": "Account not found"}
 
-        cash_available = float(acc.get("cash_available", 100000.0))
+        cash_available = float(acc.get("cash_available") or INITIAL_CAPITAL)
 
         # 동적 total_assets: 현금 + 보유 포지션 평가액 합산 (DB의 total_assets 오염 방지)
-        pos_res = await asyncio.to_thread(
-            supabase.table("paper_positions").select("current_price,units").execute
-        )
-        positions = pos_res.data or []
-        invested_capital = sum(
-            float(p["current_price"]) * float(p["units"]) for p in positions
-        )
+        invested_capital = await paper_engine.calculate_invested_capital()
         total_assets = cash_available + invested_capital
 
-        initial = 100000.0  # 초기 자본금
-        pnl = total_assets - initial
-        pnl_pct = (pnl / initial * 100) if initial > 0 else 0
+        pnl = total_assets - INITIAL_CAPITAL
+        pnl_pct = (pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
         current_drawdown = round(min(pnl_pct, 0), 2)
 
         return {
