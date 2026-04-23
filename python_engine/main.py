@@ -59,11 +59,10 @@ _stream_active = False
 
 
 def is_market_hours() -> bool:
-    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00). DST 단순 근사."""
-    from datetime import timezone, timedelta
+    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00). DST 자동 처리."""
+    from zoneinfo import ZoneInfo
 
-    et = timezone(timedelta(hours=-4))  # EDT (여름 기준 -4, 겨울 EST=-5)
-    now_et = datetime.now(et)
+    now_et = datetime.now(ZoneInfo("America/New_York"))
     if now_et.weekday() >= 5:
         return False
     open_min = 9 * 60 + 30
@@ -146,6 +145,8 @@ class TickerDataState:
         self.history: Dict[str, pd.DataFrame] = {}
         # [Opt-1] IEX는 전체 시장 거래량의 2~5%만 반영 → yfinance 비율로 교정
         self.volume_multiplier: Dict[str, float] = {}
+        # [Fix-RVOL] 30일 일봉 평균 거래량 (1분봉 rolling 대신 사용)
+        self.avg_daily_volume: Dict[str, float] = {}
 
     def update(self, ticker: str, bar) -> pd.DataFrame:
         """새로운 캔들을 히스토리에 병합 (거래량 교정 포함)"""
@@ -248,7 +249,7 @@ class TickerDataState:
                             f"✅ [Alpaca/IEX] {ticker} warmed up ({len(df)} bars, data_source=alpaca_iex)."
                         )
                 if len(self.history) >= len(tickers):
-                    return  # Successfully warmed up all via Alpaca
+                    pass  # fall through to daily volume fetch step
             except Exception as e:
                 print(f"⚠️ Alpaca warm-up interrupted: {e}")
 
@@ -271,6 +272,25 @@ class TickerDataState:
                     )
             except Exception as e:
                 print(f"⚠️ {ticker} yfinance warm-up failed: {e}")
+
+        # [Fix-RVOL] 30일 일봉 평균 거래량 계산 (1분봉 rolling(30) 대체)
+        # 390분/일 기준으로 나눠 분봉 단위 기대 거래량 계산에 사용
+        print("📊 [Warm-up] Fetching 30d avg daily volume for RVOL correction...")
+        for ticker in tickers:
+            if ticker in self.avg_daily_volume:
+                continue
+            try:
+                tk = yf.Ticker(ticker)
+                daily = await asyncio.to_thread(
+                    tk.history, period="30d", interval="1d"
+                )
+                if not daily.empty:
+                    self.avg_daily_volume[ticker] = float(daily["Volume"].mean())
+                    print(
+                        f"📈 [AvgVol] {ticker}: {self.avg_daily_volume[ticker]:,.0f} avg daily shares"
+                    )
+            except Exception as e:
+                print(f"⚠️ [AvgVol] {ticker}: {e}")
 
 
 # 전역 상태 인스턴스
@@ -1152,16 +1172,31 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         invested_capital = await paper_engine.calculate_invested_capital()
         total_assets = cash_available + invested_capital
 
-        pnl = total_assets - INITIAL_CAPITAL
-        pnl_pct = (pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
-        current_drawdown = round(min(pnl_pct, 0), 2)
+        total_pnl = total_assets - INITIAL_CAPITAL
+        total_pnl_pct = (total_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
+        current_drawdown = round(min(total_pnl_pct, 0), 2)
+
+        # 오늘 실현 손익: paper_history 당일 레코드 합산
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        history_res = await asyncio.to_thread(
+            supabase.table("paper_history")
+            .select("profit_amt")
+            .gte("created_at", today_start.isoformat())
+            .execute
+        )
+        today_pnl = sum(
+            float(r.get("profit_amt") or 0) for r in (history_res.data or [])
+        )
+        today_pnl_pct = (today_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
 
         return {
             "cash_available": round(cash_available, 2),
             "total_assets": round(total_assets, 2),
             "invested_capital": round(invested_capital, 2),
-            "today_pnl": round(pnl, 2),
-            "today_pnl_pct": round(pnl_pct, 2),
+            "today_pnl": round(today_pnl, 2),
+            "today_pnl_pct": round(today_pnl_pct, 2),
+            "total_pnl": round(total_pnl, 2),
+            "total_pnl_pct": round(total_pnl_pct, 2),
             "current_drawdown": current_drawdown,
             "currency": "USD",
             "status": "ACTIVE",
@@ -1306,9 +1341,21 @@ async def manual_paper_sell(
 
 @app.post("/api/broker/arm")
 async def toggle_arm_system(req: ArmRequest, api_key: str = Security(get_api_key)):
-    """Toggles the global SYSTEM_ARMED state"""
+    """Toggles the global SYSTEM_ARMED state and persists to DB."""
     global SYSTEM_ARMED
     SYSTEM_ARMED = req.arm
+
+    # Supabase에 영속 저장 — 서버 재시작 후에도 상태 복원 가능
+    if supabase:
+        try:
+            await asyncio.to_thread(
+                supabase.table("system_settings")
+                .update({"is_armed": SYSTEM_ARMED})
+                .eq("id", 1)
+                .execute
+            )
+        except Exception as e:
+            print(f"⚠️ [ARM] DB persist failed: {e}")
 
     status_text = "ARMED (Combat Mode)" if SYSTEM_ARMED else "DISARMED (Safe Mode)"
     print(f"📡 [SYSTEM] {status_text} by administrator.")
@@ -1649,9 +1696,10 @@ async def get_discoveries(limit: int = 10, sort_by: str = "updated_at"):
         return []
 
 
-def calculate_advanced_signals(df: pd.DataFrame):
+def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     """
-    RSI와 MACD를 결합한 고도화된 신호 엔진
+    RSI와 MACD를 결합한 고도화된 신호 엔진.
+    avg_daily_volume: 30일 일봉 평균 거래량 (주입 시 분봉 RVOL 정확도 향상)
     """
     # 1. RSI 계산 (14일)
     df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
@@ -1672,9 +1720,14 @@ def calculate_advanced_signals(df: pd.DataFrame):
     df["ADX"] = adx_indicator.adx()
 
     # 4. RVOL (Relative Volume) 계산
-    # 최근 30일 평균 거래량 대비 당일 거래량 비율 (당일 제외 어제까지의 평균 기준)
-    df["Avg_Vol_30d"] = df["Volume"].shift(1).rolling(window=30).mean()
-    df["RVOL"] = df["Volume"] / (df["Avg_Vol_30d"] + 1e-9)
+    # avg_daily_volume 주입 시: 분봉 거래량 / (일평균 / 390분) → 실제 30일 대비 비율
+    # 미주입 시: rolling(30) fallback (1분봉 30개 = 30분 평균이므로 정확도 낮음)
+    if avg_daily_volume > 0:
+        avg_min_volume = avg_daily_volume / 390  # 하루 390 거래 분
+        df["RVOL"] = df["Volume"] / (avg_min_volume + 1e-9)
+    else:
+        df["Avg_Vol_30d"] = df["Volume"].shift(1).rolling(window=30).mean()
+        df["RVOL"] = df["Volume"] / (df["Avg_Vol_30d"] + 1e-9)
 
     # 5. 추격 매수(FOMO) 방지 필터
     # 당일 시가 대비 종가가 50% 이상 급등한 경우 상투 위험으로 간주
@@ -1790,8 +1843,9 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     """
     의사결정 최적화 엔진: 지표 + 포지션 사이징 + AI 결합
     """
-    # 1. 기술적 분석
-    df = calculate_advanced_signals(df_raw)
+    # 1. 기술적 분석 (30일 daily avg volume 주입으로 RVOL 정확도 확보)
+    avg_daily_vol = candle_state.avg_daily_volume.get(ticker.upper(), 0.0)
+    df = calculate_advanced_signals(df_raw, avg_daily_volume=avg_daily_vol)
     latest = df.iloc[-1]
 
     # 2. 포지션 사이징 (변동성 조절 + 켈리)
@@ -2114,7 +2168,30 @@ async def startup_event():
 
 async def run_startup_sequence():
     """초기화 시퀀스: 워밍업 후 스냅샷 펄스 방출 및 스트림 시작"""
-    # 0. 페이퍼 트레이딩 계좌 초기화 (필요 시)
+    global SYSTEM_ARMED
+
+    # 0a. DB에서 ARMED 상태 복원 (서버 재시작 후 상태 유지)
+    # 마이그레이션: ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS is_armed boolean NOT NULL DEFAULT false;
+    if supabase:
+        try:
+            res = await asyncio.to_thread(
+                supabase.table("system_settings")
+                .select("is_armed")
+                .eq("id", 1)
+                .single()
+                .execute
+            )
+            if res.data and res.data.get("is_armed") is not None:
+                SYSTEM_ARMED = bool(res.data["is_armed"])
+                print(f"📡 [Startup] SYSTEM_ARMED restored from DB: {SYSTEM_ARMED}")
+        except Exception as e:
+            # PGRST204: is_armed 컬럼 미존재 → 마이그레이션 미적용 상태, 기본값 False 유지
+            if "PGRST204" in str(e) or "is_armed" in str(e):
+                print("⚠️ [Startup] is_armed column not found. Apply migration to enable ARM persistence.")
+            else:
+                print(f"⚠️ [Startup] Could not restore ARM state: {e}")
+
+    # 0b. 페이퍼 트레이딩 계좌 초기화 (필요 시)
     if paper_engine:
         await paper_engine.initialize_account()
 

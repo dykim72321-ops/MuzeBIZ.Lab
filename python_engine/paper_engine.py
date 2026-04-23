@@ -254,8 +254,8 @@ class PaperTradingManager:
                 await self._sync_watchlist_stop_loss(ticker, new_ts_val)
                 return
 
-            # C. TRAILING STOP 체크
-            if price < ts_threshold and is_armed:
+            # C. TRAILING STOP 체크 (리스크 관리: ARMED 여부와 무관하게 항상 실행)
+            if price < ts_threshold:
                 profit_cash = units * price
                 pnl_pct = (price / entry_price - 1) * 100
                 profit_amt = (price - entry_price) * units
