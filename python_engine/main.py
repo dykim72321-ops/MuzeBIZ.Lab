@@ -899,15 +899,27 @@ async def get_portfolio():
         invested_capital = await paper_engine.calculate_invested_capital(
             positions=positions
         )
-        # DB의 total_assets는 수동 업데이트 전까지 구식일 수 있으므로 여기서 동적으로 계산
         current_total = float(acc.get("cash_available") or 0) + invested_capital
+
+        # 오늘 실현 손익: paper_history 당일 레코드 합산
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        history_res = await asyncio.to_thread(
+            supabase.table("paper_history")
+            .select("profit_amt")
+            .gte("created_at", today_start.isoformat())
+            .execute
+        )
+        daily_pnl = sum(
+            float(r.get("profit_amt") or 0) for r in (history_res.data or [])
+        )
+        daily_pnl_pct = (daily_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
 
         return {
             "totalAssets": round(float(current_total), 2),
             "cashAvailable": round(float(acc["cash_available"]), 2),
             "investedCapital": round(float(invested_capital), 2),
-            "dailyPnL": 0.0,  # TODO: 실시간 손익 계산 로직 추가 가능
-            "dailyPnLPct": 0.0,
+            "dailyPnL": round(daily_pnl, 2),
+            "dailyPnLPct": round(daily_pnl_pct, 2),
             "positions": [
                 {
                     "ticker": p["ticker"],
@@ -1800,6 +1812,67 @@ def calculate_position_sizing(
     }
 
 
+def calculate_dna_score(
+    rsi: float,
+    macd_diff: float,
+    macd_diff_prev: float,
+    adx: float,
+    rvol: float,
+    is_extended: bool,
+) -> float:
+    """
+    RSI·MACD·ADX·RVOL을 합성한 0~100 DNA 점수.
+    ≥80 → BUY 게이트 통과 / ≥85 → STRONG BUY 알림 기준
+    """
+    score = 50.0
+
+    # RSI (±20): 과매도 = 강세, 과매수 = 약세
+    if rsi < 30:
+        score += 20
+    elif rsi < 45:
+        score += 15
+    elif rsi < 55:
+        score += 0
+    elif rsi < 65:
+        score -= 10
+    else:
+        score -= 20
+
+    # MACD (±20): 골든/데드크로스 최우선, 방향성 차순
+    is_golden = macd_diff > 0 and macd_diff_prev <= 0
+    is_dead = macd_diff < 0 and macd_diff_prev >= 0
+    if is_golden:
+        score += 20
+    elif is_dead:
+        score -= 20
+    elif macd_diff > 0:
+        score += 8
+    else:
+        score -= 8
+
+    # ADX (+10): 추세 강도
+    if adx > 25:
+        score += 10
+    elif adx > 20:
+        score += 5
+
+    # RVOL (+15 / -5): 거래량 폭증 가산, 침체 감산
+    if rvol > 5.0:
+        score += 15
+    elif rvol > 3.0:
+        score += 10
+    elif rvol > 2.0:
+        score += 5
+    elif rvol < 1.0:
+        score -= 5
+
+    # 급등 추격 페널티 (-25)
+    if is_extended:
+        score -= 25
+
+    return round(max(0.0, min(100.0, score)), 1)
+
+
 def generate_ai_investment_report(data: dict):
     """
     규칙 기반(Deterministic) 동적 리포트 생성 엔진. (OpenAI API 완전 분리)
@@ -1895,14 +1968,22 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     }
 
     # 3. AI 리포트 생성 (STRONG 신호일 때만 생성하여 비용/속도 최적화)
+    # DNA Score 실계산 (RSI·MACD·ADX·RVOL 합성, 0~100)
+    macd_diff_cur = float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
+    macd_diff_prev = float(df["MACD_Diff"].iloc[-2]) if len(df) >= 2 and not pd.isna(df["MACD_Diff"].iloc[-2]) else 0.0
+    dna_score = calculate_dna_score(
+        rsi=float(latest["RSI"]) if not pd.isna(latest["RSI"]) else 50.0,
+        macd_diff=macd_diff_cur,
+        macd_diff_prev=macd_diff_prev,
+        adx=float(latest["ADX"]) if "ADX" in latest and not pd.isna(latest["ADX"]) else 0.0,
+        rvol=float(latest["RVOL"]) if "RVOL" in latest and not pd.isna(latest["RVOL"]) else 1.0,
+        is_extended=bool(latest["Is_Extended"]) if "Is_Extended" in latest else False,
+    )
+
     if strength == "STRONG":
-        # AIAnalyzer의 분석 로직 연계 (메모리 내 AIAnalyzer 인스턴스 활용 권장하나, 여기선 직접 리포트 생성 로직 활용)
         payload["ai_report"] = generate_ai_investment_report(payload)
-        # 프론트엔드 QuantSignalCard를 위한 구조화된 데이터 추가
         payload["ai_metadata"] = {
-            "dna_score": (
-                85 if signal_type == "BUY" else (40 if signal_type == "SELL" else 60)
-            ),
+            "dna_score": dna_score,
             "bull_case": (
                 "수학적 지표상 반등 모멘텀 임계치 도달"
                 if signal_type == "BUY"
@@ -1920,7 +2001,7 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         payload["ai_report"] = (
             "시장 신호 강도가 보통(NORMAL)이며, 정밀 AI 분석 조건에 도달하지 않았습니다."
         )
-        payload["ai_metadata"] = None
+        payload["ai_metadata"] = {"dna_score": dna_score}
 
     # [Opt-3] 데이터 출처 명시적 태깅
     payload["data_source"] = "alpaca_iex"

@@ -83,35 +83,55 @@ class DBManager:
 
     def get_active_tickers(self, limit=5):
         """
-        Supabase에서 가장 최근 발견된 N개의 고유 티커 목록을 가져옵니다.
-        만약 데이터가 없거나 에러가 발생하면 Fallback 티커 목록을 반환합니다.
+        모니터링 유니버스 구성:
+        1순위 — watchlist WATCHING/HOLDING 종목 (사용자가 관심 표명한 종목)
+        2순위 — daily_discovery 최근 발굴 종목으로 잔여 슬롯 채움
         """
         if not self.supabase:
             print("⚠️ Warning: DB Client not available. Using fallback tickers.")
             return ["TSLA", "AAPL"]
 
+        tickers = []
+
+        # 1순위: watchlist WATCHING/HOLDING
         try:
-            response = (
-                self.supabase.table("daily_discovery")
+            wl_res = (
+                self.supabase.table("watchlist")
                 .select("ticker")
-                .order("updated_at", desc=True)
-                .limit(limit * 2)
+                .in_("status", ["WATCHING", "HOLDING"])
                 .execute()
             )
-
-            tickers = []
-            for item in response.data:
+            for item in wl_res.data or []:
                 ticker = item.get("ticker")
                 if ticker and ticker not in tickers:
                     tickers.append(ticker)
-
-                if len(tickers) >= limit:
-                    break
-
-            return tickers if tickers else ["TSLA", "AAPL"]
         except Exception as e:
-            print(f"❌ DB Fetch Error (Active Tickers): {e}")
-            return ["TSLA", "AAPL"]
+            print(f"⚠️ Watchlist fetch error: {e}")
+
+        # 2순위: daily_discovery로 잔여 슬롯 채움
+        if len(tickers) < limit:
+            try:
+                dd_res = (
+                    self.supabase.table("daily_discovery")
+                    .select("ticker")
+                    .order("updated_at", desc=True)
+                    .limit((limit - len(tickers)) * 2)
+                    .execute()
+                )
+                for item in dd_res.data or []:
+                    ticker = item.get("ticker")
+                    if ticker and ticker not in tickers:
+                        tickers.append(ticker)
+                    if len(tickers) >= limit:
+                        break
+            except Exception as e:
+                print(f"❌ DB Fetch Error (Active Tickers): {e}")
+
+        if tickers:
+            print(f"📋 [ActiveTickers] {tickers} (watchlist-first)")
+            return tickers[:limit]
+
+        return ["TSLA", "AAPL"]
 
 
 if __name__ == "__main__":
