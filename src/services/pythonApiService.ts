@@ -1,6 +1,8 @@
 import { supabase } from '../lib/supabase';
 
-const PY_API_BASE = '/py-api';
+// 로컬: Vite 프록시(/py-api → localhost:8001)
+// Vercel: VITE_API_BASE_URL 환경변수로 Railway URL 직접 지정
+const PY_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/py-api';
 
 export interface TechnicalIndicators {
   ticker: string;
