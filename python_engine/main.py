@@ -388,8 +388,6 @@ async def get_pulse_history(limit: int = 20):
         return []
 
     try:
-        # 각 티커별로 가장 최신 신호 하나씩 가져오는 쿼리 (또는 단순 최근 N개)
-        # 여기서는 단순하게 최근 N개를 가져옵니다.
         res = await asyncio.to_thread(
             supabase.table("realtime_signals")
             .select("*")
@@ -401,6 +399,126 @@ async def get_pulse_history(limit: int = 20):
     except Exception as e:
         print(f"❌ Pulse History Fetch Error: {e}")
         return []
+
+
+@app.get("/api/pulse/strong-buy-log")
+async def get_strong_buy_log(limit: int = 50):
+    """STRONG BUY 발동 이력 조회 — 실제 트리거된 신호만 필터링"""
+    if not supabase:
+        return {"events": [], "total": 0}
+
+    try:
+        res = await asyncio.to_thread(
+            supabase.table("realtime_signals")
+            .select("ticker,timestamp,rsi,adx,rvol,price,signal,strength,ai_metadata")
+            .eq("signal", "BUY")
+            .eq("strength", "STRONG")
+            .order("timestamp", desc=True)
+            .limit(limit)
+            .execute
+        )
+        events = []
+        for row in res.data or []:
+            # dna_score: ai_metadata JSON에서 추출 (컬럼 없어도 동작)
+            ai_meta = row.get("ai_metadata") or {}
+            if isinstance(ai_meta, str):
+                import json as _json
+                try:
+                    ai_meta = _json.loads(ai_meta)
+                except Exception:
+                    ai_meta = {}
+            dna = ai_meta.get("dna_score")
+            events.append({
+                "ticker": row.get("ticker"),
+                "timestamp": row.get("timestamp"),
+                "price": row.get("price"),
+                "dna_score": dna,
+                "rsi": row.get("rsi"),
+                "adx": row.get("adx"),
+                "rvol": row.get("rvol"),
+            })
+        return {"events": events, "total": len(events)}
+    except Exception as e:
+        print(f"❌ Strong Buy Log Error: {e}")
+        return {"events": [], "total": 0, "error": str(e)}
+
+
+@app.get("/api/pulse/indicators")
+async def get_indicator_snapshot():
+    """
+    모든 모니터링 종목의 실시간 지표 스냅샷 + STRONG BUY 근접도(proximity).
+    각 조건 충족 여부와 임계값까지의 거리를 반환해 '발동까지 몇 단계 남았는지' 파악 가능.
+    """
+    if not candle_state.history:
+        return {"tickers": {}, "armed": SYSTEM_ARMED}
+
+    result = {}
+    for ticker, df_raw in candle_state.history.items():
+        if len(df_raw) < 35:
+            result[ticker] = {"status": "warming_up", "bars": len(df_raw)}
+            continue
+
+        try:
+            avg_daily_vol = candle_state.avg_daily_volume.get(ticker, 0.0)
+            df = calculate_advanced_signals(df_raw.copy(), avg_daily_volume=avg_daily_vol)
+            latest = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) >= 2 else latest
+
+            rsi = float(latest["RSI"]) if not pd.isna(latest["RSI"]) else 50.0
+            macd_diff = float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
+            macd_diff_prev = float(prev["MACD_Diff"]) if not pd.isna(prev["MACD_Diff"]) else 0.0
+            adx = float(latest["ADX"]) if "ADX" in latest and not pd.isna(latest["ADX"]) else 0.0
+            rvol = float(latest["RVOL"]) if "RVOL" in latest and not pd.isna(latest["RVOL"]) else 1.0
+            is_extended = bool(latest["Is_Extended"]) if "Is_Extended" in latest else False
+            price = float(latest["Close"])
+
+            # 각 STRONG BUY 조건 충족 여부 및 임계값까지의 거리
+            cond_rsi = {"value": round(rsi, 2), "threshold": 45, "met": rsi < 45,
+                        "gap": round(max(0.0, rsi - 45), 2)}
+            cond_macd = {"value": round(macd_diff, 4), "threshold": 0,
+                         "met": macd_diff > 0 and macd_diff_prev <= 0,
+                         "bullish_territory": macd_diff > 0,
+                         "gap": round(max(0.0, -macd_diff), 4)}
+            cond_adx = {"value": round(adx, 2), "threshold": 20, "met": adx > 20,
+                        "gap": round(max(0.0, 20 - adx), 2)}
+            cond_rvol = {"value": round(rvol, 2), "threshold": 3.0, "met": rvol >= 3.0,
+                         "gap": round(max(0.0, 3.0 - rvol), 2)}
+            cond_extended = {"value": is_extended, "met": not is_extended}
+
+            conditions_met = sum([
+                cond_rsi["met"], cond_macd["met"],
+                cond_adx["met"], cond_rvol["met"], cond_extended["met"]
+            ])
+
+            dna_score = calculate_dna_score(rsi, macd_diff, macd_diff_prev, adx, rvol, is_extended)
+            strong_buy_active = bool(latest["Strong_Buy"]) if "Strong_Buy" in latest else False
+
+            result[ticker] = {
+                "price": round(price, 2),
+                "dna_score": dna_score,
+                "strong_buy_active": strong_buy_active,
+                "conditions_met": conditions_met,
+                "conditions_total": 5,
+                "proximity_pct": round(conditions_met / 5 * 100),
+                "conditions": {
+                    "rsi": cond_rsi,
+                    "macd_golden_cross": cond_macd,
+                    "adx": cond_adx,
+                    "rvol": cond_rvol,
+                    "not_extended": cond_extended,
+                },
+                "bars": len(df_raw),
+                "last_update": df_raw.index[-1].isoformat() if not df_raw.empty else None,
+            }
+        except Exception as e:
+            result[ticker] = {"status": "error", "error": str(e)}
+
+    # 근접도 내림차순 정렬
+    sorted_result = dict(
+        sorted(result.items(),
+               key=lambda x: x[1].get("proximity_pct", -1), reverse=True)
+    )
+    return {"tickers": sorted_result, "armed": SYSTEM_ARMED, "monitored": len(result)}
 
 
 # --- Rare Source Schemas & Engine ---
@@ -2002,6 +2120,9 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
             "시장 신호 강도가 보통(NORMAL)이며, 정밀 AI 분석 조건에 도달하지 않았습니다."
         )
         payload["ai_metadata"] = {"dna_score": dna_score}
+
+    # DNA Score 최상위 노출 (ai_metadata 중첩 없이 바로 접근 가능)
+    payload["dna_score"] = dna_score
 
     # [Opt-3] 데이터 출처 명시적 태깅
     payload["data_source"] = "alpaca_iex"
