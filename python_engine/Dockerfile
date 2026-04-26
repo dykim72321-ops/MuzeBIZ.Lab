@@ -21,8 +21,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 소스 코드 복사
 COPY . .
 
-# Railway는 PORT 환경변수를 동적으로 주입
-EXPOSE ${PORT:-8000}
+EXPOSE 8080
 
-# Railway: $PORT 환경변수 사용
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn main:app --host 0.0.0.0 --port 8080
