@@ -5,13 +5,13 @@ import asyncio
 INITIAL_CAPITAL = 100000.0
 
 # ── 포지션 사이징 / 리스크 상수 ──────────────────────────────────────────────
-KELLY_FRACTION = 0.15       # 가용 현금 대비 진입 비중 (3/4 Kelly ≈ 15%)
-MIN_BUY_BUDGET = 500.0      # 최소 주문 금액 (달러)
-TS_INIT_PCT = 0.90          # 초기 트레일링 스탑: 진입가 × 90% (-10%)
-TS_TRAIL_PCT = 0.90         # 최고가 갱신 시 TS 추적 비율: highest × 90%
-SCALE_OUT_RATIO = 0.50      # Scale-Out 시 매도 비율 (50%)
-SCALE_OUT_TS_PCT = 1.01     # Scale-Out 후 TS 본절 + 1%
-POS_WEIGHT = 0.15           # paper_positions.weight 기록값
+KELLY_FRACTION = 0.15  # 가용 현금 대비 진입 비중 (3/4 Kelly ≈ 15%)
+MIN_BUY_BUDGET = 500.0  # 최소 주문 금액 (달러)
+TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%)
+TS_TRAIL_PCT = 0.90  # 최고가 갱신 시 TS 추적 비율: highest × 90%
+SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
+SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
+POS_WEIGHT = 0.15  # paper_positions.weight 기록값
 
 
 class PaperTradingManager:
@@ -168,8 +168,12 @@ class PaperTradingManager:
             and dna_score >= 80
         ):
             # Kelly 엔진이 계산한 비중이 유효하면 사용, 없으면 기본값(KELLY_FRACTION)
-            effective_fraction = kelly_weight / 100.0 if kelly_weight > 0 else KELLY_FRACTION
-            effective_fraction = min(effective_fraction, 0.25)  # 단일 종목 최대 25% 제한
+            effective_fraction = (
+                kelly_weight / 100.0 if kelly_weight > 0 else KELLY_FRACTION
+            )
+            effective_fraction = min(
+                effective_fraction, 0.25
+            )  # 단일 종목 최대 25% 제한
             buy_budget = acc["cash_available"] * effective_fraction
             if buy_budget < MIN_BUY_BUDGET:
                 return
@@ -212,7 +216,9 @@ class PaperTradingManager:
                         .eq("ticker", ticker)
                         .execute
                     )
-                    raise RuntimeError(f"Cash UPDATE failed for {ticker}, position rolled back")
+                    raise RuntimeError(
+                        f"Cash UPDATE failed for {ticker}, position rolled back"
+                    )
 
                 report_line = f"\n💡 {ai_report}" if ai_report else ""
                 await self.webhook.send_alert(
