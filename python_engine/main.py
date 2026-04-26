@@ -281,9 +281,7 @@ class TickerDataState:
                 continue
             try:
                 tk = yf.Ticker(ticker)
-                daily = await asyncio.to_thread(
-                    tk.history, period="30d", interval="1d"
-                )
+                daily = await asyncio.to_thread(tk.history, period="30d", interval="1d")
                 if not daily.empty:
                     self.avg_daily_volume[ticker] = float(daily["Volume"].mean())
                     print(
@@ -423,20 +421,23 @@ async def get_strong_buy_log(limit: int = 50):
             ai_meta = row.get("ai_metadata") or {}
             if isinstance(ai_meta, str):
                 import json as _json
+
                 try:
                     ai_meta = _json.loads(ai_meta)
                 except Exception:
                     ai_meta = {}
             dna = ai_meta.get("dna_score")
-            events.append({
-                "ticker": row.get("ticker"),
-                "timestamp": row.get("timestamp"),
-                "price": row.get("price"),
-                "dna_score": dna,
-                "rsi": row.get("rsi"),
-                "adx": row.get("adx"),
-                "rvol": row.get("rvol"),
-            })
+            events.append(
+                {
+                    "ticker": row.get("ticker"),
+                    "timestamp": row.get("timestamp"),
+                    "price": row.get("price"),
+                    "dna_score": dna,
+                    "rsi": row.get("rsi"),
+                    "adx": row.get("adx"),
+                    "rvol": row.get("rvol"),
+                }
+            )
         return {"events": events, "total": len(events)}
     except Exception as e:
         print(f"❌ Strong Buy Log Error: {e}")
@@ -460,38 +461,78 @@ async def get_indicator_snapshot():
 
         try:
             avg_daily_vol = candle_state.avg_daily_volume.get(ticker, 0.0)
-            df = calculate_advanced_signals(df_raw.copy(), avg_daily_volume=avg_daily_vol)
+            df = calculate_advanced_signals(
+                df_raw.copy(), avg_daily_volume=avg_daily_vol
+            )
             latest = df.iloc[-1]
             prev = df.iloc[-2] if len(df) >= 2 else latest
 
             rsi = float(latest["RSI"]) if not pd.isna(latest["RSI"]) else 50.0
-            macd_diff = float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
-            macd_diff_prev = float(prev["MACD_Diff"]) if not pd.isna(prev["MACD_Diff"]) else 0.0
-            adx = float(latest["ADX"]) if "ADX" in latest and not pd.isna(latest["ADX"]) else 0.0
-            rvol = float(latest["RVOL"]) if "RVOL" in latest and not pd.isna(latest["RVOL"]) else 1.0
-            is_extended = bool(latest["Is_Extended"]) if "Is_Extended" in latest else False
+            macd_diff = (
+                float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
+            )
+            macd_diff_prev = (
+                float(prev["MACD_Diff"]) if not pd.isna(prev["MACD_Diff"]) else 0.0
+            )
+            adx = (
+                float(latest["ADX"])
+                if "ADX" in latest and not pd.isna(latest["ADX"])
+                else 0.0
+            )
+            rvol = (
+                float(latest["RVOL"])
+                if "RVOL" in latest and not pd.isna(latest["RVOL"])
+                else 1.0
+            )
+            is_extended = (
+                bool(latest["Is_Extended"]) if "Is_Extended" in latest else False
+            )
             price = float(latest["Close"])
 
             # 각 STRONG BUY 조건 충족 여부 및 임계값까지의 거리
-            cond_rsi = {"value": round(rsi, 2), "threshold": 45, "met": rsi < 45,
-                        "gap": round(max(0.0, rsi - 45), 2)}
-            cond_macd = {"value": round(macd_diff, 4), "threshold": 0,
-                         "met": macd_diff > 0 and macd_diff_prev <= 0,
-                         "bullish_territory": macd_diff > 0,
-                         "gap": round(max(0.0, -macd_diff), 4)}
-            cond_adx = {"value": round(adx, 2), "threshold": 20, "met": adx > 20,
-                        "gap": round(max(0.0, 20 - adx), 2)}
-            cond_rvol = {"value": round(rvol, 2), "threshold": 3.0, "met": rvol >= 3.0,
-                         "gap": round(max(0.0, 3.0 - rvol), 2)}
+            cond_rsi = {
+                "value": round(rsi, 2),
+                "threshold": 45,
+                "met": rsi < 45,
+                "gap": round(max(0.0, rsi - 45), 2),
+            }
+            cond_macd = {
+                "value": round(macd_diff, 4),
+                "threshold": 0,
+                "met": macd_diff > 0 and macd_diff_prev <= 0,
+                "bullish_territory": macd_diff > 0,
+                "gap": round(max(0.0, -macd_diff), 4),
+            }
+            cond_adx = {
+                "value": round(adx, 2),
+                "threshold": 20,
+                "met": adx > 20,
+                "gap": round(max(0.0, 20 - adx), 2),
+            }
+            cond_rvol = {
+                "value": round(rvol, 2),
+                "threshold": 3.0,
+                "met": rvol >= 3.0,
+                "gap": round(max(0.0, 3.0 - rvol), 2),
+            }
             cond_extended = {"value": is_extended, "met": not is_extended}
 
-            conditions_met = sum([
-                cond_rsi["met"], cond_macd["met"],
-                cond_adx["met"], cond_rvol["met"], cond_extended["met"]
-            ])
+            conditions_met = sum(
+                [
+                    cond_rsi["met"],
+                    cond_macd["met"],
+                    cond_adx["met"],
+                    cond_rvol["met"],
+                    cond_extended["met"],
+                ]
+            )
 
-            dna_score = calculate_dna_score(rsi, macd_diff, macd_diff_prev, adx, rvol, is_extended)
-            strong_buy_active = bool(latest["Strong_Buy"]) if "Strong_Buy" in latest else False
+            dna_score = calculate_dna_score(
+                rsi, macd_diff, macd_diff_prev, adx, rvol, is_extended
+            )
+            strong_buy_active = (
+                bool(latest["Strong_Buy"]) if "Strong_Buy" in latest else False
+            )
 
             result[ticker] = {
                 "price": round(price, 2),
@@ -508,15 +549,18 @@ async def get_indicator_snapshot():
                     "not_extended": cond_extended,
                 },
                 "bars": len(df_raw),
-                "last_update": df_raw.index[-1].isoformat() if not df_raw.empty else None,
+                "last_update": (
+                    df_raw.index[-1].isoformat() if not df_raw.empty else None
+                ),
             }
         except Exception as e:
             result[ticker] = {"status": "error", "error": str(e)}
 
     # 근접도 내림차순 정렬
     sorted_result = dict(
-        sorted(result.items(),
-               key=lambda x: x[1].get("proximity_pct", -1), reverse=True)
+        sorted(
+            result.items(), key=lambda x: x[1].get("proximity_pct", -1), reverse=True
+        )
     )
     return {"tickers": sorted_result, "armed": SYSTEM_ARMED, "monitored": len(result)}
 
@@ -1030,7 +1074,9 @@ async def get_portfolio():
         daily_pnl = sum(
             float(r.get("profit_amt") or 0) for r in (history_res.data or [])
         )
-        daily_pnl_pct = (daily_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
+        daily_pnl_pct = (
+            (daily_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
+        )
 
         return {
             "totalAssets": round(float(current_total), 2),
@@ -1303,7 +1349,9 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         total_assets = cash_available + invested_capital
 
         total_pnl = total_assets - INITIAL_CAPITAL
-        total_pnl_pct = (total_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
+        total_pnl_pct = (
+            (total_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
+        )
         current_drawdown = round(min(total_pnl_pct, 0), 2)
 
         # 오늘 실현 손익: paper_history 당일 레코드 합산
@@ -1317,7 +1365,9 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         today_pnl = sum(
             float(r.get("profit_amt") or 0) for r in (history_res.data or [])
         )
-        today_pnl_pct = (today_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
+        today_pnl_pct = (
+            (today_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
+        )
 
         return {
             "cash_available": round(cash_available, 2),
@@ -2087,14 +2137,28 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
 
     # 3. AI 리포트 생성 (STRONG 신호일 때만 생성하여 비용/속도 최적화)
     # DNA Score 실계산 (RSI·MACD·ADX·RVOL 합성, 0~100)
-    macd_diff_cur = float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
-    macd_diff_prev = float(df["MACD_Diff"].iloc[-2]) if len(df) >= 2 and not pd.isna(df["MACD_Diff"].iloc[-2]) else 0.0
+    macd_diff_cur = (
+        float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
+    )
+    macd_diff_prev = (
+        float(df["MACD_Diff"].iloc[-2])
+        if len(df) >= 2 and not pd.isna(df["MACD_Diff"].iloc[-2])
+        else 0.0
+    )
     dna_score = calculate_dna_score(
         rsi=float(latest["RSI"]) if not pd.isna(latest["RSI"]) else 50.0,
         macd_diff=macd_diff_cur,
         macd_diff_prev=macd_diff_prev,
-        adx=float(latest["ADX"]) if "ADX" in latest and not pd.isna(latest["ADX"]) else 0.0,
-        rvol=float(latest["RVOL"]) if "RVOL" in latest and not pd.isna(latest["RVOL"]) else 1.0,
+        adx=(
+            float(latest["ADX"])
+            if "ADX" in latest and not pd.isna(latest["ADX"])
+            else 0.0
+        ),
+        rvol=(
+            float(latest["RVOL"])
+            if "RVOL" in latest and not pd.isna(latest["RVOL"])
+            else 1.0
+        ),
         is_extended=bool(latest["Is_Extended"]) if "Is_Extended" in latest else False,
     )
 
@@ -2389,7 +2453,9 @@ async def run_startup_sequence():
         except Exception as e:
             # PGRST204: is_armed 컬럼 미존재 → 마이그레이션 미적용 상태, 기본값 False 유지
             if "PGRST204" in str(e) or "is_armed" in str(e):
-                print("⚠️ [Startup] is_armed column not found. Apply migration to enable ARM persistence.")
+                print(
+                    "⚠️ [Startup] is_armed column not found. Apply migration to enable ARM persistence."
+                )
             else:
                 print(f"⚠️ [Startup] Could not restore ARM state: {e}")
 
