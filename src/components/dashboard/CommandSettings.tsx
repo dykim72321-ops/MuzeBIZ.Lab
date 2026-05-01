@@ -1,28 +1,57 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Bell, Database, Save, RefreshCw } from 'lucide-react';
+import { Settings, Bell, Database, Save, RefreshCw, Shield, ShieldOff, ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
+import { toggleSystemArm } from '../../services/pythonApiService';
 
 export const CommandSettings: React.FC = () => {
   const [dnaThreshold, setDnaThreshold] = useState<number>(85);
   const [webhookUrl, setWebhookUrl] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
-  // 컴포넌트 마운트 시 DB에서 기존 설정값 불러오기
+
+  const [isArmed, setIsArmed] = useState<boolean>(false);
+  const [isTogglingArm, setIsTogglingArm] = useState(false);
+
   useEffect(() => {
     const fetchSettings = async () => {
       const { data } = await supabase
         .from('system_settings')
         .select('*')
         .single();
-      
+
       if (data) {
         if (data.alert_threshold) setDnaThreshold(data.alert_threshold);
         if (data.webhook_url) setWebhookUrl(data.webhook_url);
+        if (data.is_armed !== undefined) setIsArmed(!!data.is_armed);
       }
     };
     fetchSettings();
   }, []);
+
+  const handleToggleArm = async () => {
+    const next = !isArmed;
+    setIsTogglingArm(true);
+    try {
+      await toggleSystemArm(next);
+      setIsArmed(next);
+      if (next) {
+        toast.success('🔴 SYSTEM ARMED', {
+          description: '자동 매수/매도가 활성화됩니다. DNA≥80 STRONG BUY 시 자동 진입합니다.',
+        });
+      } else {
+        toast('🟣 SYSTEM DISARMED', {
+          description: '안전 모드 전환. 스캐닝은 계속되지만 매매는 실행되지 않습니다.',
+        });
+      }
+    } catch (err: any) {
+      toast.error('ARM 전환 실패', {
+        description: err.message || '백엔드 연결을 확인하세요.',
+      });
+    } finally {
+      setIsTogglingArm(false);
+    }
+  };
 
   const handleSaveSettings = async () => {
     setIsSaving(true);
@@ -63,28 +92,28 @@ export const CommandSettings: React.FC = () => {
             const { error } = await supabase
               .from('backtest_cache')
               .delete()
-              .neq('ticker', 'dummy'); 
+              .neq('ticker', 'dummy');
 
             if (error) throw error;
             toast.success('Cache Flushed', {
               description: 'All backtest data has been cleared.',
-              id: toastId
+              id: toastId,
             });
           } catch (error) {
             console.error('Cache clear error:', error);
             toast.error('Flush Error', {
               description: 'Could not purge memory tables.',
-              id: toastId
+              id: toastId,
             });
           } finally {
             setIsClearing(false);
           }
-        }
+        },
       },
       cancel: {
         label: '취소',
-        onClick: () => {}
-      }
+        onClick: () => {},
+      },
     });
   };
 
@@ -96,23 +125,81 @@ export const CommandSettings: React.FC = () => {
           <Settings className="w-4 h-4 text-slate-500" />
           System Control Panel
         </h3>
+        {/* ARMED 상태 뱃지 */}
+        <span className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border transition-colors ${
+          isArmed
+            ? 'bg-rose-50 text-rose-600 border-rose-200'
+            : 'bg-slate-100 text-slate-400 border-slate-200'
+        }`}>
+          {isArmed
+            ? <ShieldCheck className="w-3 h-3" />
+            : <ShieldOff className="w-3 h-3" />
+          }
+          {isArmed ? 'ARMED' : 'DISARMED'}
+        </span>
       </div>
 
       <div className="p-6 space-y-8">
+
+        {/* 0. SYSTEM_ARMED 토글 — 최상단 배치 */}
+        <div className="space-y-4">
+          <h4 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+            <Shield className="w-4 h-4" /> Autonomous Trading Control
+          </h4>
+
+          <div className="pl-6 border-l-2 border-slate-100">
+            <div className={`flex items-center justify-between p-5 rounded-xl border-2 transition-all ${
+              isArmed
+                ? 'bg-rose-50 border-rose-200'
+                : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div>
+                <p className={`text-sm font-black ${isArmed ? 'text-rose-700' : 'text-slate-700'}`}>
+                  {isArmed ? '🔴 COMBAT MODE — 자동 매매 활성' : '🟣 SAFE MODE — 관제 전용'}
+                </p>
+                <p className="text-[10px] text-slate-500 mt-1 max-w-sm">
+                  {isArmed
+                    ? 'DNA≥80 STRONG BUY 시 자동 진입 · RSI>60 Scale-Out · Trailing Stop 자동 청산'
+                    : '스캐닝 및 시그널 수신은 계속되지만 실제 주문은 실행되지 않습니다.'
+                  }
+                </p>
+              </div>
+              <button
+                onClick={handleToggleArm}
+                disabled={isTogglingArm}
+                className={`relative flex items-center gap-2.5 px-5 py-3 rounded-xl text-sm font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-md ${
+                  isArmed
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-200'
+                    : 'bg-slate-800 hover:bg-slate-900 text-white shadow-slate-200'
+                }`}
+              >
+                {isTogglingArm ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : isArmed ? (
+                  <ShieldOff className="w-4 h-4" />
+                ) : (
+                  <ShieldCheck className="w-4 h-4" />
+                )}
+                {isTogglingArm ? 'Processing...' : isArmed ? 'DISARM' : 'ARM SYSTEM'}
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* 1. 알림 시스템 설정 */}
         <div className="space-y-4">
           <h4 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
             <Bell className="w-4 h-4" /> Alert & Webhook Setup
           </h4>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pl-6 border-l-2 border-slate-100">
             <div className="space-y-2">
               <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider">DNA Score Threshold (Target)</label>
               <div className="flex items-center gap-4">
-                <input 
-                  type="range" 
-                  min="50" max="100" 
-                  value={dnaThreshold} 
+                <input
+                  type="range"
+                  min="50" max="100"
+                  value={dnaThreshold}
                   onChange={(e) => setDnaThreshold(Number(e.target.value))}
                   className="flex-1 accent-[#0176d3]"
                 />
@@ -125,8 +212,8 @@ export const CommandSettings: React.FC = () => {
 
             <div className="space-y-2">
               <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider">Discord Webhook URL</label>
-              <input 
-                type="password" 
+              <input
+                type="password"
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
                 placeholder="https://discord.com/api/webhooks/..."
@@ -141,13 +228,13 @@ export const CommandSettings: React.FC = () => {
           <h4 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
             <Database className="w-4 h-4" /> System Maintenance
           </h4>
-          
+
           <div className="pl-6 border-l-2 border-slate-100 flex items-center justify-between bg-slate-50 p-4 rounded-lg">
             <div>
               <p className="text-sm font-bold text-slate-700">Backtest Matrix Cache</p>
               <p className="text-[10px] text-slate-500 mt-1">알고리즘 v4 업데이트 후 즉각적인 재연산이 필요할 때 캐시를 초기화합니다.</p>
             </div>
-            <button 
+            <button
               onClick={handleClearCache}
               disabled={isClearing}
               className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-50 transition-colors disabled:opacity-50"
@@ -160,7 +247,7 @@ export const CommandSettings: React.FC = () => {
 
         {/* Footer Actions */}
         <div className="pt-4 border-t border-slate-100 flex justify-end">
-          <button 
+          <button
             onClick={handleSaveSettings}
             disabled={isSaving}
             className="flex items-center gap-2 px-6 py-2.5 bg-[#0176d3] text-white rounded-lg text-xs font-black uppercase tracking-wider hover:bg-[#015ba3] transition-colors disabled:opacity-50 shadow-sm shadow-[#0176d3]/30"

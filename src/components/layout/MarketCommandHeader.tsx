@@ -1,5 +1,5 @@
 import React from 'react';
-import { Rocket, Loader2, CheckCircle } from 'lucide-react';
+import { Rocket, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import clsx from 'clsx';
 
 interface MarketCommandHeaderProps {
@@ -31,18 +31,16 @@ export const MarketCommandHeader: React.FC<MarketCommandHeaderProps> = ({
       <div>
         <div className="flex items-center gap-3 mb-1">
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-            {title === "통합 지휘 통제실" && (
-              <div className="relative">
-                <div className={clsx(
-                  "w-4 h-4 rounded-full",
-                  isConnected ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.5)]'
-                )} />
-                <div className={clsx(
-                  "absolute inset-0 w-4 h-4 rounded-full animate-ping opacity-75",
-                  isConnected ? 'bg-emerald-400' : 'bg-rose-400'
-                )} />
-              </div>
-            )}
+            <div className="relative">
+              <div className={clsx(
+                "w-4 h-4 rounded-full",
+                isConnected ? 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'bg-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.5)]'
+              )} />
+              <div className={clsx(
+                "absolute inset-0 w-4 h-4 rounded-full animate-ping opacity-75",
+                isConnected ? 'bg-emerald-400' : 'bg-rose-400'
+              )} />
+            </div>
             {title}
           </h1>
           <div className="px-3 py-1 bg-white/40 border border-white/20 rounded-full flex items-center gap-2 backdrop-blur-sm">
@@ -57,6 +55,11 @@ export const MarketCommandHeader: React.FC<MarketCommandHeaderProps> = ({
         {huntStatus === 'success' && (
           <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-tight text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-md border border-emerald-100">
             <CheckCircle className="w-4 h-4" /> 탐색기 가동됨
+          </span>
+        )}
+        {huntStatus === 'error' && (
+          <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-tight text-rose-600 bg-rose-50 px-3 py-1.5 rounded-md border border-rose-100">
+            <XCircle className="w-4 h-4" /> 헌팅 실패
           </span>
         )}
         <button
