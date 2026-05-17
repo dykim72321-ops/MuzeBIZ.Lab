@@ -59,7 +59,6 @@ webhook = WebhookManager()
 paper_engine = None
 
 
-
 def is_market_hours() -> bool:
     """US 시장 개장 여부 (ET 기준 평일 09:30~16:00). DST 자동 처리."""
     from zoneinfo import ZoneInfo
@@ -2429,7 +2428,9 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     """Alpaca WebSocket 스트림 데몬 시작"""
     print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
 
-    active_tickers = tickers  # except 블록에서도 안전하게 참조 가능하도록 스코프 상위에 선언
+    active_tickers = (
+        tickers  # except 블록에서도 안전하게 참조 가능하도록 스코프 상위에 선언
+    )
 
     # 1. 감시 유니버스 로드
     try:
