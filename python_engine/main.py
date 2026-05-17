@@ -58,8 +58,6 @@ webhook = WebhookManager()
 # PaperTradingManager 인스턴스 (Supabase가 초기화된 후 설정)
 paper_engine = None
 
-# Alpaca 스트림 중복 방지 플래그
-_stream_active = False
 
 
 def is_market_hours() -> bool:
@@ -2431,9 +2429,10 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     """Alpaca WebSocket 스트림 데몬 시작"""
     print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
 
+    active_tickers = tickers  # except 블록에서도 안전하게 참조 가능하도록 스코프 상위에 선언
+
     # 1. 감시 유니버스 로드
     try:
-        active_tickers = tickers
         if not active_tickers:
             active_tickers = await asyncio.to_thread(db.get_active_tickers, limit=15)
 
@@ -2465,8 +2464,6 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
         # 5. 스트림 실행 (무한 루프) — with retry limit to prevent console spam
         max_auth_failures = 3
         auth_failure_count = 0
-
-        original_run = stream._run_forever
 
         async def _guarded_run_forever():
             nonlocal auth_failure_count
