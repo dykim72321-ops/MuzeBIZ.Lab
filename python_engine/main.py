@@ -2517,6 +2517,37 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
             print("🌙 [Pulse] 시장 폐장 — 스트림 재시작 스킵 (스냅샷 모드 유지)")
 
 
+async def stream_scheduler(active_tickers: list):
+    """개장 시간을 감지해 Alpaca 스트림을 자동 시작/종료하는 스케줄러"""
+    stream_task: asyncio.Task = None
+    was_market_open = False
+
+    while True:
+        now_open = is_market_hours()
+
+        if now_open and not was_market_open:
+            print("🔔 [Scheduler] 개장 감지 — Alpaca 스트림 시작")
+            stream_task = asyncio.create_task(start_alpaca_stream(active_tickers))
+            was_market_open = True
+
+        elif not now_open and was_market_open:
+            print("🌙 [Scheduler] 폐장 감지 — 스트림 종료 대기")
+            if stream_task and not stream_task.done():
+                stream_task.cancel()
+            was_market_open = False
+
+        elif not now_open and not was_market_open:
+            from zoneinfo import ZoneInfo
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            open_min = 9 * 60 + 30
+            cur_min = now_et.hour * 60 + now_et.minute
+            mins_to_open = open_min - cur_min
+            if 0 < mins_to_open <= 60:
+                print(f"⏰ [Scheduler] 개장 {mins_to_open}분 전 대기 중...")
+
+        await asyncio.sleep(60)
+
+
 async def system_heartbeat():
     """10분 주기 시스템 상태 보고 (Dead Man's Switch)"""
     print("💓 [Heartbeat] System Monitor Started.")
@@ -2631,10 +2662,7 @@ async def run_startup_sequence():
     # 3. 실시간 스트림 및 하트비트 시작
     asyncio.create_task(system_heartbeat())
     if active_tickers:
-        if is_market_hours():
-            await start_alpaca_stream(active_tickers)
-        else:
-            print("🌙 [Pulse] 시장 폐장 — Alpaca 스트림 스킵. 스냅샷 데이터만 사용.")
+        asyncio.create_task(stream_scheduler(active_tickers))
 
 
 # --- REALTIME PULSE ENGINE (End) ---
