@@ -78,9 +78,9 @@ export const Dashboard = () => {
   }, []);
 
   const allTickers = useMemo(() => Object.keys(pulseMap), [pulseMap]);
-  const strongTickers = useMemo(() => allTickers.filter(t => pulseMap[t].strength === 'STRONG'), [allTickers, pulseMap]);
-  const normalTickers = useMemo(() => allTickers.filter(t => pulseMap[t].strength === 'NORMAL'), [allTickers, pulseMap]);
-  const buyTickers = useMemo(() => allTickers.filter(t => pulseMap[t].signal === 'BUY'), [allTickers, pulseMap]);
+  const strongTickers = useMemo(() => allTickers.filter(t => pulseMap[t]?.strength === 'STRONG'), [allTickers, pulseMap]);
+  const normalTickers = useMemo(() => allTickers.filter(t => pulseMap[t]?.strength === 'NORMAL'), [allTickers, pulseMap]);
+  const buyTickers = useMemo(() => allTickers.filter(t => pulseMap[t]?.signal === 'BUY'), [allTickers, pulseMap]);
 
   const displayedStrong = activeTab === 'normal' ? [] : strongTickers;
   const displayedNormal = activeTab === 'strong' ? [] : normalTickers;

@@ -7,7 +7,9 @@ import { triggerHunt, apiFetch } from '../services/pythonApiService';
  * 퀀트 엔진의 실시간 상태와 제어를 담당하는 통합 훅
  */
 export const useMarketEngine = () => {
-  const pulseUrl = `ws://${window.location.host}/py-api/ws/pulse`;
+  const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsBase = import.meta.env.VITE_WS_BASE_URL ?? `${wsProto}//${window.location.host}/py-api`;
+  const pulseUrl = `${wsBase}/ws/pulse`;
   const { pulseMap, isConnected, lastUpdatedTicker, error, seedMap } = usePulseSocket(pulseUrl);
 
   // 1.1 초기 히스토리 데이터 획득 및 시딩
