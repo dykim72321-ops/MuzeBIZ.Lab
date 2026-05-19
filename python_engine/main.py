@@ -2538,6 +2538,7 @@ async def stream_scheduler(active_tickers: list):
 
         elif not now_open and not was_market_open:
             from zoneinfo import ZoneInfo
+
             now_et = datetime.now(ZoneInfo("America/New_York"))
             open_min = 9 * 60 + 30
             cur_min = now_et.hour * 60 + now_et.minute
