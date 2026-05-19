@@ -2051,7 +2051,9 @@ def calculate_position_sizing(
     optimal_kelly = max(0, kelly_f) * kelly_fraction
 
     # --- [Step 4] 최종 결합 및 제한 ---
-    final_weight = vol_weight * optimal_kelly
+    # vol_weight * kelly 곱셈은 변동성 높은 마이크로캡에서 2~5%로 수렴해 MIN_BUY_BUDGET 미달.
+    # min(vol_weight, kelly) 방식으로 더 보수적인 값을 택해 실제 사용 가능한 비중 확보.
+    final_weight = min(vol_weight, optimal_kelly)
     final_weight = min(final_weight, 1.0)
 
     # RVOL 정보 추가 (포지션 사이징 참고용)
@@ -2094,8 +2096,9 @@ def calculate_dna_score(
         score -= 20
 
     # MACD (±20): 골든/데드크로스 최우선, 방향성 차순
-    is_golden = macd_diff > 0 and macd_diff_prev <= 0
-    is_dead = macd_diff < 0 and macd_diff_prev >= 0
+    # Strong_Buy 조건(shift(1) < 0 strict)과 동일한 기준으로 통일
+    is_golden = macd_diff > 0 and macd_diff_prev < 0
+    is_dead = macd_diff < 0 and macd_diff_prev > 0
     if is_golden:
         score += 20
     elif is_dead:
