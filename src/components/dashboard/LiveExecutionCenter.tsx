@@ -60,7 +60,7 @@ export const LiveExecutionCenter = () => {
   const loadAllData = async () => {
     try {
       // Parallel fetch for broker and internal paper trading data
-      const [s, p, h, pp, ph] = await Promise.all([
+      const [s, brokerPositions, brokerOrders, pp, ph] = await Promise.all([
         fetchQuantSignals(),
         fetchBrokerPositions(),
         fetchBrokerOrders(30),
@@ -68,19 +68,17 @@ export const LiveExecutionCenter = () => {
         fetchPaperHistory()
       ]);
       setSignals(s || []);
-      
-      // Merge or prioritize based on context. For now, we'll show both or prioritize paper positions for the quant engine.
-      // If we have internal paper positions, we'll combine them or show them in the positions tab.
-      const transformedPaperPos = pp.map(p => ({
-        ...p,
-        quantity: p.units,
-        unrealized_pl: (p.current_price - p.entry_price) * p.units,
-        unrealized_plpc: ((p.current_price / p.entry_price) - 1) * 100,
+
+      const transformedPaperPos = pp.map(pos => ({
+        ...pos,
+        quantity: pos.units,
+        unrealized_pl: (pos.current_price - pos.entry_price) * pos.units,
+        unrealized_plpc: ((pos.current_price / pos.entry_price) - 1) * 100,
         is_paper: true
       }));
 
-      setPositions([...transformedPaperPos, ...(p || [])]);
-      setHistory([...(ph || []), ...(h || [])]);
+      setPositions([...transformedPaperPos, ...(brokerPositions || [])]);
+      setHistory([...(ph || []), ...(brokerOrders || [])]);
     } catch (err) {
       console.error('Failed to load terminal data:', err);
     } finally {
@@ -409,20 +407,27 @@ export const LiveExecutionCenter = () => {
                 )}
 
                 {activeTab === 'history' && (
-                  history.length > 0 ? history.map((order: any) => (
+                  history.length > 0 ? history.map((order: any) => {
+                    const isProfit = order.pnl_pct != null ? order.pnl_pct >= 0 : order.side === 'buy';
+                    return (
                     <div key={order.id} className="bg-white/5 border border-white/5 rounded-2xl p-5 flex justify-between items-center">
                       <div className="flex items-center gap-4">
-                        <div className={clsx("w-10 h-10 rounded-2xl flex items-center justify-center border", order.side === 'buy' ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20")}>
+                        <div className={clsx("w-10 h-10 rounded-2xl flex items-center justify-center border", isProfit ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20")}>
                           {order.status === 'filled' ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-slate-500" />}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="text-base font-black text-white">{order.ticker}</span>
-                            <span className={clsx("text-[10px] font-black px-2 py-0.5 rounded uppercase", order.side === 'buy' ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>{order.side}</span>
+                            <span className={clsx("text-[10px] font-black px-2 py-0.5 rounded uppercase", isProfit ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
+                              {order.pnl_pct != null ? `${order.pnl_pct >= 0 ? '+' : ''}${Number(order.pnl_pct).toFixed(1)}%` : order.side}
+                            </span>
                             <span className="text-[10px] font-bold text-slate-600 uppercase">{order.type}</span>
                           </div>
                           <div className="text-[10px] text-slate-500 font-bold mt-0.5">
-                            QTY: {order.filled_qty}/{order.quantity} · AVG: ${order.filled_avg_price > 0 ? Number(order.filled_avg_price).toFixed(2) : '--'}
+                            {order.pnl_pct != null
+                              ? `P&L: $${Number(order.profit_amt ?? 0).toFixed(2)} · AVG: $${order.filled_avg_price > 0 ? Number(order.filled_avg_price).toFixed(2) : '--'}`
+                              : `QTY: ${order.filled_qty}/${order.quantity} · AVG: $${order.filled_avg_price > 0 ? Number(order.filled_avg_price).toFixed(2) : '--'}`
+                            }
                           </div>
                         </div>
                       </div>
@@ -431,7 +436,8 @@ export const LiveExecutionCenter = () => {
                         <div className="text-[9px] text-slate-600 mt-1">{order.created_at ? new Date(order.created_at).toLocaleString() : '--'}</div>
                       </div>
                     </div>
-                  )) : (
+                    );
+                  }) : (
                     <div className="py-20 text-center text-slate-600 text-[10px] font-black uppercase tracking-widest opacity-30">No order history</div>
                   )
                 )}

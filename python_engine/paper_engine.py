@@ -77,8 +77,6 @@ class PaperTradingManager:
             "initial_dna_score": round(dna_score, 1),
         }
         try:
-            # service role → RLS 우회. user_id=null 허용 (시스템 자동 등록)
-            # BUG-3 fix: filter by user_id IS NULL to avoid overwriting users' manual entries
             existing = await asyncio.to_thread(
                 self.supabase.table("watchlist")
                 .select("ticker")
@@ -151,15 +149,16 @@ class PaperTradingManager:
         2. HOLD 중 RSI > 60 → 50% 분할 익절 (SCALE_OUT) & TS 상향 + watchlist stop_loss 동기화
         3. 가격 < TS_Threshold → 전량 청산 (TRAILING_STOP) + 관심종목 EXITED
         """
-        pos = await self.get_position(ticker)
-        acc = await self.get_account()
+        pos, acc = await asyncio.gather(
+            self.get_position(ticker),
+            self.get_account(),
+        )
 
         if not acc:
             print("⚠️ Paper Account not initialized.")
             return
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
-        # LOGIC-1 fix: gate on dna_score >= 70 per system design (relaxed)
         if (
             signal_type == "BUY"
             and strength == "STRONG"
@@ -250,7 +249,6 @@ class PaperTradingManager:
                 ts_threshold = max(ts_threshold, new_ts)
 
             # B. SCALE_OUT 체크 (RSI > 60 + 수익권 진입 확인)
-            # LOGIC-2 fix: only scale-out when in profit to avoid locking in a loss
             if rsi > 60 and not is_scaled_out and is_armed and price > entry_price:
                 sell_units = units * SCALE_OUT_RATIO
                 profit_cash = sell_units * price
@@ -292,8 +290,7 @@ class PaperTradingManager:
                 # 같은 봉에서 Scale-Out과 Trailing Stop이 동시에 발동하는 것을 방지
                 return
 
-            # C. TRAILING STOP 체크 (리스크 관리: ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)
-            # CLAUDE.md 탈출 기준 B의 "AND SYSTEM_ARMED" 조건은 의도적으로 제거됨
+            # C. TRAILING STOP 체크 (ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)
             if price < ts_threshold:
                 profit_cash = units * price
                 pnl_pct = (price / entry_price - 1) * 100

@@ -2,6 +2,7 @@
 ALTER TABLE public.backtest_cache ENABLE ROW LEVEL SECURITY;
 
 -- Policy: Allow everyone (anon and authenticated) to read cached results
+DROP POLICY IF EXISTS "Allow public read access on backtest_cache" ON public.backtest_cache;
 CREATE POLICY "Allow public read access on backtest_cache"
 ON public.backtest_cache
 FOR SELECT
@@ -9,6 +10,7 @@ TO public
 USING (true);
 
 -- Policy: Allow authenticated users to delete records (for cache flushing)
+DROP POLICY IF EXISTS "Allow authenticated delete on backtest_cache" ON public.backtest_cache;
 CREATE POLICY "Allow authenticated delete on backtest_cache"
 ON public.backtest_cache
 FOR DELETE

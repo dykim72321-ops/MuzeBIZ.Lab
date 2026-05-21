@@ -8,12 +8,15 @@ DROP POLICY IF EXISTS "Auth Read/Write Account" ON public.paper_account;
 DROP POLICY IF EXISTS "Auth Read/Write Positions" ON public.paper_positions;
 DROP POLICY IF EXISTS "Auth Read/Write History" ON public.paper_history;
 
+DROP POLICY IF EXISTS "Backend Read/Write Account" ON public.paper_account;
 CREATE POLICY "Backend Read/Write Account" ON public.paper_account
   FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Backend Read/Write Positions" ON public.paper_positions;
 CREATE POLICY "Backend Read/Write Positions" ON public.paper_positions
   FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Backend Read/Write History" ON public.paper_history;
 CREATE POLICY "Backend Read/Write History" ON public.paper_history
   FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 

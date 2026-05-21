@@ -6,15 +6,18 @@
 
 -- paper_account
 DROP POLICY IF EXISTS "Public Read/Write Account" ON public.paper_account;
+DROP POLICY IF EXISTS "Anon Read Account" ON public.paper_account;
 CREATE POLICY "Anon Read Account" ON public.paper_account
   FOR SELECT TO anon, authenticated USING (true);
 
 -- paper_positions
 DROP POLICY IF EXISTS "Public Read/Write Positions" ON public.paper_positions;
+DROP POLICY IF EXISTS "Anon Read Positions" ON public.paper_positions;
 CREATE POLICY "Anon Read Positions" ON public.paper_positions
   FOR SELECT TO anon, authenticated USING (true);
 
 -- paper_history
 DROP POLICY IF EXISTS "Public Read/Write History" ON public.paper_history;
+DROP POLICY IF EXISTS "Anon Read History" ON public.paper_history;
 CREATE POLICY "Anon Read History" ON public.paper_history
   FOR SELECT TO anon, authenticated USING (true);

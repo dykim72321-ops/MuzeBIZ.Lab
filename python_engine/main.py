@@ -1339,14 +1339,21 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
     if not paper_engine:
         return {"error": "Paper engine not initialized"}
     try:
-        acc = await paper_engine.get_account()
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        acc, invested_capital, history_res = await asyncio.gather(
+            paper_engine.get_account(),
+            paper_engine.calculate_invested_capital(),
+            asyncio.to_thread(
+                supabase.table("paper_history")
+                .select("profit_amt")
+                .gte("created_at", today_start.isoformat())
+                .execute
+            ),
+        )
         if not acc:
             return {"error": "Account not found"}
 
         cash_available = float(acc.get("cash_available") or INITIAL_CAPITAL)
-
-        # 동적 total_assets: 현금 + 보유 포지션 평가액 합산 (DB의 total_assets 오염 방지)
-        invested_capital = await paper_engine.calculate_invested_capital()
         total_assets = cash_available + invested_capital
 
         total_pnl = total_assets - INITIAL_CAPITAL
@@ -1355,14 +1362,6 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         )
         current_drawdown = round(min(total_pnl_pct, 0), 2)
 
-        # 오늘 실현 손익: paper_history 당일 레코드 합산
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        history_res = await asyncio.to_thread(
-            supabase.table("paper_history")
-            .select("profit_amt")
-            .gte("created_at", today_start.isoformat())
-            .execute
-        )
         today_pnl = sum(
             float(r.get("profit_amt") or 0) for r in (history_res.data or [])
         )
@@ -1422,7 +1421,7 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
                 {
                     "id": str(item.get("id")),
                     "ticker": item.get("ticker"),
-                    "side": "buy" if (pnl_pct or 0) >= 0 else "sell",
+                    "side": "sell",
                     "type": item.get("exit_reason") or "trailing_stop",
                     "quantity": "--",
                     "filled_qty": "--",
@@ -1448,13 +1447,10 @@ async def manual_paper_sell(
 
     ticker = req.ticker.upper()
 
-    pos_res = await asyncio.to_thread(
-        supabase.table("paper_positions").select("*").eq("ticker", ticker).execute
-    )
-    if not pos_res.data:
+    pos = await paper_engine.get_position(ticker)
+    if not pos:
         raise HTTPException(status_code=404, detail=f"No open position for {ticker}")
 
-    pos = pos_res.data[0]
     entry_price = float(pos["entry_price"])
     units = float(pos["units"])
 
@@ -1472,11 +1468,8 @@ async def manual_paper_sell(
     profit_amt = (current_price - entry_price) * units
     proceeds = current_price * units
 
-    acc_res = await asyncio.to_thread(
-        supabase.table("paper_account").select("*").limit(1).execute
-    )
-    if acc_res.data:
-        acc = acc_res.data[0]
+    acc = await paper_engine.get_account()
+    if acc:
         new_cash = float(acc["cash_available"]) + proceeds
         await asyncio.to_thread(
             supabase.table("paper_account")
@@ -2583,7 +2576,6 @@ async def run_startup_sequence():
     global SYSTEM_ARMED
 
     # 0a. DB에서 ARMED 상태 복원 (서버 재시작 후 상태 유지)
-    # 마이그레이션: ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS is_armed boolean NOT NULL DEFAULT false;
     if supabase:
         try:
             res = await asyncio.to_thread(

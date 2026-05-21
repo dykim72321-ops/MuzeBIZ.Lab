@@ -3,6 +3,7 @@
 
 DROP POLICY IF EXISTS "Allow update for service role" ON public.system_settings;
 
+DROP POLICY IF EXISTS "Allow update for everyone" ON public.system_settings;
 CREATE POLICY "Allow update for everyone" ON public.system_settings
     FOR UPDATE 
     USING (true) 
