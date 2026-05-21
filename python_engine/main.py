@@ -1999,14 +1999,14 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     )
 
     # 6. 전략적 합치 (Confluence) 로직
-    # Strong Buy: RSI < 45 AND MACD Golden Cross AND ADX > 20 AND RVOL > 3.0 AND Not Extended
+    # Strong Buy: RSI < 50 AND MACD Golden Cross AND ADX > 20 AND RVOL > 1.5 AND Not Extended
     # shift(1) < 0 (strict): 직전 봉이 정확히 0인 경우 거짓 신호 제거
     df["Strong_Buy"] = (
-        (df["RSI"] < 45)
+        (df["RSI"] < 50)
         & (df["MACD_Diff"] > 0)
         & (df["MACD_Diff"].shift(1) < 0)
         & (df["ADX"] > 20)
-        & (df["RVOL"] > 3.0)
+        & (df["RVOL"] > 1.5)
         & (~df["Is_Extended"])
     )
 

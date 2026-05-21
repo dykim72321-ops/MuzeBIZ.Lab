@@ -159,13 +159,13 @@ class PaperTradingManager:
             return
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
-        # LOGIC-1 fix: gate on dna_score >= 80 per system design
+        # LOGIC-1 fix: gate on dna_score >= 70 per system design (relaxed)
         if (
             signal_type == "BUY"
             and strength == "STRONG"
             and not pos
             and is_armed
-            and dna_score >= 80
+            and dna_score >= 70
         ):
             # Kelly 엔진이 계산한 비중이 유효하면 사용, 없으면 기본값(KELLY_FRACTION)
             effective_fraction = (

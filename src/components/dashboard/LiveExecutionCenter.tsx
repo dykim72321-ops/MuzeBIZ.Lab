@@ -11,7 +11,7 @@ import {
   fetchBrokerAccount, fetchBrokerStatus, toggleSystemArm,
   closePosition as closeBrokerPosition, liquidateAllPositions,
   fetchBrokerPositions, fetchBrokerOrders,
-  fetchPaperAccount, fetchPaperPositions, fetchPaperHistory
+  fetchPaperAccount, fetchPaperPositions, fetchPaperHistory, sellPaperPosition
 } from '../../services/pythonApiService';
 import { toast } from 'sonner';
 import { ManualTradeModal } from './ManualTradeModal';
@@ -164,13 +164,23 @@ export const LiveExecutionCenter = () => {
         onClick: async () => {
           const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
           try {
-            const result = await closeBrokerPosition(ticker);
-            if (result.status === 'success') {
+            const position = positions.find(p => p.ticker === ticker);
+            let result;
+            
+            if (position?.is_paper) {
+              result = await sellPaperPosition(ticker);
+            } else {
+              result = await closeBrokerPosition(ticker);
+            }
+            
+            if (result?.status === 'success') {
               toast.success(`${ticker} 청산 성공`, { id: toastId });
               loadAllData();
+            } else {
+              toast.error(result?.error || '청산 실패', { id: toastId });
             }
           } catch (error) {
-            toast.error('청산 실패', { id: toastId });
+            toast.error('청산 에러', { id: toastId });
           }
         }
       }
