@@ -15,7 +15,6 @@ import {
   Zap,
   ShieldCheck,
   X,
-  Search,
   Coins,
   Star,
   Activity,
@@ -25,7 +24,6 @@ import {
   Clock,
   TrendingUp,
   TrendingDown,
-  Trash2,
   Lock,
   Unlock
 } from 'lucide-react';
@@ -52,6 +50,7 @@ import {
 import { CommandSettings } from '../components/dashboard/CommandSettings';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { PennyQuantScoreBar } from '../components/penny/PennyQuantScoreBar';
+import { MonitoringOrbit } from '../components/dashboard/MonitoringOrbit';
 
 interface DashboardWatchlistItem extends WatchlistItem {
   currentPrice: number;
@@ -64,11 +63,12 @@ interface DashboardWatchlistItem extends WatchlistItem {
 const PENNY_DISPLAY_THRESHOLD = 1.5;
 
 export const UnifiedDashboard = () => {
-  const { isHunting, triggerHunt } = useMarketEngine();
+  const { isHunting, triggerHunt, pulseMap } = useMarketEngine();
   const { data: strategyStats, isLoading: statsLoading } = useStrategyStats();
 
   // 1. Data States
   const [watchlistItems, setWatchlistItems] = useState<DashboardWatchlistItem[]>([]);
+  const [watchlistStocks, setWatchlistStocks] = useState<any[]>([]);
   const [discoveryStocks, setDiscoveryStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [terminalData, setTerminalData] = useState<any | null>(null);
@@ -79,7 +79,6 @@ export const UnifiedDashboard = () => {
   // 2. Action States
   const [isArmed, setIsArmed] = useState(false);
   const [pennyScanStatus, setPennyScanStatus] = useState<PennyScanStatus | null>(null);
-  const [watchlistSearchTerm, setWatchlistSearchTerm] = useState('');
 
   // 3. Trade & Account States
   const [pennyPositions, setPennyPositions] = useState<any[]>([]);
@@ -151,6 +150,7 @@ export const UnifiedDashboard = () => {
       });
 
       setWatchlistItems(normalizedWatchlist);
+      setWatchlistStocks(wlStocks);
       setDiscoveryStocks(discoveryResult.data || []);
       
       setPennyPositions(
@@ -287,18 +287,7 @@ export const UnifiedDashboard = () => {
     return [{ name: 'Start', value: baseCapital }, ...points];
   }, [pennyHistory]);
 
-  // Watchlist panel: EXITED 항목은 별도로 분리하여 기본 숨김
-  const [showExitedWatchlist, setShowExitedWatchlist] = useState(false);
 
-  const { activeWatchlist, exitedWatchlist } = useMemo(() => {
-    const matched = watchlistItems.filter(item =>
-      item.ticker.toLowerCase().includes(watchlistSearchTerm.toLowerCase())
-    );
-    return {
-      activeWatchlist: matched.filter(item => item.status !== 'EXITED'),
-      exitedWatchlist: matched.filter(item => item.status === 'EXITED'),
-    };
-  }, [watchlistItems, watchlistSearchTerm]);
 
   // Derived Account PnL
   const totalPnl = useMemo(() => {
@@ -615,132 +604,13 @@ export const UnifiedDashboard = () => {
           </div>
 
           {/* RIGHT 1/3 COLUMN: Watchlist (Combined Orbit) */}
-          <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
-            <div className="border-b border-slate-100 pb-4 space-y-3">
-              <div>
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Combined Tracking Orbit</span>
-                <h2 className="text-base font-black text-slate-800">통합 관심종목 오빗</h2>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">실시간 시그널 매칭을 감시 중인 종목군입니다. ($1.5 이하는 [페니] 배지 부착)</p>
-              </div>
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="티커 검색..."
-                  value={watchlistSearchTerm}
-                  onChange={(e) => setWatchlistSearchTerm(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200/60 rounded-xl pl-9 pr-4 py-2 text-xs font-bold placeholder-slate-400 outline-none focus:border-indigo-400 focus:bg-white transition-all"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-              {activeWatchlist.length === 0 && exitedWatchlist.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                  <Star className="w-8 h-8 text-slate-300 mx-auto mb-2 opacity-60" />
-                  <p className="text-xs font-bold">관심종목이 비어있습니다.</p>
-                </div>
-              ) : (
-                <>
-                  {/* 활성 종목 (WATCHING / HOLDING) */}
-                  {activeWatchlist.map((item) => (
-                    <div
-                      key={item.ticker}
-                      className="p-3.5 bg-slate-50/40 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-between group/wl"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={clsx(
-                          "w-8 h-8 rounded-lg flex items-center justify-center font-black text-[10px] border",
-                          item.isPenny ? "bg-cyan-50 border-cyan-100 text-cyan-600" : "bg-indigo-50 border-indigo-100 text-indigo-600"
-                        )}>
-                          {item.ticker.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-slate-900 text-sm leading-none">{item.ticker}</span>
-                            <span className={clsx(
-                              "text-[7px] font-black px-1.5 py-0.5 rounded border leading-none",
-                              item.status === 'HOLDING' ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
-                              "bg-indigo-50 border-indigo-200 text-indigo-600"
-                            )}>
-                              {item.status}
-                            </span>
-                          </div>
-                          <span className="text-[9px] text-slate-500 font-bold block mt-1">
-                            {item.buyPrice ? `진입: $${item.buyPrice.toFixed(item.isPenny ? 4 : 2)}` : '대기 중'}
-                            {item.initialDnaScore ? ` | DNA: ${item.initialDnaScore}점` : ''}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right">
-                          <span className="text-xs font-extrabold text-slate-900 tabular-nums block">${item.currentPrice.toFixed(item.isPenny ? 4 : 2)}</span>
-                          {item.changePercent !== 0 && (
-                            <span className={clsx(
-                              "text-[9px] font-black block mt-0.5 tabular-nums",
-                              item.changePercent >= 0 ? "text-emerald-600" : "text-rose-600"
-                            )}>
-                              {item.changePercent >= 0 ? '+' : ''}{item.changePercent.toFixed(2)}%
-                            </span>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleRemoveWatchlist(item.ticker)}
-                          className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-lg transition-colors opacity-0 group-hover/wl:opacity-100"
-                          title="제거"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* EXITED 접기 토글 */}
-                  {exitedWatchlist.length > 0 && (
-                    <div>
-                      <button
-                        onClick={() => setShowExitedWatchlist(v => !v)}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-black text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors border border-dashed border-slate-200"
-                      >
-                        <span>청산 완료 {exitedWatchlist.length}개</span>
-                        <span>{showExitedWatchlist ? '▲ 접기' : '▼ 펼치기'}</span>
-                      </button>
-                      {showExitedWatchlist && exitedWatchlist.map((item) => (
-                        <div
-                          key={item.ticker}
-                          className="mt-2 p-3.5 bg-slate-50/40 border border-slate-100 rounded-xl flex items-center justify-between opacity-50 group/wl"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-[10px] border bg-slate-100 border-slate-200 text-slate-400">
-                              {item.ticker.charAt(0)}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-extrabold text-slate-500 text-sm leading-none line-through">{item.ticker}</span>
-                                <span className="text-[7px] font-black px-1.5 py-0.5 rounded border leading-none bg-slate-100 border-slate-200 text-slate-400">
-                                  EXITED
-                                </span>
-                              </div>
-                              <span className="text-[9px] text-slate-400 font-bold block mt-1">
-                                {item.buyPrice ? `진입: $${item.buyPrice.toFixed(item.isPenny ? 4 : 2)}` : '-'}
-                              </span>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => handleRemoveWatchlist(item.ticker)}
-                            className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-lg transition-colors opacity-0 group-hover/wl:opacity-100"
-                            title="제거"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+          <MonitoringOrbit
+            watchlistItems={watchlistItems}
+            watchlistStocks={watchlistStocks}
+            pulseMap={pulseMap}
+            handleDeepDive={handleDeepDive}
+            handleRemoveWatchlist={handleRemoveWatchlist}
+          />
 
         </div>
 

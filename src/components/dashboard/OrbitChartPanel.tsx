@@ -22,8 +22,8 @@ interface ChartPoint {
   low: number;
 }
 
-// Chandelier Exit: highest_price_since_entry * (1 - trail%) — 간소화 버전
-// 페니주: 12% trail, 일반주($5↑): 8% trail
+// Chandelier Exit: highest_price_since_entry * (1 - trail%)
+// 페니주(≤$1): 12% trail, 일반주(>$1): 8% trail
 function calcChandelierExit(
   data: { price: number; high: number }[],
   entryPrice: number,
@@ -42,12 +42,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   const price = payload.find((p: any) => p.dataKey === 'price')?.value;
   const stop = payload.find((p: any) => p.dataKey === 'trailingStop')?.value;
   return (
-    <div className="bg-[#0b1120] border border-slate-700/80 rounded-xl p-3 text-[10px] font-black shadow-xl">
+    <div className="bg-white border border-slate-200 rounded-xl p-3 text-[10px] font-bold shadow-md">
       <div className="text-slate-400 mb-1.5 tracking-widest">{label}</div>
-      {price && <div className="text-white">Price: <span className="text-cyan-400">${price.toFixed(2)}</span></div>}
-      {stop && <div className="text-rose-400 mt-0.5">Stop: ${stop.toFixed(2)}</div>}
+      {price && <div className="text-slate-700">Price: <span className="text-indigo-600 font-mono font-semibold">${price.toFixed(2)}</span></div>}
+      {stop && <div className="text-rose-600 mt-0.5 font-mono font-semibold">Stop: ${stop.toFixed(2)}</div>}
       {price && stop && (
-        <div className={clsx('mt-1 uppercase tracking-widest', price > stop ? 'text-emerald-400' : 'text-rose-500')}>
+        <div className={clsx('mt-1 uppercase tracking-widest font-black', price > stop ? 'text-emerald-600' : 'text-rose-600')}>
           {price > stop ? '▲ Above Stop' : '▼ SELL SIGNAL'}
         </div>
       )}
@@ -83,7 +83,7 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
         const { close, high, low } = result.indicators.quote[0];
         const timestamps: number[] = result.timestamp;
         const entryPrice = item.buyPrice || close[0] || 1;
-        const isPenny = entryPrice < 5;
+        const isPenny = entryPrice <= 1.0; // CLAUDE.md 명세에 맞춰 ≤ 1.0 으로 판정
 
         const raw = timestamps
           .map((ts, i) => ({
@@ -141,52 +141,52 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 16 }}
-      className="bg-[#020617]/95 backdrop-blur-3xl border border-slate-700/60 rounded-[2rem] overflow-hidden shadow-[0_0_60px_rgba(34,211,238,0.06)]"
+      className="bg-slate-50/90 backdrop-blur-md border border-slate-200/60 rounded-[2rem] overflow-hidden shadow-sm mt-3"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-800/60">
+      <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-200/60">
         <div className="flex items-center gap-3">
-          <Fingerprint className="w-5 h-5 text-cyan-400" />
+          <Fingerprint className="w-5 h-5 text-indigo-600" />
           <div>
-            <span className="text-base font-black text-white uppercase tracking-widest font-mono">{item.ticker}</span>
-            <span className="block text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] mt-0.5">
+            <span className="text-base font-black text-slate-800 uppercase tracking-widest font-mono">{item.ticker}</span>
+            <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-0.5">
               추적 시작: {new Date(item.addedAt).toLocaleDateString('ko-KR')}
             </span>
           </div>
         </div>
         <button
           onClick={onClose}
-          className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 hover:text-white transition-all"
+          className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-200/60 hover:bg-slate-300/60 text-slate-500 hover:text-slate-800 transition-all"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
       {/* Stat Strip */}
-      <div className="grid grid-cols-3 gap-0 border-b border-slate-800/60 divide-x divide-slate-800/60">
+      <div className="grid grid-cols-3 gap-0 border-b border-slate-200/60 divide-x divide-slate-200/60">
         {/* P&L */}
         <div className="px-5 py-4">
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">수익률 (진입 대비)</span>
+          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-1">수익률 (진입 대비)</span>
           {pnlPct !== null ? (
-            <div className={clsx('text-xl font-black font-mono', parseFloat(pnlPct) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+            <div className={clsx('text-xl font-black font-mono', parseFloat(pnlPct) >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
               {parseFloat(pnlPct) >= 0 ? '+' : ''}{pnlPct}%
             </div>
           ) : (
-            <div className="text-slate-600 text-sm font-black">--</div>
+            <div className="text-slate-400 text-sm font-bold">--</div>
           )}
         </div>
         {/* 매도 시그널 */}
         <div className="px-5 py-4">
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">Chandelier Exit</span>
+          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Chandelier Exit</span>
           {loading ? (
-            <div className="text-slate-600 text-sm font-black">--</div>
+            <div className="text-slate-400 text-sm font-bold">--</div>
           ) : isSellSignal ? (
-            <div className="flex items-center gap-1.5 text-rose-400">
+            <div className="flex items-center gap-1.5 text-rose-600">
               <AlertTriangle className="w-4 h-4" />
               <span className="text-sm font-black uppercase tracking-widest">SELL</span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-emerald-400">
+            <div className="flex items-center gap-1.5 text-emerald-600">
               <ShieldAlert className="w-4 h-4" />
               <span className="text-sm font-black uppercase tracking-widest">HOLD</span>
             </div>
@@ -194,18 +194,18 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
         </div>
         {/* DNA 일치률 */}
         <div className="px-5 py-4">
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">DNA 일치률</span>
+          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-1">DNA 일치률</span>
           <div className={clsx(
             'text-xl font-black font-mono',
-            dnaStatus === 'ALPHA_HELD' ? 'text-cyan-400' :
-            dnaStatus === 'WEAKENING'  ? 'text-amber-400' : 'text-rose-400'
+            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-600' :
+            dnaStatus === 'WEAKENING'  ? 'text-amber-600' : 'text-rose-600'
           )}>
             {dnaMatchRate}%
           </div>
           <span className={clsx(
             'text-[8px] font-black uppercase tracking-widest',
-            dnaStatus === 'ALPHA_HELD' ? 'text-cyan-500/60' :
-            dnaStatus === 'WEAKENING'  ? 'text-amber-500/60' : 'text-rose-500/60'
+            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-500/80' :
+            dnaStatus === 'WEAKENING'  ? 'text-amber-500/80' : 'text-rose-500/80'
           )}>
             {dnaStatus === 'ALPHA_HELD' ? 'Alpha Maintained' :
              dnaStatus === 'WEAKENING'  ? 'Signal Weakening' : 'Signal Lost'}
@@ -217,21 +217,21 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
       <div className="p-6">
         {loading ? (
           <div className="h-52 flex items-center justify-center">
-            <div className="text-[10px] font-black text-slate-600 uppercase tracking-[0.3em] animate-pulse">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">
               차트 데이터 로딩 중...
             </div>
           </div>
         ) : error || chartData.length === 0 ? (
           <div className="h-52 flex items-center justify-center">
-            <div className="text-[10px] font-black text-slate-700 uppercase tracking-[0.3em]">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
               데이터를 불러올 수 없습니다
             </div>
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-4 mb-4 text-[9px] font-black uppercase tracking-widest">
+            <div className="flex items-center gap-4 mb-4 text-[9px] font-bold uppercase tracking-widest">
               <div className="flex items-center gap-1.5">
-                <div className="w-3 h-0.5 bg-cyan-400 rounded" />
+                <div className="w-3 h-0.5 bg-indigo-500 rounded" />
                 <span className="text-slate-500">Price</span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -240,24 +240,24 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
               </div>
               {entryPrice && (
                 <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-0.5 bg-slate-500 rounded" />
+                  <div className="w-3 h-0.5 bg-slate-400 rounded" />
                   <span className="text-slate-500">Entry ${Number(entryPrice).toFixed(2)}</span>
                 </div>
               )}
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 9, fill: '#475569', fontWeight: 700 }}
+                  tick={{ fontSize: 9, fill: '#64748b', fontWeight: 700 }}
                   axisLine={false}
                   tickLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
                   domain={yDomain}
-                  tick={{ fontSize: 9, fill: '#475569', fontWeight: 700 }}
+                  tick={{ fontSize: 9, fill: '#64748b', fontWeight: 700 }}
                   axisLine={false}
                   tickLine={false}
                   width={52}
@@ -267,7 +267,7 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
                 {entryPrice && (
                   <ReferenceLine
                     y={entryPrice}
-                    stroke="#64748b"
+                    stroke="#cbd5e1"
                     strokeDasharray="4 4"
                     strokeWidth={1}
                   />
@@ -275,24 +275,24 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
                 <Area
                   type="monotone"
                   dataKey="price"
-                  stroke="#22d3ee"
+                  stroke="#6366f1"
                   strokeWidth={2}
-                  fill="url(#priceGrad)"
+                  fill={`url(#priceGrad-${item.ticker})`}
                   dot={false}
-                  activeDot={{ r: 4, fill: '#22d3ee' }}
+                  activeDot={{ r: 4, fill: '#6366f1' }}
                 />
                 <Line
                   type="monotone"
                   dataKey="trailingStop"
-                  stroke="#f43f5e"
+                  stroke="#ef4444"
                   strokeWidth={1.5}
                   strokeDasharray="5 3"
                   dot={false}
                 />
                 <defs>
-                  <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#22d3ee" stopOpacity={0} />
+                  <linearGradient id={`priceGrad-${item.ticker}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                   </linearGradient>
                 </defs>
               </ComposedChart>
@@ -304,26 +304,26 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
       {/* DNA 일치률 바 */}
       <div className="px-6 pb-6">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
             DNA 일치률 ({initialDna} → {currentDna})
           </span>
           <span className={clsx(
-            'text-[10px] font-black',
-            dnaStatus === 'ALPHA_HELD' ? 'text-cyan-400' :
-            dnaStatus === 'WEAKENING'  ? 'text-amber-400' : 'text-rose-400'
+            'text-[10px] font-bold',
+            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-600' :
+            dnaStatus === 'WEAKENING'  ? 'text-amber-600' : 'text-rose-600'
           )}>
             {dnaMatchRate}%
           </span>
         </div>
-        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        <div className="w-full h-1.5 bg-slate-200/60 rounded-full overflow-hidden">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${Math.min(dnaMatchRate, 100)}%` }}
             transition={{ duration: 1, ease: 'easeOut' }}
             className={clsx(
               'h-full rounded-full',
-              dnaStatus === 'ALPHA_HELD' ? 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]' :
-              dnaStatus === 'WEAKENING'  ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]' :
+              dnaStatus === 'ALPHA_HELD' ? 'bg-indigo-500' :
+              dnaStatus === 'WEAKENING'  ? 'bg-amber-500' :
               'bg-rose-500'
             )}
           />
