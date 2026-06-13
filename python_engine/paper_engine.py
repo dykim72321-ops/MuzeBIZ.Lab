@@ -24,23 +24,28 @@ PENNY_TIGHT_TS_PCT = 0.93  # Scale-Out 후 잔여 물량 TS: highest × 93% (-7%
 
 # ── [Guide-3] 슬리피지 보정 (보수적 시뮬레이션) ─────────────────────────────
 # 페니 종목은 호가 스프레드가 커서 더 높은 슬리피지 적용
-SLIPPAGE_BUY_NORMAL = 0.005   # 일반 종목 매수 슬리피지 +0.5%
+SLIPPAGE_BUY_NORMAL = 0.005  # 일반 종목 매수 슬리피지 +0.5%
 SLIPPAGE_SELL_NORMAL = 0.005  # 일반 종목 매도 슬리피지 -0.5%
-SLIPPAGE_BUY_PENNY = 0.015    # 페니 종목 매수 슬리피지 +1.5% (와이드 스프레드 반영)
-SLIPPAGE_SELL_PENNY = 0.010   # 페니 종목 매도 슬리피지 -1.0%
+SLIPPAGE_BUY_PENNY = 0.015  # 페니 종목 매수 슬리피지 +1.5% (와이드 스프레드 반영)
+SLIPPAGE_SELL_PENNY = 0.010  # 페니 종목 매도 슬리피지 -1.0%
 # 거래량이 극도로 낮은 종목은 슬리피지를 2× 가중 (유동성 패널티)
-SLIPPAGE_LOW_VOLUME_THRESHOLD = 50_000   # 주/일 거래량 기준
+SLIPPAGE_LOW_VOLUME_THRESHOLD = 50_000  # 주/일 거래량 기준
 
 
-def _apply_slippage(price: float, is_buy: bool, is_penny: bool, volume: int = 0) -> float:
+def _apply_slippage(
+    price: float, is_buy: bool, is_penny: bool, volume: int = 0
+) -> float:
     """
     체결 불리 방향으로 슬리피지를 반영한 보수적 모의 체결가 반환.
     - 매수: 시장가보다 높게 체결 (ask 쪽 스프레드)
     - 매도: 시장가보다 낮게 체결 (bid 쪽 스프레드)
     - 거래량 < SLIPPAGE_LOW_VOLUME_THRESHOLD → 슬리피지 2× 가중
     """
-    base_pct = (SLIPPAGE_BUY_PENNY if is_penny else SLIPPAGE_BUY_NORMAL) if is_buy \
-               else (SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL)
+    base_pct = (
+        (SLIPPAGE_BUY_PENNY if is_penny else SLIPPAGE_BUY_NORMAL)
+        if is_buy
+        else (SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL)
+    )
     if volume > 0 and volume < SLIPPAGE_LOW_VOLUME_THRESHOLD:
         base_pct *= 2.0
     if is_buy:
@@ -271,7 +276,9 @@ class PaperTradingManager:
                     color=0x2ECC71,
                 )
                 # 관심종목 자동 등록 (DNA≥80 매수 → HOLDING)
-                await self._sync_watchlist_buy(ticker, fill_price, ts_threshold, dna_score)
+                await self._sync_watchlist_buy(
+                    ticker, fill_price, ts_threshold, dna_score
+                )
             except Exception as e:
                 print(f"❌ Buy Error: {e}")
                 raise
@@ -310,7 +317,9 @@ class PaperTradingManager:
             if scale_trigger and not is_scaled_out and is_armed and price > entry_price:
                 sell_units = units * SCALE_OUT_RATIO
                 # [Guide-3] 매도 슬리피지 적용
-                fill_sell_price = _apply_slippage(price, is_buy=False, is_penny=is_penny)
+                fill_sell_price = _apply_slippage(
+                    price, is_buy=False, is_penny=is_penny
+                )
                 profit_cash = sell_units * fill_sell_price
 
                 # 가상 계좌 업데이트 (cash_available만 갱신 — total_assets는 /api/broker/paper/account에서
@@ -345,7 +354,9 @@ class PaperTradingManager:
                 )
 
                 slip_sell_pct = (fill_sell_price / price - 1) * 100
-                price_str = f"${fill_sell_price:.4f}" if is_penny else f"${fill_sell_price:.2f}"
+                price_str = (
+                    f"${fill_sell_price:.4f}" if is_penny else f"${fill_sell_price:.2f}"
+                )
                 ts_desc = (
                     f"-7% TS ${new_ts_val:.4f}"
                     if is_penny
@@ -364,7 +375,9 @@ class PaperTradingManager:
             # C. TRAILING STOP 체크 (ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)
             if price < ts_threshold:
                 # [Guide-3] 손절 매도 슬리피지 적용 (패닉 셀 상황 → 불리한 체결)
-                fill_exit_price = _apply_slippage(price, is_buy=False, is_penny=is_penny)
+                fill_exit_price = _apply_slippage(
+                    price, is_buy=False, is_penny=is_penny
+                )
                 profit_cash = units * fill_exit_price
                 pnl_pct = (fill_exit_price / entry_price - 1) * 100
                 profit_amt = (fill_exit_price - entry_price) * units

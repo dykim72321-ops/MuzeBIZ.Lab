@@ -1216,7 +1216,9 @@ async def validate_candidates(
             df["Deviation"] = (df["Close"] - df["MA5"]) / df["MA5"]
 
             # 3. RVOL (상대 거래량, 당일 제외 20일 median 기준)
-            df["Vol_Avg"] = df["Volume"].shift(1).rolling(window=20, min_periods=1).median()
+            df["Vol_Avg"] = (
+                df["Volume"].shift(1).rolling(window=20, min_periods=1).median()
+            )
             df["RVOL"] = df["Volume"] / (df["Vol_Avg"] + 1e-9)
 
             latest = df.iloc[-1]
@@ -2001,38 +2003,58 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     day_open = df.groupby(_dates)["Open"].transform("first")
 
     ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
-    df["Is_Extended"] = (df["Close"] > day_open * 1.25) | (
-        df["Close"] > df["Close"].shift(1) * 1.25
-    ) | (df["Close"] > ma20 * 1.30)
+    df["Is_Extended"] = (
+        (df["Close"] > day_open * 1.25)
+        | (df["Close"] > df["Close"].shift(1) * 1.25)
+        | (df["Close"] > ma20 * 1.30)
+    )
 
     # 6. DNA Score 벡터 연산 및 Strong_Buy / Strong_Sell 통합
     score = pd.Series(50.0, index=df.index)
 
     # RSI scoring (RVOL 돌파 시 패널티 면제 포함)
-    score += np.where(df["RSI"] < 30, 20,
-             np.where(df["RSI"] < 45, 15,
-             np.where(df["RSI"] < 55, 0,
-             np.where(df["RSI"] < 65, np.where(df["RVOL"] >= 3.0, 0, -10),
-                                      np.where(df["RVOL"] >= 3.0, 0, -20)))))
+    score += np.where(
+        df["RSI"] < 30,
+        20,
+        np.where(
+            df["RSI"] < 45,
+            15,
+            np.where(
+                df["RSI"] < 55,
+                0,
+                np.where(
+                    df["RSI"] < 65,
+                    np.where(df["RVOL"] >= 3.0, 0, -10),
+                    np.where(df["RVOL"] >= 3.0, 0, -20),
+                ),
+            ),
+        ),
+    )
 
     # MACD scoring (기울기 판정)
     macd_diff = df["MACD_Diff"]
     macd_diff_prev = df["MACD_Diff"].shift(1).fillna(0.0)
     is_golden = (macd_diff > 0) & (macd_diff_prev <= 0)
     is_dead = (macd_diff < 0) & (macd_diff_prev >= 0)
-    score += np.where(is_golden, 20,
-             np.where(is_dead, -20,
-             np.where(macd_diff > macd_diff_prev, 8, -8)))
+    score += np.where(
+        is_golden,
+        20,
+        np.where(is_dead, -20, np.where(macd_diff > macd_diff_prev, 8, -8)),
+    )
 
     # ADX scoring
-    score += np.where(df["ADX"] > 25, 10,
-             np.where(df["ADX"] > 20, 5, 0))
+    score += np.where(df["ADX"] > 25, 10, np.where(df["ADX"] > 20, 5, 0))
 
     # RVOL scoring
-    score += np.where(df["RVOL"] > 5.0, 15,
-             np.where(df["RVOL"] > 3.0, 10,
-             np.where(df["RVOL"] > 2.0, 5,
-             np.where(df["RVOL"] < 1.0, -5, 0))))
+    score += np.where(
+        df["RVOL"] > 5.0,
+        15,
+        np.where(
+            df["RVOL"] > 3.0,
+            10,
+            np.where(df["RVOL"] > 2.0, 5, np.where(df["RVOL"] < 1.0, -5, 0)),
+        ),
+    )
 
     # Extended scoring
     score -= np.where(df["Is_Extended"], 25, 0)
@@ -2374,6 +2396,7 @@ async def run_penny_scan_internal(
             if supabase:
                 try:
                     from datetime import timedelta
+
                     cutoff = (datetime.now() - timedelta(days=30)).isoformat()
                     pool_res = await asyncio.to_thread(
                         supabase.table("penny_universe_pool")
@@ -2385,7 +2408,9 @@ async def run_penny_scan_internal(
                     )
                     if pool_res.data:
                         pool_tickers = [r["ticker"] for r in pool_res.data]
-                        print(f"📦 [Penny Pool] Loaded {len(pool_tickers)} tickers from accumulated pool")
+                        print(
+                            f"📦 [Penny Pool] Loaded {len(pool_tickers)} tickers from accumulated pool"
+                        )
                 except Exception as pool_err:
                     print(f"⚠️ [Penny Pool] Pool fetch skipped: {pool_err}")
 
@@ -2399,7 +2424,9 @@ async def run_penny_scan_internal(
                 min(500, len(tradable)),
             )
             sampled = fresh_sample + pool_tickers
-            print(f"🔀 [Penny] Universe mix: {len(fresh_sample)} fresh + {len(pool_tickers)} pool = {len(sampled)} total")
+            print(
+                f"🔀 [Penny] Universe mix: {len(fresh_sample)} fresh + {len(pool_tickers)} pool = {len(sampled)} total"
+            )
 
             batch_size = 50
             for i in range(0, len(sampled), batch_size):
@@ -2490,7 +2517,9 @@ async def run_penny_scan_internal(
                 )
                 .execute
             )
-            print(f"✅ [Penny Pool] UPSERT {len(penny_tickers)} tickers → penny_universe_pool")
+            print(
+                f"✅ [Penny Pool] UPSERT {len(penny_tickers)} tickers → penny_universe_pool"
+            )
         except Exception as upsert_err:
             print(f"⚠️ [Penny Pool] UPSERT skipped: {upsert_err}")
 
@@ -2521,14 +2550,18 @@ async def run_penny_scan_internal(
             df["ADX"] = adx_ind.adx()
 
             # RVOL (30일 median 대비 현재, self-dilution 방지를 위해 shift(1))
-            df["Avg_Vol"] = df["Volume"].shift(1).rolling(window=30, min_periods=1).median()
+            df["Avg_Vol"] = (
+                df["Volume"].shift(1).rolling(window=30, min_periods=1).median()
+            )
             df["RVOL"] = df["Volume"] / (df["Avg_Vol"] + 1e-9)
 
             # 추격 매수 방지 (25% 및 20일 이평선 이격도)
             ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
-            df["Is_Extended"] = (df["Close"] > df["Open"] * 1.25) | (
-                df["Close"] > df["Close"].shift(1) * 1.25
-            ) | (df["Close"] > ma20 * 1.30)
+            df["Is_Extended"] = (
+                (df["Close"] > df["Open"] * 1.25)
+                | (df["Close"] > df["Close"].shift(1) * 1.25)
+                | (df["Close"] > ma20 * 1.30)
+            )
 
             latest = df.iloc[-1]
             prev = df.iloc[-2] if len(df) >= 2 else latest
@@ -2797,14 +2830,16 @@ async def on_minute_bar_closed(bar):
         if ticker_symbol in _held_tickers and paper_engine:
             rsi_val = await asyncio.to_thread(_rsi14_last, df_hist)
             # WebSocket 프론트엔드에도 최소 페이로드 전송 (현재가 + RSI)
-            await manager.broadcast({
-                "ticker": ticker_symbol,
-                "price": current_price,
-                "rsi": round(rsi_val, 2),
-                "signal": "HOLD",
-                "strength": "MONITOR",
-                "dna_score": None,
-            })
+            await manager.broadcast(
+                {
+                    "ticker": ticker_symbol,
+                    "price": current_price,
+                    "rsi": round(rsi_val, 2),
+                    "signal": "HOLD",
+                    "strength": "MONITOR",
+                    "dna_score": None,
+                }
+            )
             await paper_engine.process_signal(
                 ticker=ticker_symbol,
                 price=current_price,
@@ -3161,7 +3196,9 @@ async def run_startup_sequence():
             if held_res.data:
                 for row in held_res.data:
                     _held_tickers.add(row["ticker"])
-                print(f"📌 [Guide-2] Restored {len(_held_tickers)} HOLD tickers to monitor set: {sorted(_held_tickers)}")
+                print(
+                    f"📌 [Guide-2] Restored {len(_held_tickers)} HOLD tickers to monitor set: {sorted(_held_tickers)}"
+                )
         except Exception as e:
             print(f"⚠️ [Guide-2] Could not restore held tickers: {e}")
 
