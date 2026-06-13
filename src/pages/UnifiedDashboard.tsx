@@ -235,7 +235,7 @@ export const UnifiedDashboard = () => {
           description: nextState ? '자동 매매가 활성화되었습니다.' : '시스템이 안전 관제 모드로 전환되었습니다.'
         });
       }
-    } catch (error) {
+    } catch {
       toast.error('ARM 상태 변경 실패', { id: toastId });
     }
   };
@@ -255,7 +255,7 @@ export const UnifiedDashboard = () => {
             } else {
               toast.error(result?.error || '청산 실패', { id: toastId });
             }
-          } catch (error) {
+          } catch {
             toast.error('청산 에러', { id: toastId });
           }
         }
@@ -268,7 +268,7 @@ export const UnifiedDashboard = () => {
       await removeFromWatchlist(ticker);
       toast.success(`${ticker} 관심종목 제거 완료`);
       loadDashboardData();
-    } catch (e) {
+    } catch {
       toast.error('관심종목 제거 실패');
     }
   };
