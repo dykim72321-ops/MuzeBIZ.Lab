@@ -201,9 +201,9 @@ export const CommandSettings: React.FC = () => {
                   min="50" max="100"
                   value={dnaThreshold}
                   onChange={(e) => setDnaThreshold(Number(e.target.value))}
-                  className="flex-1 accent-[#0176d3]"
+                  className="flex-1 accent-indigo-600"
                 />
-                <span className={`text-lg font-black w-12 text-right ${dnaThreshold >= 85 ? 'text-rose-600' : 'text-[#0176d3]'}`}>
+                <span className={`text-lg font-black w-12 text-right ${dnaThreshold >= 85 ? 'text-rose-600' : 'text-indigo-600'}`}>
                   {dnaThreshold}
                 </span>
               </div>
@@ -217,7 +217,7 @@ export const CommandSettings: React.FC = () => {
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
                 placeholder="https://discord.com/api/webhooks/..."
-                className="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0176d3]/20 focus:border-[#0176d3] transition-all"
+                className="w-full text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
               />
             </div>
           </div>
@@ -250,7 +250,7 @@ export const CommandSettings: React.FC = () => {
           <button
             onClick={handleSaveSettings}
             disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2.5 bg-[#0176d3] text-white rounded-lg text-xs font-black uppercase tracking-wider hover:bg-[#015ba3] transition-colors disabled:opacity-50 shadow-sm shadow-[#0176d3]/30"
+            className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-lg text-xs font-black uppercase tracking-wider hover:bg-indigo-700 transition-colors disabled:opacity-50 shadow-sm shadow-indigo-500/30"
           >
             <Save className="w-4 h-4" />
             {isSaving ? 'Saving Matrix...' : 'Save Configuration'}

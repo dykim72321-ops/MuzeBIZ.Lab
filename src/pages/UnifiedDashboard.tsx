@@ -418,6 +418,22 @@ export const UnifiedDashboard = () => {
           </div>
         </div>
 
+        {/* 💡 SYSTEM STATUS INFO BAR */}
+        <div className="bg-indigo-50/50 border border-indigo-100/50 rounded-[1.5rem] p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-2.5 text-indigo-950 font-bold">
+            <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)] shrink-0" />
+            <span className="shrink-0 font-extrabold text-[10px] uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">시스템 가이드</span>
+            <span className="text-slate-600 font-medium">
+              {isArmed 
+                ? '자동 매매 활성(ARMED) 모드입니다. 관심 종목 중 퀀트 매수 지표 조건 충족 시 실시간 자동 매수가 구동됩니다.' 
+                : '현재 안전 관제(SAFE) 모드입니다. 실시간 탐색 및 알림은 유지되나 가상 주문은 실행되지 않습니다.'}
+            </span>
+          </div>
+          <div className="text-[10px] text-slate-400 font-bold md:text-right shrink-0">
+            * 페니 주식(진입가 $1.0 이하) 매수 시 -15% 손절선 및 익절 분할매도 상태머신이 자동 작동합니다.
+          </div>
+        </div>
+
         {/* ════════ METRICS GRID ════════ */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
@@ -425,6 +441,7 @@ export const UnifiedDashboard = () => {
               label: '총 자산 가치 (Total Assets)',
               value: pennyAccount ? `$${(pennyAccount.total_assets ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$100,000.00',
               sub: '현금 + 포지션 평가액',
+              info: '가상 예수금과 보유 주식 평가 가치를 합산한 실시간 포트폴리오 평가 총액입니다.',
               icon: BarChart3,
               color: 'text-indigo-600 bg-indigo-50 border-indigo-100'
             },
@@ -432,6 +449,7 @@ export const UnifiedDashboard = () => {
               label: '가용 주문 잔고 (Available Cash)',
               value: pennyAccount ? `$${(pennyAccount.cash_available ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$100,000.00',
               sub: '가상 매수 가능 예치금',
+              info: '새로운 퀀트 종목 시그널 매치 시 즉시 투입할 수 있는 미결제 현금 잔고입니다.',
               icon: Coins,
               color: 'text-cyan-600 bg-cyan-50 border-cyan-100'
             },
@@ -439,6 +457,7 @@ export const UnifiedDashboard = () => {
               label: '진행중 포지션 평가손익 (Current P&L)',
               value: `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
               sub: '현재 보유 종목의 미실현 손익',
+              info: '보유 중인 미청산 가상 주식들의 평균 매수가 대비 현재 평가손익 합계입니다.',
               icon: totalPnl >= 0 ? TrendingUp : TrendingDown,
               color: totalPnl >= 0 ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-rose-600 bg-rose-50 border-rose-100'
             },
@@ -446,19 +465,23 @@ export const UnifiedDashboard = () => {
               label: '백테스트 엔진 승률 (Win Rate)',
               value: statsLoading ? 'Loading...' : strategyStats ? `${strategyStats.win_rate.toFixed(1)}%` : '68.7%',
               sub: statsLoading ? '연산 중...' : `Profit Factor: ${strategyStats ? strategyStats.profit_factor.toFixed(2) : '1.14'}x`,
+              info: '과거 거래 데이터 기반 시뮬레이션 및 백테스트의 종합 승률 및 이익 지수입니다.',
               icon: Star,
               color: 'text-amber-600 bg-amber-50 border-amber-100'
             }
           ].map((metric, i) => (
-            <div key={i} className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xl shadow-slate-100/40 flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none block">{metric.label}</span>
-                <span className="text-2xl font-black text-slate-900 leading-none tabular-nums block">{metric.value}</span>
-                <span className="text-[10px] text-slate-500 font-medium leading-none block pt-1">{metric.sub}</span>
+            <div key={i} className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xl shadow-slate-100/40 flex flex-col justify-between min-h-[140px]">
+              <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none block">{metric.label}</span>
+                  <span className="text-2xl font-black text-slate-900 leading-none tabular-nums block">{metric.value}</span>
+                  <span className="text-[10px] text-slate-500 font-bold leading-none block pt-1">{metric.sub}</span>
+                </div>
+                <div className={clsx("p-2.5 rounded-xl border shrink-0", metric.color)}>
+                  <metric.icon className="w-4 h-4" />
+                </div>
               </div>
-              <div className={clsx("p-3.5 rounded-xl border", metric.color)}>
-                <metric.icon className="w-5 h-5" />
-              </div>
+              <p className="text-[9px] text-slate-400 font-medium leading-normal border-t border-slate-50 pt-2 mt-2">{metric.info}</p>
             </div>
           ))}
         </div>
@@ -475,6 +498,7 @@ export const UnifiedDashboard = () => {
                 <div>
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Asset & Profit Metrics</span>
                   <h2 className="text-base font-black text-slate-800">포트폴리오 자산 성장 및 누적 손익 곡선</h2>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">실시간 청산 완료된 거래 내역에 기반한 가상 자산의 누적 성장 흐름을 시각화합니다.</p>
                 </div>
                 <div className="flex items-center gap-4 text-[10px] text-slate-500 font-bold">
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500" /> 가상 자산 평가액</span>
@@ -523,8 +547,9 @@ export const UnifiedDashboard = () => {
                 <div>
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Top Quantitative Picks</span>
                   <h2 className="text-base font-black text-slate-800">퀀트 엔진 추천 & 오늘의 알파 종목</h2>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">수학적 기술 지표 분석으로 엄선된 매수 후보 종목입니다. 클릭 시 상세 지표(RSI/ADX/RVOL)가 노출됩니다.</p>
                 </div>
-                <span className="text-[10px] font-black bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100">
+                <span className="text-[10px] font-black bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 shrink-0">
                   DNA 80점 이상 엄선
                 </span>
               </div>
@@ -595,6 +620,7 @@ export const UnifiedDashboard = () => {
               <div>
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Combined Tracking Orbit</span>
                 <h2 className="text-base font-black text-slate-800">통합 관심종목 오빗</h2>
+                <p className="text-[10px] text-slate-400 font-medium mt-0.5">실시간 시그널 매칭을 감시 중인 종목군입니다. ($1.5 이하는 [페니] 배지 부착)</p>
               </div>
               <div className="relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -727,8 +753,9 @@ export const UnifiedDashboard = () => {
               <div>
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Active Positions</span>
                 <h2 className="text-base font-black text-slate-800">현재 보유 중인 매수 포지션</h2>
+                <p className="text-[10px] text-slate-400 font-medium mt-0.5">실시간 매수가 완료되어 운용 중인 가상 주식 자산입니다. 트레일링 스탑에 도달하거나 우측 청산 클릭 시 즉시 전량 매도됩니다.</p>
               </div>
-              <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg">
+              <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg shrink-0">
                 {pennyPositions.length}개 보유 중
               </span>
             </div>
@@ -787,9 +814,9 @@ export const UnifiedDashboard = () => {
                           <td className="py-4 text-right">
                             <button
                               onClick={() => handleClosePosition(pos.ticker)}
-                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-500 border border-rose-200 text-rose-600 hover:text-white text-[9px] font-black rounded-lg transition-all uppercase tracking-widest"
+                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-600 border border-rose-200 text-rose-600 hover:text-white text-[10px] font-bold rounded-lg transition-all"
                             >
-                              Close
+                              즉시 청산
                             </button>
                           </td>
                         </tr>
@@ -804,9 +831,12 @@ export const UnifiedDashboard = () => {
           {/* RIGHT 1/3 COLUMN: Trade History */}
           <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-slate-400" />
-                <h2 className="text-base font-black text-slate-800">최근 청산 이력</h2>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-slate-400" />
+                  <h2 className="text-base font-black text-slate-800">최근 청산 이력</h2>
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium mt-0.5">매도가 완료되어 최종 손익금과 사유가 확정된 거래 내역입니다.</p>
               </div>
               <span className="text-[10px] font-bold text-slate-500">{pennyHistory.length}건 기록</span>
             </div>

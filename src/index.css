@@ -42,14 +42,14 @@
 
 @layer base {
   body {
-    /* Abyss Dark Theme Base - Lightened for better contrast */
-    @apply bg-slate-900 text-slate-100 antialiased font-sans overflow-x-hidden
-      w-full m-0 selection:bg-blue-800/40 selection:text-blue-100;
+    /* Light Slate Theme Base */
+    @apply bg-slate-50 text-slate-800 antialiased font-sans overflow-x-hidden
+      w-full m-0 selection:bg-indigo-100 selection:text-indigo-900;
   }
 
   /* Enterprise Typography Improvement */
   h1, h2, h3, h4 {
-    @apply font-bold tracking-tight text-white;
+    @apply font-bold tracking-tight text-slate-950;
   }
 
   .tabular-nums {
@@ -58,40 +58,40 @@
 }
 
 @layer components {
-  /* Dark Glass Input */
+  /* Light Glass Input */
   .sfdc-input {
-    @apply w-full bg-slate-900/50 border border-slate-700 rounded-md px-3 py-2 text-sm
-      text-slate-100 transition-all outline-none focus:border-blue-500
-      focus:ring-2 focus:ring-blue-500/20 placeholder:text-slate-500;
+    @apply w-full bg-white/80 border border-slate-200 rounded-md px-3 py-2 text-sm
+      text-slate-800 transition-all outline-none focus:border-indigo-500
+      focus:ring-2 focus:ring-indigo-500/20 placeholder:text-slate-400;
   }
 
   .sfdc-label {
-    @apply block text-sm font-semibold text-slate-300 mb-1.5;
+    @apply block text-sm font-semibold text-slate-700 mb-1.5;
   }
 
   /* Neon Primary Button */
   .sfdc-button-primary {
-    @apply px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md
-      transition-all text-sm font-bold shadow-[0_0_15px_rgba(37,99,235,0.4)]
+    @apply px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md
+      transition-all text-sm font-bold shadow-md hover:shadow-lg
       active:scale-95 disabled:opacity-50 disabled:pointer-events-none;
   }
 
-  /* Dark Secondary Button */
+  /* Light Secondary Button */
   .sfdc-button-secondary {
-    @apply px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border
-      border-slate-600 rounded-md transition-all text-sm font-bold shadow-sm
+    @apply px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border
+      border-slate-200 rounded-md transition-all text-sm font-bold shadow-sm
       active:scale-95;
   }
 
-  /* Deep Dark Card Base */
+  /* Light Card Base */
   .sfdc-card {
-    @apply bg-slate-800/60 backdrop-blur-md border border-slate-700/60 rounded-lg shadow-xl overflow-hidden
-      transition-all hover:border-slate-600;
+    @apply bg-white border border-slate-200/80 rounded-lg shadow-sm overflow-hidden
+      transition-all hover:border-slate-300;
   }
 
   .sfdc-card-header {
-    @apply p-4 border-b border-slate-700/60 bg-slate-800/80 flex items-center
-      justify-between text-slate-100;
+    @apply p-4 border-b border-slate-200/80 bg-slate-50/50 flex items-center
+      justify-between text-slate-800;
   }
 
   /* Terminal Mono Font */
@@ -110,64 +110,64 @@
     scrollbar-width: none;
   }
 
-  /* Neo-Glassmorphism Panels */
+  /* Neo-Glassmorphism Panels (Light Theme) */
   .glass-panel {
-    background: rgba(15, 23, 42, 0.4);
+    background: rgba(255, 255, 255, 0.7);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
-    border-right: 1px solid rgba(255, 255, 255, 0.04);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    @apply shadow-2xl;
+    border-top: 1px solid rgba(255, 255, 255, 0.5);
+    border-left: 1px solid rgba(255, 255, 255, 0.5);
+    border-right: 1px solid rgba(0, 0, 0, 0.02);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.02);
+    @apply shadow-lg;
   }
 
   .glass-panel-hover {
-    background: rgba(15, 23, 42, 0.4);
+    background: rgba(255, 255, 255, 0.7);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
-    border-right: 1px solid rgba(255, 255, 255, 0.04);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    @apply shadow-2xl transition-all duration-200;
+    border-top: 1px solid rgba(255, 255, 255, 0.5);
+    border-left: 1px solid rgba(255, 255, 255, 0.5);
+    border-right: 1px solid rgba(0, 0, 0, 0.02);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.02);
+    @apply shadow-lg transition-all duration-200;
   }
   .glass-panel-hover:hover {
-    background: rgba(15, 23, 42, 0.55);
-    border-top-color: rgba(255, 255, 255, 0.14);
-    border-left-color: rgba(255, 255, 255, 0.14);
-    @apply shadow-[0_8px_32px_rgba(0,0,0,0.4)];
+    background: rgba(255, 255, 255, 0.85);
+    border-top-color: rgba(255, 255, 255, 0.8);
+    border-left-color: rgba(255, 255, 255, 0.8);
+    @apply shadow-xl;
   }
 
   .glass-card {
-    @apply bg-slate-800/50 backdrop-blur-md border border-slate-700/50 shadow-lg;
+    @apply bg-white/80 backdrop-blur-md border border-slate-200/50 shadow-lg shadow-slate-100/50;
   }
 
   .neon-glow-primary {
-    box-shadow: 0 0 20px rgba(37, 99, 235, 0.15);
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
   }
 
   /* Interactive Elements / Neon Glows */
   .neon-glow-blue {
-    @apply shadow-[0_0_20px_rgba(59,130,246,0.3)] border-blue-500/40 transition-all duration-300;
+    @apply shadow-[0_0_20px_rgba(99,102,241,0.1)] border-indigo-500/20 transition-all duration-300;
   }
   .neon-glow-blue:hover {
-    @apply shadow-[0_0_30px_rgba(59,130,246,0.5)] border-blue-400/60 scale-[1.01];
+    @apply shadow-[0_0_30px_rgba(99,102,241,0.2)] border-indigo-400/40 scale-[1.01];
   }
 
   /* Signal Timelines */
   .signal-buy {
-    @apply shadow-[0_0_15px_rgba(16,185,129,0.3)] border-emerald-500/40;
+    @apply shadow-[0_0_15px_rgba(16,185,129,0.15)] border-emerald-500/30;
   }
   .signal-sell {
-    @apply shadow-[0_0_15px_rgba(244,63,94,0.3)] border-rose-500/40;
+    @apply shadow-[0_0_15px_rgba(244,63,94,0.15)] border-rose-500/30;
   }
 }
 
-/* Scrollbar Custom (Dark Theme) */
+/* Scrollbar Custom (Light Theme) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #334155 transparent;
+  scrollbar-color: #cbd5e1 transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -177,11 +177,11 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #cbd5e1;
   border-radius: 10px;
   border: 1px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #94a3b8;
 }
