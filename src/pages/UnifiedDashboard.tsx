@@ -1,8 +1,15 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import { toast } from 'sonner';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid
+} from 'recharts';
 
 import {
   Zap,
@@ -10,62 +17,58 @@ import {
   X,
   Search,
   Coins,
-  LayoutDashboard,
-  Scan,
   Star,
   Activity,
-  RefreshCw,
   CheckCircle,
   XCircle,
-  ShieldAlert,
   BarChart3,
-  Clock
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  Trash2,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 // Hooks & Services
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { useStrategyStats } from '../hooks/useStrategyStats';
-import { getWatchlist, addToWatchlist, type WatchlistItem } from '../services/watchlistService';
-import { fetchMultipleStocksOptimized, getTopStocks } from '../services/stockService';
+import { getWatchlist, addToWatchlist, removeFromWatchlist, type WatchlistItem } from '../services/watchlistService';
+import { fetchMultipleStocksOptimized } from '../services/stockService';
 import { processSignal } from '../utils/signalProcessor';
 import { supabase as supabaseClient } from '../lib/supabase';
-import { calculateDNATargets } from '../utils/dnaMath';
-import { scanPennyStocks, type PennyScanResponse } from '../services/pennyService';
 import {
+  fetchBrokerStatus,
+  toggleSystemArm,
   fetchPaperAccount,
   fetchPaperPositions,
   fetchPaperHistory,
-  sellPaperPosition
+  sellPaperPosition,
+  fetchPennyScanStatus,
+  type PennyScanStatus
 } from '../services/pythonApiService';
 
 // Components
 import { CommandSettings } from '../components/dashboard/CommandSettings';
-import { StrategicSignalMatrix } from '../components/dashboard/StrategicSignalMatrix';
-import { AlphaDiscoverySection } from '../components/dashboard/AlphaDiscoverySection';
-import { MonitoringOrbit } from '../components/dashboard/MonitoringOrbit';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
-import { LiveExecutionCenter } from '../components/dashboard/LiveExecutionCenter';
-import { PerformanceSummary } from '../components/dashboard/PerformanceSummary';
-
-// Scanner Components
-import { ScannerControls } from '../components/scanner/ScannerControls';
-import { ScannerTopFive } from '../components/scanner/ScannerTopFive';
-import { ScannerAssetList } from '../components/scanner/ScannerAssetList';
-
-// Penny Components
-import { PennyStockCard } from '../components/penny/PennyStockCard';
 import { PennyQuantScoreBar } from '../components/penny/PennyQuantScoreBar';
-import type { Stock } from '../types';
+
+interface DashboardWatchlistItem extends WatchlistItem {
+  currentPrice: number;
+  changePercent: number;
+  isPenny: boolean;
+}
+
+// Current-price tolerance for penny display: stocks that entered ≤$1 can rise above $1,
+// so we treat anything ≤ this threshold as "penny" for UI purposes.
+const PENNY_DISPLAY_THRESHOLD = 1.5;
 
 export const UnifiedDashboard = () => {
-  const { pulseMap } = useMarketEngine();
-  const { data: strategyStats } = useStrategyStats();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'command';
+  const { isHunting, triggerHunt } = useMarketEngine();
+  const { data: strategyStats, isLoading: statsLoading } = useStrategyStats();
 
-  // 1. General States
-  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
-  const [watchlistStocks, setWatchlistStocks] = useState<any[]>([]);
+  // 1. Data States
+  const [watchlistItems, setWatchlistItems] = useState<DashboardWatchlistItem[]>([]);
   const [discoveryStocks, setDiscoveryStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [terminalData, setTerminalData] = useState<any | null>(null);
@@ -73,27 +76,15 @@ export const UnifiedDashboard = () => {
   const [isMarketOpen, setIsMarketOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // 2. Scanner States
-  const [scannerStocks, setScannerStocks] = useState<Stock[]>([]);
-  const [scannerLoading, setScannerLoading] = useState(true);
-  const [scannerSearchTerm, setScannerSearchTerm] = useState('');
-  const [scannerViewMode, setScannerViewMode] = useState<'table' | 'grid'>('table');
-  const [minDna, setMinDna] = useState(0);
-  const [selectedSector, setSelectedSector] = useState('All');
-  const [selectedRisk, setSelectedRisk] = useState('All');
-  const [sortBy, setSortBy] = useState<'dna' | 'price' | 'change'>('dna');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [isHistorical, setIsHistorical] = useState(false);
+  // 2. Action States
+  const [isArmed, setIsArmed] = useState(false);
+  const [pennyScanStatus, setPennyScanStatus] = useState<PennyScanStatus | null>(null);
+  const [watchlistSearchTerm, setWatchlistSearchTerm] = useState('');
 
-  // 3. Penny Sandbox States
-  const [pennyScanData, setPennyScanData] = useState<PennyScanResponse | null>(null);
-  const [pennyWatchlistItems, setPennyWatchlistItems] = useState<WatchlistItem[]>([]);
+  // 3. Trade & Account States
   const [pennyPositions, setPennyPositions] = useState<any[]>([]);
   const [pennyHistory, setPennyHistory] = useState<any[]>([]);
   const [pennyAccount, setPennyAccount] = useState<any>(null);
-  const [pennyScanning, setPennyScanning] = useState(false);
-  const [pennyLoadingData, setPennyLoadingData] = useState(true);
-  const [pennyActiveSection, setPennyActiveSection] = useState<'scan' | 'watchlist' | 'positions' | 'history'>('scan');
 
   // US 시장 개장 여부 체크 (ET 기준 평일 09:30~16:00)
   useEffect(() => {
@@ -115,109 +106,84 @@ export const UnifiedDashboard = () => {
     return () => clearInterval(id);
   }, []);
 
-  // ── Load Command Center Data ──────────────────────────────────────────
-  const loadCommandData = useCallback(async () => {
-    setLoading(true);
+  // ── Load ARM Status ──────────────────────────────────────────────────
+  const loadArmStatus = useCallback(async () => {
     try {
-      const items = await getWatchlist();
-      setWatchlistItems(items);
-      
-      const [watchlistData, discoveryResult] = await Promise.all([
-        items.length > 0 ? fetchMultipleStocksOptimized(items.map(i => i.ticker)) : Promise.resolve([]),
+      const status = await fetchBrokerStatus();
+      if (status && typeof status.is_armed === 'boolean') {
+        setIsArmed(status.is_armed);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch broker status:', e);
+    }
+  }, []);
+
+  // ── Load All Data ─────────────────────────────────────────────────────
+  const loadDashboardData = useCallback(async () => {
+    try {
+      const [wl, pp, ph, pa, discoveryResult, scanStatus] = await Promise.all([
+        getWatchlist(),
+        fetchPaperPositions(),
+        fetchPaperHistory(),
+        fetchPaperAccount(),
         supabaseClient
           .from('daily_discovery')
           .select('*')
           .gte('updated_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
           .order('dna_score', { ascending: false })
-          .limit(15),
+          .limit(8),
+        fetchPennyScanStatus(),
       ]);
+      if (scanStatus) setPennyScanStatus(scanStatus);
 
-      if (discoveryResult.error) console.error('Discovery fetch error:', discoveryResult.error);
+      // Fetch current prices of watchlist items to identify penny stocks accurately
+      const wlStocks = wl.length > 0 ? await fetchMultipleStocksOptimized(wl.map(i => i.ticker)) : [];
 
-      setWatchlistStocks(watchlistData);
+      const normalizedWatchlist = wl.map(item => {
+        const stockInfo = wlStocks.find(s => s.ticker === item.ticker);
+        const price = stockInfo?.price ?? item.buyPrice ?? 0;
+        return {
+          ...item,
+          currentPrice: price,
+          changePercent: stockInfo?.changePercent ?? 0,
+          isPenny: price <= PENNY_DISPLAY_THRESHOLD
+        };
+      });
+
+      setWatchlistItems(normalizedWatchlist);
       setDiscoveryStocks(discoveryResult.data || []);
+      
+      setPennyPositions(
+        pp.map((pos: any) => ({
+          ...pos,
+          unrealized_pl: (pos.current_price - pos.entry_price) * pos.units,
+          unrealized_plpc: ((pos.current_price / pos.entry_price) - 1) * 100,
+          isPenny: pos.entry_price <= 1.0
+        }))
+      );
+      setPennyHistory(ph || []);
+      setPennyAccount(pa);
       setLastFetchedTime(new Date().toISOString().substring(11, 19));
     } catch (err) {
-      console.error('Failed to load unified data:', err);
+      console.error('Failed to load dashboard data:', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'command') {
-      loadCommandData();
-      const interval = setInterval(loadCommandData, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [activeTab, loadCommandData]);
-
-  // ── Load Scanner Data ─────────────────────────────────────────────────
-  const fetchScannerStocks = useCallback(async () => {
-    try {
-      setScannerLoading(true);
-      const data = await getTopStocks(isHistorical);
-      setScannerStocks(data);
-    } catch (err) {
-      console.error('Failed to fetch scanner stocks:', err);
-    } finally {
-      setScannerLoading(false);
-    }
-  }, [isHistorical]);
-
-  useEffect(() => {
-    if (activeTab === 'scanner') {
-      fetchScannerStocks();
-    }
-  }, [activeTab, fetchScannerStocks]);
-
-  // ── Load Penny Sandbox Data ───────────────────────────────────────────
-  const loadPennySideData = useCallback(async () => {
-    try {
-      const [wl, pp, ph, pa] = await Promise.all([
-        getWatchlist(),
-        fetchPaperPositions(),
-        fetchPaperHistory(),
-        fetchPaperAccount(),
-      ]);
-
-      // 페니 판별: 백엔드(paper_engine)와 동일하게 진입가(buyPrice) 기준으로만 필터
-      const pennyWl = wl.filter(item => item.buyPrice !== undefined && item.buyPrice <= 1.0);
-
-      setPennyWatchlistItems(pennyWl);
-      setPennyPositions(
-        pp
-          .filter((pos: any) => pos.entry_price > 0 && pos.entry_price <= 1.0)
-          .map((pos: any) => {
-            const cp = pos.current_price > 0 ? pos.current_price : undefined;
-            return {
-              ...pos,
-              unrealized_pl: cp !== undefined ? (cp - pos.entry_price) * pos.units : undefined,
-              unrealized_plpc: cp !== undefined ? (cp / pos.entry_price - 1) * 100 : undefined,
-            };
-          })
-      );
-      setPennyHistory(ph);
-      setPennyAccount(pa);
-    } catch (e) {
-      console.error('[PennyDash] Side data error:', e);
-    } finally {
-      setPennyLoadingData(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === 'penny') {
-      loadPennySideData();
-      const interval = setInterval(loadPennySideData, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [activeTab, loadPennySideData]);
+    loadDashboardData();
+    loadArmStatus();
+    const interval = setInterval(() => {
+      loadDashboardData();
+      loadArmStatus();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [loadDashboardData, loadArmStatus]);
 
   // ── Handlers ─────────────────────────────────────────────────────────
   const handleDeepDive = (stock: any) => {
     const displaySignal = processSignal(stock);
-    const cache = (stock as { stock_analysis_cache?: Array<{ analysis: any }> }).stock_analysis_cache?.[0]?.analysis;
     const rawSummary = stock.rawAiSummary || "";
 
     let quantData: any = null;
@@ -236,7 +202,7 @@ export const UnifiedDashboard = () => {
       dnaScore: stock.dna_score || stock.dnaScore || 0,
       bullPoints: displaySignal.bullPoints,
       bearPoints: displaySignal.bearPoints,
-      riskLevel: cache?.riskLevel || ((stock.dna_score || stock.dnaScore || 0) >= 70 ? 'Low' : (stock.dna_score || stock.dnaScore || 0) >= 50 ? 'Medium' : 'High'),
+      riskLevel: (stock.dna_score || stock.dnaScore || 0) >= 70 ? 'Low' : (stock.dna_score || stock.dnaScore || 0) >= 50 ? 'Medium' : 'High',
       formulaVerdict: displaySignal.reasoning,
       price: stock.price || 0,
       change: `${(stock.change_percent || stock.changePercent || 0).toFixed(2)}%`,
@@ -246,698 +212,701 @@ export const UnifiedDashboard = () => {
     });
   };
 
-  const handlePennyScan = async () => {
-    setPennyScanning(true);
-    const toastId = toast.loading('🪙 페니 주식 스캔 중... (2개월 데이터 분석)');
+  const handleLiveHuntingTrigger = async () => {
+    const toastId = toast.loading('🛰️ 실시간 퀀트 라이브 헌팅 구동 중...');
     try {
-      const data = await scanPennyStocks(1.0, 3);
-      setPennyScanData(data);
-      toast.success(`스캔 완료! ${data.total_scanned}개 종목 발견`, {
-        id: toastId,
-        description: `Top 3 자동 등록: ${data.auto_registered.join(', ') || 'None'}`,
-      });
-      await Promise.all([loadPennySideData(), loadCommandData()]);
+      await triggerHunt();
+      toast.success('라이브 헌팅 트리거 성공', { id: toastId });
+      await loadDashboardData();
     } catch (e: any) {
-      toast.error('스캔 실패', { id: toastId, description: e.message });
-    } finally {
-      setPennyScanning(false);
+      toast.error('헌팅 트리거 실패', { id: toastId, description: e.message });
     }
   };
 
-  const handlePennySell = async (ticker: string) => {
-    const toastId = toast.loading(`${ticker} 청산 중...`);
+  const handleToggleArm = async () => {
+    const nextState = !isArmed;
+    const toastId = toast.loading(nextState ? 'SYSTEM ARMING...' : 'SYSTEM DISARMING...');
     try {
-      await sellPaperPosition(ticker);
-      toast.success(`${ticker} 청산 완료`, { id: toastId });
-      await Promise.all([loadPennySideData(), loadCommandData()]);
-    } catch (e: any) {
-      toast.error('청산 실패', { id: toastId, description: e.message });
+      const result = await toggleSystemArm(nextState);
+      if (result.status === 'success') {
+        setIsArmed(result.is_armed);
+        toast.success(nextState ? 'SYSTEM ARMED' : 'SYSTEM DISARMED', {
+          id: toastId,
+          description: nextState ? '자동 매매가 활성화되었습니다.' : '시스템이 안전 관제 모드로 전환되었습니다.'
+        });
+      }
+    } catch (error) {
+      toast.error('ARM 상태 변경 실패', { id: toastId });
     }
   };
 
-  const handlePennyAddWatchlist = async (ticker: string) => {
+  const handleClosePosition = async (ticker: string) => {
+    toast(`🛑 ${ticker} 청산 확인`, {
+      description: '이 포지션을 시장가로 즉시 청산하시겠습니까?',
+      action: {
+        label: '청산 실행',
+        onClick: async () => {
+          const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
+          try {
+            const result = await sellPaperPosition(ticker);
+            if (result?.status === 'success') {
+              toast.success(`${ticker} 청산 성공`, { id: toastId });
+              loadDashboardData();
+            } else {
+              toast.error(result?.error || '청산 실패', { id: toastId });
+            }
+          } catch (error) {
+            toast.error('청산 에러', { id: toastId });
+          }
+        }
+      }
+    });
+  };
+
+  const handleRemoveWatchlist = async (ticker: string) => {
     try {
-      const stockData = pennyScanData?.results.find((s) => s.ticker === ticker);
-      await addToWatchlist(
-        ticker,
-        undefined,
-        'WATCHING',
-        stockData?.price,
-        undefined,
-        undefined,
-        stockData?.dna_score
+      await removeFromWatchlist(ticker);
+      toast.success(`${ticker} 관심종목 제거 완료`);
+      loadDashboardData();
+    } catch (e) {
+      toast.error('관심종목 제거 실패');
+    }
+  };
+
+  // ── Derived Chart Data ────────────────────────────────────────────────
+  const chartData = useMemo(() => {
+    if (!pennyHistory || pennyHistory.length === 0) return [];
+    const baseCapital = 100000;
+    const sortedHistory = [...pennyHistory].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+    let runningTotal = baseCapital;
+    const points = sortedHistory.map((item, idx) => {
+      runningTotal += Number(item.profit_amt || 0);
+      const dateStr = item.created_at ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : `T${idx+1}`;
+      return { name: dateStr, value: runningTotal };
+    });
+    return [{ name: 'Start', value: baseCapital }, ...points];
+  }, [pennyHistory]);
+
+  // Watchlist panel: EXITED 항목은 별도로 분리하여 기본 숨김
+  const [showExitedWatchlist, setShowExitedWatchlist] = useState(false);
+
+  const { activeWatchlist, exitedWatchlist } = useMemo(() => {
+    const matched = watchlistItems.filter(item =>
+      item.ticker.toLowerCase().includes(watchlistSearchTerm.toLowerCase())
+    );
+    return {
+      activeWatchlist: matched.filter(item => item.status !== 'EXITED'),
+      exitedWatchlist: matched.filter(item => item.status === 'EXITED'),
+    };
+  }, [watchlistItems, watchlistSearchTerm]);
+
+  // Derived Account PnL
+  const totalPnl = useMemo(() => {
+    return pennyPositions.reduce((sum, p) => sum + ((p.current_price - p.entry_price) * p.units || 0), 0);
+  }, [pennyPositions]);
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white/95 backdrop-blur-md p-4 border border-slate-100 rounded-xl shadow-lg leading-none">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">{payload[0].payload.name}</p>
+          <p className="text-lg font-black text-slate-800 tabular-nums">
+            ${Number(payload[0].value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </p>
+        </div>
       );
-      toast.success(`${ticker} 관심종목 추가`);
-      await Promise.all([loadPennySideData(), loadCommandData()]);
-    } catch (e: any) {
-      toast.error('추가 실패', { description: e.message });
     }
+    return null;
   };
-
-  // ── Derived States ───────────────────────────────────────────────────
-  // Command Tab
-  const strongTickers = useMemo(() => 
-    Object.keys(pulseMap).filter(t => pulseMap[t].strength === 'STRONG'),
-    [pulseMap]
-  );
-
-  const normalTickers = useMemo(() => 
-    Object.keys(pulseMap).filter(t => pulseMap[t].strength === 'NORMAL' && pulseMap[t].signal === 'BUY'),
-    [pulseMap]
-  );
-
-  const filteredDiscovery = useMemo(() => {
-    const watchlistTickers = new Set(watchlistItems.map(i => i.ticker));
-    return (discoveryStocks || [])
-      .filter(s => !watchlistTickers.has(s.ticker) && (s.dna_score || 0) >= 80)
-      .slice(0, 5);
-  }, [discoveryStocks, watchlistItems]);
-
-  // Scanner Tab
-  const scannerSectors = useMemo(() => ['All', ...new Set(scannerStocks.map(s => s.sector))], [scannerStocks]);
-
-  const processedScannerStocks = useMemo(() => {
-    return scannerStocks
-      .filter(stock => {
-        const matchesSearch = stock.ticker.toLowerCase().includes(scannerSearchTerm.toLowerCase()) ||
-          stock.name.toLowerCase().includes(scannerSearchTerm.toLowerCase());
-        const matchesDna = stock.dnaScore >= minDna;
-        const matchesSector = selectedSector === 'All' || stock.sector === selectedSector;
-        const matchesRisk = selectedRisk === 'All' ||
-          (selectedRisk === 'Low' && stock.dnaScore < 40) ||
-          (selectedRisk === 'Medium' && stock.dnaScore >= 40 && stock.dnaScore < 70) ||
-          (selectedRisk === 'High' && stock.dnaScore >= 70);
-
-        return matchesSearch && matchesDna && matchesSector && matchesRisk;
-      })
-      .sort((a, b) => {
-        let valA = sortBy === 'dna' ? a.dnaScore : sortBy === 'price' ? a.price : a.changePercent;
-        let valB = sortBy === 'dna' ? b.dnaScore : sortBy === 'price' ? b.price : b.changePercent;
-        return sortOrder === 'asc' ? valA - valB : valB - valA;
-      });
-  }, [scannerStocks, scannerSearchTerm, minDna, selectedSector, selectedRisk, sortBy, sortOrder]);
-
-  const toggleScannerSort = (field: 'dna' | 'price' | 'change') => {
-    if (sortBy === field) {
-      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(field);
-      setSortOrder('desc');
-    }
-  };
-
-  // Penny Sandbox Tab
-  const pennyWatchlist = pennyWatchlistItems;
-
-  const pennyTotalPnl = pennyPositions.reduce(
-    (sum: number, p: any) => sum + (p.unrealized_pl ?? 0),
-    0
-  );
 
   return (
-    <div className="min-h-screen bg-[#020617] relative overflow-hidden">
-      {/* Terminal Grid Overlay */}
-      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
-           style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 relative overflow-hidden pb-12">
+      {/* Decorative Grid Background Overlay */}
+      <div className="absolute inset-0 opacity-[0.4] pointer-events-none" 
+           style={{ backgroundImage: 'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
       
-      {/* Ambient Glows */}
-      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/10 blur-[120px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-      <div className="absolute bottom-1/2 right-0 w-[500px] h-[500px] bg-cyan-500/10 blur-[120px] rounded-full translate-x-1/2 pointer-events-none" />
-      <div className="absolute bottom-0 left-1/2 w-[800px] h-[400px] bg-blue-600/10 blur-[120px] rounded-full -translate-x-1/2 pointer-events-none" />
+      {/* Soft Ambient Light Glows */}
+      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/5 blur-[120px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
+      <div className="absolute bottom-1/2 right-0 w-[500px] h-[500px] bg-cyan-500/5 blur-[120px] rounded-full translate-x-1/2 pointer-events-none" />
 
-      {/* Global Refresh Indicator (Syncing mode) */}
-      {loading && activeTab === 'command' && (
-        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-[#0b101a]/90 backdrop-blur-xl px-4 py-2 rounded-xl border border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.2)] animate-in fade-in slide-in-from-top-4">
-          <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-          <span className="text-[10px] font-black text-indigo-300 uppercase tracking-[0.2em]">Synchronizing Nexus...</span>
+      {loading && (
+        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-white/90 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-slate-100 shadow-xl animate-in fade-in slide-in-from-top-4">
+          <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
+          <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Synchronizing Command Data...</span>
         </div>
       )}
 
       <div className="max-w-[1700px] mx-auto px-6 py-8 space-y-8 animate-in fade-in duration-700 relative z-10">
+        
         {/* ════════ HEADER ════════ */}
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-slate-800/50 pb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200 pb-6">
           <div>
-            <div className="flex items-center gap-3 mb-2">
-              <span className="w-1.5 h-4 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">Integrated Intelligence Nexus</span>
+            <div className="flex items-center gap-3 mb-1.5">
+              <span className="w-1.5 h-4 bg-indigo-600 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.4)]" />
+              <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.4em]">Integrated Intelligence Dashboard</span>
             </div>
-            <h1 className="text-4xl font-black text-white flex items-center gap-4 tracking-tighter">
-              {activeTab === 'command' && <Zap className="w-10 h-10 text-indigo-500 fill-indigo-500/20" />}
-              {activeTab === 'scanner' && <Search className="w-10 h-10 text-indigo-500" />}
-              {activeTab === 'penny' && <Coins className="w-10 h-10 text-cyan-500 fill-cyan-500/20" />}
-              
-              {activeTab === 'command' && "Alpha Discovery Terminal"}
-              {activeTab === 'scanner' && "Quantum Asset Explorer"}
-              {activeTab === 'penny' && "$1 Penny Quant Sandbox"}
+            <h1 className="text-3xl font-black text-slate-950 flex items-center gap-3 tracking-tighter">
+              <Zap className="w-8 h-8 text-indigo-600" />
+              통합 자산 지휘소
             </h1>
-            <p className="text-sm text-slate-500 mt-2 font-medium">
-              {activeTab === 'command' && "실시간 시장 지표 펄스 감시, 오늘의 알파 종목 발굴 및 가상 투자 운용"}
-              {activeTab === 'scanner' && "DNA 점수 및 다차원 정량 필터링 기반 시장 주도주 리서치 스캐너"}
-              {activeTab === 'penny' && "초소형 페니 주식 리밸런싱, 2단계 익절 및 타이트 손절선 매매 자동 검증"}
-            </p>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <span className={clsx(
+                "w-2 h-2 rounded-full",
+                isMarketOpen ? "bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-slate-400"
+              )} />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                US Market {isMarketOpen ? 'Open' : 'Closed'}
+              </span>
+              <span className="text-slate-300">|</span>
+              <p className="text-xs text-slate-500 font-bold">실시간 시장 펄스 감시, 오늘의 알파 발굴, 그리고 포트폴리오의 실시간 가상 매매 현황 통합 관제</p>
+            </div>
           </div>
-          <div className="flex items-center gap-8">
-            <div className="flex flex-col items-end">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Global Market Status</span>
-              <div className={`flex items-center gap-3 px-4 py-1.5 rounded-full border shadow-[0_0_15px_rgba(16,185,129,0.1)] ${isMarketOpen ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-slate-800/40 border-slate-700/40'}`}>
-                <div className={`w-2 h-2 rounded-full ${isMarketOpen ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] animate-pulse' : 'bg-slate-600'}`} />
-                <span className={`text-xs font-black uppercase tracking-widest leading-none ${isMarketOpen ? 'text-emerald-400' : 'text-slate-500'}`}>
-                  {isMarketOpen ? 'Market Open' : 'Market Closed'}
+
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* System ARM Toggle — 현재 상태 표시 + 클릭 시 전환 방향 명시 */}
+            <button
+              onClick={handleToggleArm}
+              title={isArmed ? '클릭하면 자동매매를 비활성화합니다' : '클릭하면 자동매매를 활성화합니다'}
+              className={clsx(
+                "flex items-center gap-0 rounded-2xl border font-black text-xs uppercase tracking-wider transition-all duration-300 active:scale-95 shadow-md overflow-hidden",
+                isArmed
+                  ? "border-rose-200"
+                  : "border-emerald-200"
+              )}
+            >
+              {/* 현재 상태 레이블 */}
+              <span className={clsx(
+                "flex items-center gap-2 px-4 py-3",
+                isArmed ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"
+              )}>
+                {isArmed ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                {isArmed ? 'ARMED' : 'SAFE'}
+              </span>
+              {/* 클릭 시 전환 방향 */}
+              <span className={clsx(
+                "flex items-center gap-1.5 px-3 py-3 text-[9px] border-l",
+                isArmed
+                  ? "bg-slate-50 border-rose-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600"
+                  : "bg-slate-50 border-emerald-100 text-slate-500 hover:bg-emerald-100 hover:text-emerald-600"
+              )}>
+                {isArmed ? '→ 해제' : '→ 활성화'}
+              </span>
+            </button>
+
+            {/* Auto Penny Scan Status Badge */}
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-cyan-50 border border-cyan-100 rounded-2xl shadow-sm">
+              <Coins className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+              <div className="leading-none">
+                <span className="text-[9px] font-black text-cyan-700 uppercase tracking-widest block">Auto Penny Scan</span>
+                <span className="text-[9px] text-cyan-600 font-bold block mt-0.5">
+                  {pennyScanStatus?.last_scan_at
+                    ? `최근: ${new Date(pennyScanStatus.last_scan_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
+                    : '서버 시작 후 30초 내 실행'}
                 </span>
               </div>
             </div>
+
+            {/* Settings Panel Trigger */}
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="flex items-center gap-3 px-6 py-3 bg-indigo-900/10 border border-indigo-500/30 rounded-2xl hover:bg-indigo-900/20 transition-all shadow-[0_0_20px_rgba(99,102,241,0.1)] group/guard"
+              title="퀀트 전략 파라미터 설정"
+              className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-200 rounded-2xl shadow-sm transition-colors text-xs font-black uppercase tracking-wider"
             >
-              <ShieldCheck className="w-5 h-5 text-indigo-400 group-hover:scale-110 transition-transform" />
-              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">NexGuard Locked</span>
+              <ShieldCheck className="w-4 h-4" />
+              설정
             </button>
           </div>
         </div>
 
-        {/* ════════ SUB-TAB NAVIGATION ════════ */}
-        <div className="flex items-center gap-3 bg-[#0b101a]/50 p-2 rounded-2xl border border-slate-800/80 w-fit backdrop-blur-xl">
+        {/* ════════ METRICS GRID ════════ */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
-            { id: 'command', label: '지휘 통제실', icon: LayoutDashboard, desc: '실시간 관제 및 일반 계좌 운용' },
-            { id: 'scanner', label: '퀀트 스캐너', icon: Search, desc: '전체 종목 다차원 필터링 및 검색' },
-            { id: 'penny', label: '페니 샌드박스', icon: Coins, desc: '$1 이하 동전주 자동매매 실험실' }
-          ].map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setSearchParams({ tab: tab.id })}
-                className={clsx(
-                  "flex items-center gap-3 px-6 py-3 rounded-xl transition-all duration-300 group/tab",
-                  isActive
-                    ? "bg-indigo-600/15 text-indigo-400 border border-indigo-500/20 shadow-[0_0_20px_rgba(99,102,241,0.15)] font-black text-xs uppercase tracking-wider"
-                    : "text-slate-500 hover:text-slate-300 border border-transparent font-bold text-xs uppercase tracking-wider"
-                )}
-                title={tab.desc}
-              >
-                <tab.icon className={clsx("w-4 h-4 transition-transform group-hover/tab:scale-110", isActive ? "text-indigo-400" : "text-slate-500")} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+            {
+              label: '총 자산 가치 (Total Assets)',
+              value: pennyAccount ? `$${(pennyAccount.total_assets ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$100,000.00',
+              sub: '현금 + 포지션 평가액',
+              icon: BarChart3,
+              color: 'text-indigo-600 bg-indigo-50 border-indigo-100'
+            },
+            {
+              label: '가용 주문 잔고 (Available Cash)',
+              value: pennyAccount ? `$${(pennyAccount.cash_available ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$100,000.00',
+              sub: '가상 매수 가능 예치금',
+              icon: Coins,
+              color: 'text-cyan-600 bg-cyan-50 border-cyan-100'
+            },
+            {
+              label: '진행중 포지션 평가손익 (Current P&L)',
+              value: `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+              sub: '현재 보유 종목의 미실현 손익',
+              icon: totalPnl >= 0 ? TrendingUp : TrendingDown,
+              color: totalPnl >= 0 ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-rose-600 bg-rose-50 border-rose-100'
+            },
+            {
+              label: '백테스트 엔진 승률 (Win Rate)',
+              value: statsLoading ? 'Loading...' : strategyStats ? `${strategyStats.win_rate.toFixed(1)}%` : '68.7%',
+              sub: statsLoading ? '연산 중...' : `Profit Factor: ${strategyStats ? strategyStats.profit_factor.toFixed(2) : '1.14'}x`,
+              icon: Star,
+              color: 'text-amber-600 bg-amber-50 border-amber-100'
+            }
+          ].map((metric, i) => (
+            <div key={i} className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xl shadow-slate-100/40 flex items-center justify-between">
+              <div className="space-y-1">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none block">{metric.label}</span>
+                <span className="text-2xl font-black text-slate-900 leading-none tabular-nums block">{metric.value}</span>
+                <span className="text-[10px] text-slate-500 font-medium leading-none block pt-1">{metric.sub}</span>
+              </div>
+              <div className={clsx("p-3.5 rounded-xl border", metric.color)}>
+                <metric.icon className="w-5 h-5" />
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* ════════ TAB CONTENT ════════ */}
-        <AnimatePresence mode="wait">
-          {activeTab === 'command' && (
-            <motion.div key="command-tab" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="space-y-10">
-              {loading ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                  <div className="lg:col-span-8 space-y-8">
-                      <div className="h-[400px] bg-[#0b101a]/40 rounded-[2.5rem] border border-slate-800 animate-pulse" />
-                      <div className="h-[300px] bg-[#0b101a]/40 rounded-[2.5rem] border border-slate-800 animate-pulse" />
+        {/* ════════ MAIN SECTION ════════ */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+          
+          {/* LEFT 2/3 COLUMN: Chart & Daily recommendations */}
+          <div className="lg:col-span-2 space-y-8">
+            
+            {/* A. PERFORMANCE GROWTH CHART */}
+            <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                <div>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Asset & Profit Metrics</span>
+                  <h2 className="text-base font-black text-slate-800">포트폴리오 자산 성장 및 누적 손익 곡선</h2>
+                </div>
+                <div className="flex items-center gap-4 text-[10px] text-slate-500 font-bold">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500" /> 가상 자산 평가액</span>
+                  <span className="text-slate-300">|</span>
+                  <span>최종 갱신: {lastFetchedTime}</span>
+                </div>
+              </div>
+
+              <div className="h-72 w-full">
+                {chartData.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center gap-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                    <BarChart3 className="w-8 h-8 text-slate-300" />
+                    <p className="text-xs font-bold text-slate-400">청산 이력이 없습니다</p>
+                    <p className="text-[10px] text-slate-400">매매가 완료되면 누적 손익 곡선이 표시됩니다.</p>
                   </div>
-                  <div className="lg:col-span-4">
-                      <div className="h-[700px] bg-[#0b101a]/40 rounded-[2.5rem] border border-slate-800 animate-pulse" />
-                  </div>
+                ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.01}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={9} tickLine={false} axisLine={false} dy={8} />
+                    <YAxis
+                      stroke="#94a3b8"
+                      fontSize={9}
+                      tickLine={false}
+                      axisLine={false}
+                      domain={['dataMin - 1000', 'dataMax + 1000']}
+                      tickFormatter={(val) => `$${(val/1000).toFixed(0)}k`}
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            {/* B. TODAY QUANT DISCOVERIES */}
+            <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                <div>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Top Quantitative Picks</span>
+                  <h2 className="text-base font-black text-slate-800">퀀트 엔진 추천 & 오늘의 알파 종목</h2>
+                </div>
+                <span className="text-[10px] font-black bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100">
+                  DNA 80점 이상 엄선
+                </span>
+              </div>
+
+              {discoveryStocks.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <Activity className="w-8 h-8 text-slate-300 mx-auto mb-3 animate-pulse" />
+                  <p className="text-xs font-bold">발굴된 오늘의 추천 종목이 없습니다.</p>
+                  <p className="text-[10px] text-slate-400 mt-1">상단의 "라이브 헌팅" 또는 "페니 스캔"을 가동해 보세요.</p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-10">
-                  {/* TOP ROW: Alpha Discovery (Full Width) */}
-                  <div className="relative z-10">
-                    <AlphaDiscoverySection 
-                      filteredDiscovery={filteredDiscovery} 
-                      handleDeepDive={handleDeepDive} 
-                      lastFetchedTime={lastFetchedTime}
-                    />
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {discoveryStocks.map((stock) => {
+                    const isPenny = (stock.price || stock.buy_price) <= PENNY_DISPLAY_THRESHOLD;
+                    return (
+                      <div
+                        key={stock.ticker}
+                        onClick={() => handleDeepDive(stock)}
+                        className="p-4 bg-slate-50/50 border border-slate-100 rounded-2xl hover:border-indigo-400/40 hover:bg-slate-50 transition-all cursor-pointer flex items-center justify-between group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={clsx(
+                            "w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs border",
+                            isPenny ? "bg-cyan-50 border-cyan-100 text-cyan-600" : "bg-indigo-50 border-indigo-100 text-indigo-600"
+                          )}>
+                            {stock.ticker}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors">{stock.ticker}</span>
+                              <span className={clsx(
+                                "text-[7px] font-black px-1 rounded tracking-widest border",
+                                isPenny ? "bg-cyan-50 border-cyan-200 text-cyan-600" : "bg-indigo-50 border-indigo-200 text-indigo-600"
+                              )}>
+                                {isPenny ? '페니' : '일반'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-bold block mt-0.5">{stock.sector || 'US Stock'}</span>
+                          </div>
+                        </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start relative z-10">
-                    {/* LEFT COLUMN: Strategic Signal Matrix (8/12) */}
-                    <div className="lg:col-span-8 space-y-10">
-                      <StrategicSignalMatrix
-                        strongTickers={strongTickers}
-                        normalTickers={normalTickers}
-                        pulseMap={pulseMap}
-                        handleDeepDive={handleDeepDive}
-                      />
-
-                      {/* Integrated Command Center (Live Execution) */}
-                      <div className="mt-10">
-                        <LiveExecutionCenter />
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <span className="text-sm font-extrabold text-slate-900 tabular-nums">${stock.price.toFixed(isPenny ? 4 : 2)}</span>
+                            <span className={clsx(
+                              "text-[10px] font-black block mt-0.5 tabular-nums",
+                              (stock.change_percent ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                            )}>
+                              {(stock.change_percent ?? 0) >= 0 ? '+' : ''}{(stock.change_percent ?? 0).toFixed(2)}%
+                            </span>
+                          </div>
+                          <div className="w-12">
+                            <PennyQuantScoreBar score={stock.dna_score} size="sm" showLabel={false} />
+                          </div>
+                        </div>
                       </div>
-                    </div>
-
-                    {/* RIGHT COLUMN: Monitoring Orbit & Stats (4/12) */}
-                    <div className="lg:col-span-4 space-y-8">
-                      <PerformanceSummary stats={strategyStats} />
-                      
-                      <MonitoringOrbit 
-                        watchlistItems={watchlistItems} 
-                        watchlistStocks={watchlistStocks} 
-                        pulseMap={pulseMap}
-                        handleDeepDive={handleDeepDive} 
-                      />
-                    </div>
-                  </div>
+                    );
+                  })}
                 </div>
               )}
-            </motion.div>
-          )}
+            </div>
 
-          {activeTab === 'scanner' && (
-            <motion.div key="scanner-tab" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="space-y-8">
-              <ScannerControls 
-                searchTerm={scannerSearchTerm}
-                onSearchChange={setScannerSearchTerm}
-                minDna={minDna}
-                onMinDnaToggle={() => setMinDna(minDna === 70 ? 0 : 70)}
-                isHistorical={isHistorical}
-                onHistoricalToggle={() => setIsHistorical(!isHistorical)}
-                selectedRisk={selectedRisk}
-                onRiskChange={setSelectedRisk}
-                selectedSector={selectedSector}
-                onSectorChange={setSelectedSector}
-                sectors={scannerSectors}
-                viewMode={scannerViewMode}
-                onViewModeChange={setScannerViewMode}
-              />
+          </div>
 
-              {scannerLoading ? (
-                <div className="flex flex-col items-center justify-center py-40 space-y-8">
-                  <div className="relative">
-                    <div className="w-20 h-20 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
-                    <Zap className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-indigo-400 animate-pulse" />
-                  </div>
-                  <p className="text-slate-400 font-black text-xs tracking-[0.3em] uppercase animate-pulse">Filtering Market Signal Matrix...</p>
-                </div>
-              ) : processedScannerStocks.length === 0 ? (
-                <div className="text-center py-40 bg-[#0b101a]/40 rounded-[2rem] border border-dashed border-slate-800 shadow-2xl backdrop-blur-sm">
-                  <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-6 border border-slate-800">
-                     <Search className="w-8 h-8 text-slate-600" />
-                  </div>
-                  <p className="text-slate-400 font-bold text-lg mb-4">No results matched your search matrix.</p>
-                  <button onClick={() => { setScannerSearchTerm(''); setMinDna(0); setSelectedRisk('All'); setSelectedSector('All'); }} className="text-indigo-400 font-black uppercase text-xs hover:text-indigo-300 tracking-widest transition-colors py-2 px-4 bg-indigo-500/10 rounded-lg border border-indigo-500/20">Reset Core Filters</button>
+          {/* RIGHT 1/3 COLUMN: Watchlist (Combined Orbit) */}
+          <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
+            <div className="border-b border-slate-100 pb-4 space-y-3">
+              <div>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Combined Tracking Orbit</span>
+                <h2 className="text-base font-black text-slate-800">통합 관심종목 오빗</h2>
+              </div>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="티커 검색..."
+                  value={watchlistSearchTerm}
+                  onChange={(e) => setWatchlistSearchTerm(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200/60 rounded-xl pl-9 pr-4 py-2 text-xs font-bold placeholder-slate-400 outline-none focus:border-indigo-400 focus:bg-white transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+              {activeWatchlist.length === 0 && exitedWatchlist.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <Star className="w-8 h-8 text-slate-300 mx-auto mb-2 opacity-60" />
+                  <p className="text-xs font-bold">관심종목이 비어있습니다.</p>
                 </div>
               ) : (
                 <>
-                  <ScannerTopFive stocks={scannerStocks} onDeepDive={handleDeepDive} />
-                  <div className="h-4" />
-                  <ScannerAssetList 
-                    viewMode={scannerViewMode}
-                    stocks={processedScannerStocks}
-                    sortBy={sortBy}
-                    sortOrder={sortOrder}
-                    onSort={toggleScannerSort}
-                    onDeepDive={handleDeepDive}
-                  />
-                </>
-              )}
-            </motion.div>
-          )}
-
-          {activeTab === 'penny' && (
-            <motion.div key="penny-tab" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="space-y-8">
-              {/* Account & Scan pill */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-6 bg-[#0b101a]/40 border border-slate-800/50 p-6 rounded-2xl">
-                <div>
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider mb-1">페니 랩 상태 제어</h3>
-                  <p className="text-xs text-slate-500">1달러 이하 페니 주식 리밸런싱 및 가상 지갑 정보</p>
-                </div>
-                <div className="flex items-center gap-4 flex-wrap">
-                  {pennyAccount && (
-                    <div className="flex items-center gap-4 px-5 py-3 bg-[#0b101a]/60 border border-slate-800/60 rounded-2xl">
-                      <div className="text-right">
-                        <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Cash</div>
-                        <div className="text-sm font-black text-white tabular-nums">${(pennyAccount.cash_available ?? 0).toLocaleString()}</div>
-                      </div>
-                      <div className="w-px h-8 bg-slate-800" />
-                      <div className="text-right">
-                        <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">P&L</div>
-                        <div className={clsx("text-sm font-black tabular-nums", pennyTotalPnl >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                          {pennyTotalPnl >= 0 ? '+' : ''}${pennyTotalPnl.toFixed(2)}
+                  {/* 활성 종목 (WATCHING / HOLDING) */}
+                  {activeWatchlist.map((item) => (
+                    <div
+                      key={item.ticker}
+                      className="p-3.5 bg-slate-50/40 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-between group/wl"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={clsx(
+                          "w-8 h-8 rounded-lg flex items-center justify-center font-black text-[10px] border",
+                          item.isPenny ? "bg-cyan-50 border-cyan-100 text-cyan-600" : "bg-indigo-50 border-indigo-100 text-indigo-600"
+                        )}>
+                          {item.ticker.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-slate-900 text-sm leading-none">{item.ticker}</span>
+                            <span className={clsx(
+                              "text-[7px] font-black px-1.5 py-0.5 rounded border leading-none",
+                              item.status === 'HOLDING' ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
+                              "bg-indigo-50 border-indigo-200 text-indigo-600"
+                            )}>
+                              {item.status}
+                            </span>
+                          </div>
+                          <span className="text-[9px] text-slate-500 font-bold block mt-1">
+                            {item.buyPrice ? `진입: $${item.buyPrice.toFixed(item.isPenny ? 4 : 2)}` : '대기 중'}
+                            {item.initialDnaScore ? ` | DNA: ${item.initialDnaScore}점` : ''}
+                          </span>
                         </div>
                       </div>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handlePennyScan}
-                    disabled={pennyScanning}
-                    className={clsx(
-                      "flex items-center gap-3 px-8 py-4 rounded-2xl font-black text-sm transition-all duration-300 border shadow-2xl active:scale-95",
-                      pennyScanning
-                        ? "bg-slate-800 text-slate-400 border-slate-700 cursor-wait"
-                        : "bg-gradient-to-r from-cyan-600 to-emerald-600 text-white border-cyan-400/30 shadow-[0_0_40px_rgba(34,211,238,0.3)] hover:shadow-[0_0_60px_rgba(34,211,238,0.5)]"
-                    )}
-                  >
-                    <RefreshCw className={clsx("w-5 h-5", pennyScanning && "animate-spin")} />
-                    {pennyScanning ? '스캔 중...' : '퀀트 스캔 시작'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Parameters strip */}
-              {pennyScanData?.penny_params && (
-                <div className="flex flex-wrap gap-3">
-                  {[
-                    { label: 'TS', value: `-${pennyScanData.penny_params.trailing_stop_pct}%`, tip: 'Trailing Stop' },
-                    { label: 'Breakeven', value: `+${pennyScanData.penny_params.breakeven_trigger_pct}%`, tip: '본전 락인 조건' },
-                    { label: 'Scale-Out', value: `RSI>${pennyScanData.penny_params.scale_out_rsi}`, tip: '1차 매도' },
-                    { label: 'Profit Exit', value: `+${pennyScanData.penny_params.scale_out_profit_pct}%`, tip: '1차 익절 기준' },
-                    { label: 'Tight TS', value: `-${pennyScanData.penny_params.tight_ts_pct}%`, tip: '2차 추종 TS' },
-                    { label: 'RVOL', value: `>${pennyScanData.penny_params.rvol_min}x`, tip: '최소 거래량' },
-                    { label: 'Data', value: pennyScanData.penny_params.data_lookback, tip: '분석 기간' },
-                  ].map((param) => (
-                    <div
-                      key={param.label}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-[#0b101a]/60 border border-slate-800/60 rounded-xl"
-                      title={param.tip}
-                    >
-                      <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">{param.label}</span>
-                      <span className="text-[10px] font-black text-cyan-400 tabular-nums">{param.value}</span>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className="text-xs font-extrabold text-slate-900 tabular-nums block">${item.currentPrice.toFixed(item.isPenny ? 4 : 2)}</span>
+                          {item.changePercent !== 0 && (
+                            <span className={clsx(
+                              "text-[9px] font-black block mt-0.5 tabular-nums",
+                              item.changePercent >= 0 ? "text-emerald-600" : "text-rose-600"
+                            )}>
+                              {item.changePercent >= 0 ? '+' : ''}{item.changePercent.toFixed(2)}%
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleRemoveWatchlist(item.ticker)}
+                          className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-lg transition-colors opacity-0 group-hover/wl:opacity-100"
+                          title="제거"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
-                </div>
-              )}
 
-              {/* Sub sections inside penny */}
-              <div className="flex items-center gap-2 bg-[#0b101a]/40 p-1.5 rounded-2xl border border-slate-800/60 w-fit">
-                {[
-                  { id: 'scan' as const, label: '퀀트 스캔 결과', icon: Scan, count: pennyScanData?.total_scanned },
-                  { id: 'watchlist' as const, label: '관심 종목', icon: Star, count: pennyWatchlist.length },
-                  { id: 'positions' as const, label: '가상 포지션', icon: BarChart3, count: pennyPositions.length },
-                  { id: 'history' as const, label: '매매 이력', icon: Clock, count: pennyHistory.length },
-                ].map((sec) => (
-                  <button
-                    key={sec.id}
-                    onClick={() => setPennyActiveSection(sec.id)}
-                    className={clsx(
-                      "flex items-center gap-2 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.15em] transition-all",
-                      pennyActiveSection === sec.id
-                        ? "bg-cyan-600/20 text-cyan-400 border border-cyan-500/20 shadow-[0_0_15px_rgba(34,211,238,0.15)]"
-                        : "text-slate-500 hover:text-slate-300 border border-transparent"
-                    )}
-                  >
-                    <sec.icon className="w-3.5 h-3.5" />
-                    {sec.label}
-                    {sec.count != null && sec.count > 0 && (
-                      <span className={clsx(
-                        "text-[8px] px-1.5 py-0.5 rounded-md font-black",
-                        pennyActiveSection === sec.id ? "bg-cyan-500/20 text-cyan-300" : "bg-slate-800 text-slate-500"
-                      )}>
-                        {sec.count}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              {/* Penny Tab Section Content */}
-              <div className="mt-4">
-                {pennyActiveSection === 'scan' && (
-                  <div className="space-y-6 animate-in fade-in duration-300">
-                    {!pennyScanData ? (
-                      <div className="bg-[#0b101a]/40 border border-slate-800/60 rounded-[2.5rem] p-16 flex flex-col items-center justify-center gap-6">
-                        <div className="w-20 h-20 bg-cyan-500/5 border border-cyan-500/20 rounded-3xl flex items-center justify-center">
-                          <Scan className="w-10 h-10 text-cyan-500/40" />
-                        </div>
-                        <div className="text-center">
-                          <h3 className="text-lg font-black text-white mb-2">페니 스캔을 실행하세요</h3>
-                          <p className="text-sm text-slate-500 max-w-md">
-                            1달러 이하 종목들의 기술적 정량 지표를 일봉 기준으로 역산하여 DNA 퀀트 스코어를 판별하고 Top 3 종목을 자동 Watchlist에 동기화합니다.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {pennyScanData.results.slice(0, 20).map((stock) => (
-                          <PennyStockCard
-                            key={stock.ticker}
-                            stock={stock}
-                            onAddToWatchlist={handlePennyAddWatchlist}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {pennyActiveSection === 'watchlist' && (
-                  <div className="bg-[#0b101a]/40 backdrop-blur-md border border-slate-800/60 rounded-[2.5rem] overflow-hidden animate-in fade-in duration-300">
-                    <div className="p-6 border-b border-slate-800/50 flex items-center gap-3">
-                      <Star className="w-5 h-5 text-cyan-400 fill-cyan-400/20" />
-                      <span className="text-xs font-black text-white uppercase tracking-[0.2em]">관심 종목 현황</span>
-                      <span className="text-[10px] font-bold text-slate-500 ml-auto">
-                        {pennyWatchlist.length}개 종목 추적 중
-                      </span>
-                    </div>
-                    <div className="divide-y divide-slate-800/40">
-                      {pennyLoadingData ? (
-                        <div className="p-12 text-center">
-                          <Activity className="w-6 h-6 text-slate-600 animate-pulse mx-auto mb-3" />
-                          <span className="text-[10px] text-slate-600 font-black uppercase tracking-widest">Loading...</span>
-                        </div>
-                      ) : pennyWatchlistItems.length === 0 ? (
-                        <div className="p-12 text-center text-slate-600">
-                          <Star className="w-8 h-8 mx-auto mb-3 opacity-30" />
-                          <p className="text-[10px] font-black uppercase tracking-widest">등록된 관심 종목이 없습니다</p>
-                        </div>
-                      ) : (
-                        pennyWatchlistItems.map((item) => {
-                          const scanMatch = pennyScanData?.results.find((r) => r.ticker === item.ticker);
-                          return (
-                            <div key={item.ticker} className="p-5 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
-                              <div className="flex items-center gap-4">
-                                <div className={clsx(
-                                  "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm border",
-                                  item.status === 'HOLDING' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
-                                  item.status === 'EXITED' ? "bg-slate-800/60 border-slate-700/40 text-slate-500" :
-                                  "bg-cyan-500/10 border-cyan-500/20 text-cyan-400"
-                                )}>
-                                  {item.ticker.charAt(0)}
-                                </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-base font-black text-white">{item.ticker}</span>
-                                    <span className={clsx(
-                                      "text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest border",
-                                      item.status === 'WATCHING' ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20" :
-                                      item.status === 'HOLDING' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                      "bg-slate-800 text-slate-500 border-slate-700"
-                                    )}>
-                                      {item.status}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-slate-500 font-bold mt-0.5 flex gap-3">
-                                    {item.buyPrice && <span>진입: ${item.buyPrice.toFixed(4)}</span>}
-                                    {item.stopLoss && <span>손절: ${item.stopLoss.toFixed(4)}</span>}
-                                    {item.initialDnaScore && <span>DNA: {item.initialDnaScore}</span>}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                {scanMatch && (
-                                  <div className="w-32">
-                                    <PennyQuantScoreBar score={scanMatch.dna_score} size="sm" />
-                                  </div>
-                                )}
-                                <span className="text-[9px] text-slate-600 font-bold">
-                                  {new Date(item.addedAt).toLocaleDateString('ko-KR')}
+                  {/* EXITED 접기 토글 */}
+                  {exitedWatchlist.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => setShowExitedWatchlist(v => !v)}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-black text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors border border-dashed border-slate-200"
+                      >
+                        <span>청산 완료 {exitedWatchlist.length}개</span>
+                        <span>{showExitedWatchlist ? '▲ 접기' : '▼ 펼치기'}</span>
+                      </button>
+                      {showExitedWatchlist && exitedWatchlist.map((item) => (
+                        <div
+                          key={item.ticker}
+                          className="mt-2 p-3.5 bg-slate-50/40 border border-slate-100 rounded-xl flex items-center justify-between opacity-50 group/wl"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-black text-[10px] border bg-slate-100 border-slate-200 text-slate-400">
+                              {item.ticker.charAt(0)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-slate-500 text-sm leading-none line-through">{item.ticker}</span>
+                                <span className="text-[7px] font-black px-1.5 py-0.5 rounded border leading-none bg-slate-100 border-slate-200 text-slate-400">
+                                  EXITED
                                 </span>
                               </div>
+                              <span className="text-[9px] text-slate-400 font-bold block mt-1">
+                                {item.buyPrice ? `진입: $${item.buyPrice.toFixed(item.isPenny ? 4 : 2)}` : '-'}
+                              </span>
                             </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {pennyActiveSection === 'positions' && (
-                  <div className="bg-[#0b101a]/40 backdrop-blur-md border border-slate-800/60 rounded-[2.5rem] overflow-hidden animate-in fade-in duration-300">
-                    <div className="p-6 border-b border-slate-800/50 flex items-center gap-3">
-                      <BarChart3 className="w-5 h-5 text-emerald-400" />
-                      <span className="text-xs font-black text-white uppercase tracking-[0.2em]">가상 매수 포지션</span>
-                    </div>
-
-                    <div className="divide-y divide-slate-800/40">
-                      {pennyPositions.length === 0 ? (
-                        <div className="p-12 text-center text-slate-600">
-                          <BarChart3 className="w-8 h-8 mx-auto mb-3 opacity-30" />
-                          <p className="text-[10px] font-black uppercase tracking-widest">보유 포지션이 없습니다</p>
-                        </div>
-                      ) : (
-                        pennyPositions.map((pos: any) => {
-                          const pnlPct = pos.unrealized_plpc ?? 0;
-                          const pnlAmt = pos.unrealized_pl ?? 0;
-                          const isProfit = pnlPct >= 0;
-
-                          return (
-                            <div key={pos.ticker} className="p-5 flex items-center justify-between hover:bg-white/[0.02] transition-colors group">
-                              <div className="flex items-center gap-4">
-                                <div className={clsx(
-                                  "w-12 h-12 rounded-xl flex items-center justify-center font-black border",
-                                  isProfit ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                                )}>
-                                  {pos.ticker?.charAt(0) || '?'}
-                                </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-lg font-black text-white">{pos.ticker}</span>
-                                    <span className={clsx(
-                                      "text-[10px] font-black px-2 py-0.5 rounded",
-                                      isProfit ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
-                                    )}>
-                                      {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
-                                    </span>
-                                    <span className="text-[8px] font-black bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded uppercase">
-                                      {pos.status || 'HOLD'}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px] text-slate-500 font-bold mt-0.5 flex gap-3">
-                                    <span>진입: ${Number(pos.entry_price).toFixed(4)}</span>
-                                    <span>현재: ${Number(pos.current_price).toFixed(4)}</span>
-                                    <span>수량: {Number(pos.units).toFixed(2)}</span>
-                                    {pos.ts_threshold && <span>TS: ${Number(pos.ts_threshold).toFixed(4)}</span>}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-3">
-                                <div className="text-right mr-4">
-                                  <div className={clsx("text-sm font-black tabular-nums", isProfit ? "text-emerald-400" : "text-rose-400")}>
-                                    {pnlAmt >= 0 ? '+' : ''}${pnlAmt.toFixed(2)}
-                                  </div>
-                                  <div className="text-[9px] text-slate-600 font-bold">P&L</div>
-                                </div>
-                                <button
-                                  onClick={() => handlePennySell(pos.ticker)}
-                                  className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white text-[10px] font-black rounded-xl border border-rose-500/20 transition-all uppercase tracking-widest opacity-0 group-hover:opacity-100"
-                                >
-                                  Close
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {pennyActiveSection === 'history' && (
-                  <div className="space-y-6 animate-in fade-in duration-300">
-                    <div className="bg-[#0b101a]/40 backdrop-blur-md border border-slate-800/60 rounded-[2.5rem] overflow-hidden">
-                      <div className="p-6 border-b border-slate-800/50 flex items-center gap-3">
-                        <Clock className="w-5 h-5 text-slate-400" />
-                        <span className="text-xs font-black text-white uppercase tracking-[0.2em]">매매 이력</span>
-                        <span className="text-[10px] font-bold text-slate-500 ml-auto">{pennyHistory.length}건</span>
-                      </div>
-
-                      <div className="divide-y divide-slate-800/40">
-                        {pennyHistory.length === 0 ? (
-                          <div className="p-12 text-center text-slate-600">
-                            <Clock className="w-8 h-8 mx-auto mb-3 opacity-30" />
-                            <p className="text-[10px] font-black uppercase tracking-widest">매매 이력이 없습니다</p>
                           </div>
-                        ) : (
-                          pennyHistory.map((trade: any, idx: number) => {
-                            const isProfit = (trade.pnl_pct ?? 0) >= 0;
-                            return (
-                              <div key={trade.id || idx} className="p-5 flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                  <div className={clsx(
-                                    "w-10 h-10 rounded-xl flex items-center justify-center border",
-                                    isProfit ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20"
-                                  )}>
-                                    {isProfit ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <XCircle className="w-4 h-4 text-rose-400" />}
-                                  </div>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-base font-black text-white">{trade.ticker}</span>
-                                      <span className={clsx(
-                                        "text-[10px] font-black px-2 py-0.5 rounded",
-                                        isProfit ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
-                                      )}>
-                                        {(trade.pnl_pct ?? 0) >= 0 ? '+' : ''}{Number(trade.pnl_pct ?? 0).toFixed(1)}%
-                                      </span>
-                                    </div>
-                                    <div className="text-[10px] text-slate-500 font-bold mt-0.5 flex gap-3">
-                                      <span>진입: ${Number(trade.entry_price ?? 0).toFixed(4)}</span>
-                                      <span>청산: ${Number(trade.exit_price ?? 0).toFixed(4)}</span>
-                                      <span className="text-slate-600">{trade.exit_reason || 'N/A'}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <div className={clsx("text-sm font-black tabular-nums", isProfit ? "text-emerald-400" : "text-rose-400")}>
-                                    {(trade.profit_amt ?? 0) >= 0 ? '+' : ''}${Number(trade.profit_amt ?? 0).toFixed(2)}
-                                  </div>
-                                  <div className="text-[9px] text-slate-600">
-                                    {trade.created_at ? new Date(trade.created_at).toLocaleDateString('ko-KR') : '--'}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
+                          <button
+                            onClick={() => handleRemoveWatchlist(item.ticker)}
+                            className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-lg transition-colors opacity-0 group-hover/wl:opacity-100"
+                            title="제거"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
-                    {/* Exit strategy summary */}
-                    <div className="bg-[#0b101a]/40 border border-slate-800/60 rounded-2xl p-6">
-                      <div className="flex items-center gap-2 mb-4">
-                        <ShieldAlert className="w-4 h-4 text-amber-400" />
-                        <span className="text-[10px] font-black text-amber-400 uppercase tracking-[0.2em]">매도 전략 수식</span>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-[#020617]/60 border border-emerald-500/10 rounded-xl p-4">
-                          <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-2">1차 매도 (Scale-Out 50%)</div>
-                          <div className="text-xs text-slate-400 font-medium space-y-1">
-                            <p>• 수익률 +20% 달성 <span className="text-slate-600">OR</span> RSI {'>'} 70</p>
-                            <p>• 보유 물량 50% 시장가 즉시 익절</p>
-                            <p>• Trailing Stop → 진입가(본전)로 락인</p>
-                          </div>
-                        </div>
-                        <div className="bg-[#020617]/60 border border-cyan-500/10 rounded-xl p-4">
-                          <div className="text-[9px] font-black text-cyan-400 uppercase tracking-widest mb-2">2차 매도 (Trailing Stop -7%)</div>
-                          <div className="text-xs text-slate-400 font-medium space-y-1">
-                            <p>• 잔여 50% 물량 → -7% 타이트 TS</p>
-                            <p>• 잔여 랠리를 끝까지 추종(Ride)</p>
-                            <p>• TS 발동 시 전량 청산</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+        </div>
+
+        {/* ════════ BOTTOM SECTION: Positions & History ════════ */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* LEFT 2/3 COLUMN: Positions */}
+          <div className="lg:col-span-2 bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Active Positions</span>
+                <h2 className="text-base font-black text-slate-800">현재 보유 중인 매수 포지션</h2>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg">
+                {pennyPositions.length}개 보유 중
+              </span>
+            </div>
 
-        {/* Settings Slideout Backdrop */}
-        {isSettingsOpen && (
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200]"
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <th className="pb-3">종목</th>
+                    <th className="pb-3 text-right">구분</th>
+                    <th className="pb-3 text-right">수량</th>
+                    <th className="pb-3 text-right">진입가</th>
+                    <th className="pb-3 text-right">현재가</th>
+                    <th className="pb-3 text-right">Trailing Stop</th>
+                    <th className="pb-3 text-right">평가 손익 (P&L)</th>
+                    <th className="pb-3 text-right"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50/50">
+                  {pennyPositions.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-12 text-center text-slate-400 font-bold text-xs">
+                        보유중인 가상 매수 포지션이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    pennyPositions.map((pos) => {
+                      const pnlPct = pos.unrealized_plpc;
+                      const pnlAmt = pos.unrealized_pl;
+                      const isProfit = pnlAmt >= 0;
+                      return (
+                        <tr key={pos.ticker} className="hover:bg-slate-50/40 transition-colors text-xs font-bold">
+                          <td className="py-4">
+                            <span className="font-extrabold text-slate-900 text-sm">{pos.ticker}</span>
+                          </td>
+                          <td className="py-4 text-right">
+                            <span className={clsx(
+                              "text-[8px] font-black px-1.5 py-0.5 rounded border tracking-widest",
+                              pos.isPenny ? "bg-cyan-50 border-cyan-200 text-cyan-600" : "bg-indigo-50 border-indigo-200 text-indigo-600"
+                            )}>
+                              {pos.isPenny ? '페니' : '일반'}
+                            </span>
+                          </td>
+                          <td className="py-4 text-right font-mono text-slate-600 tabular-nums">{Number(pos.units).toFixed(2)}</td>
+                          <td className="py-4 text-right font-mono text-slate-600 tabular-nums">${Number(pos.entry_price).toFixed(pos.isPenny ? 4 : 2)}</td>
+                          <td className="py-4 text-right font-mono text-slate-900 tabular-nums">${Number(pos.current_price).toFixed(pos.isPenny ? 4 : 2)}</td>
+                          <td className="py-4 text-right font-mono text-rose-500 tabular-nums">
+                            {pos.ts_threshold ? `$${Number(pos.ts_threshold).toFixed(pos.isPenny ? 4 : 2)}` : 'N/A'}
+                          </td>
+                          <td className={clsx("py-4 text-right font-mono tabular-nums text-sm font-black", isProfit ? "text-emerald-600" : "text-rose-600")}>
+                            <div className="flex items-center justify-end gap-1.5">
+                              {isProfit ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                              <span>{isProfit ? '+' : ''}{pnlAmt.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
+                            </div>
+                          </td>
+                          <td className="py-4 text-right">
+                            <button
+                              onClick={() => handleClosePosition(pos.ticker)}
+                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-500 border border-rose-200 text-rose-600 hover:text-white text-[9px] font-black rounded-lg transition-all uppercase tracking-widest"
+                            >
+                              Close
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* RIGHT 1/3 COLUMN: Trade History */}
+          <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-400" />
+                <h2 className="text-base font-black text-slate-800">최근 청산 이력</h2>
+              </div>
+              <span className="text-[10px] font-bold text-slate-500">{pennyHistory.length}건 기록</span>
+            </div>
+
+            <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+              {pennyHistory.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2 opacity-60" />
+                  <p className="text-xs font-bold">최근 종료된 매매 기록이 없습니다.</p>
+                </div>
+              ) : (
+                pennyHistory.slice(0, 15).map((trade, idx) => {
+                  const isProfit = (trade.pnl_pct ?? 0) >= 0;
+                  const isPenny = Number(trade.entry_price || 0) <= 1.0;
+                  return (
+                    <div key={trade.id || idx} className="p-3 bg-slate-50/50 border border-slate-100 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={clsx(
+                          "w-8 h-8 rounded-lg flex items-center justify-center border",
+                          isProfit ? "bg-emerald-50 border-emerald-100" : "bg-rose-50 border-rose-100"
+                        )}>
+                          {isProfit ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-rose-500" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-slate-900 text-sm leading-none">{trade.ticker}</span>
+                            <span className={clsx(
+                              "text-[8px] font-black px-1.5 py-0.5 rounded border leading-none",
+                              isProfit ? "bg-emerald-50 border-emerald-200 text-emerald-600" : "bg-rose-50 border-rose-200 text-rose-600"
+                            )}>
+                              {(trade.pnl_pct ?? 0) >= 0 ? '+' : ''}{Number(trade.pnl_pct ?? 0).toFixed(1)}%
+                            </span>
+                          </div>
+                          <span className="text-[9px] text-slate-500 font-bold block mt-1.5">
+                            진입: ${Number(trade.entry_price || 0).toFixed(isPenny ? 4 : 2)} ➔ 청산: ${Number(trade.exit_price || 0).toFixed(isPenny ? 4 : 2)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className={clsx("text-sm font-black tabular-nums block", isProfit ? "text-emerald-600" : "text-rose-600")}>
+                          {isProfit ? '+' : ''}${Number(trade.profit_amt ?? 0).toFixed(2)}
+                        </span>
+                        <span className="text-[8px] text-slate-400 font-medium block mt-0.5">
+                          {trade.exit_reason || 'Exit'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* Settings Sideout Backdrop */}
+      {isSettingsOpen && (
+        <div
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200]"
+          onClick={() => setIsSettingsOpen(false)}
+        />
+      )}
+
+      {/* Settings Slideout Panel */}
+      <div className={`fixed top-0 right-0 h-full w-full max-w-lg bg-white border-l border-slate-200 z-[210] overflow-y-auto transition-transform duration-300 ease-in-out ${isSettingsOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200 sticky top-0 bg-white z-10">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="w-5 h-5 text-indigo-600" />
+            <span className="text-sm font-black text-slate-800 uppercase tracking-[0.2em]">NexGuard Control</span>
+          </div>
+          <button
             onClick={() => setIsSettingsOpen(false)}
-          />
-        )}
-
-        {/* Settings Slideout Panel */}
-        <div className={`fixed top-0 right-0 h-full w-full max-w-lg bg-[#0b101a] border-l border-slate-800 z-[210] overflow-y-auto transition-transform duration-300 ease-in-out ${isSettingsOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-          <div className="flex items-center justify-between px-6 py-5 border-b border-slate-800 sticky top-0 bg-[#0b101a] z-10">
-            <div className="flex items-center gap-3">
-              <ShieldCheck className="w-5 h-5 text-indigo-400" />
-              <span className="text-sm font-black text-white uppercase tracking-[0.2em]">NexGuard Control</span>
+            className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"
+          >
+            <X className="w-4 h-4 text-slate-500" />
+          </button>
+        </div>
+        <div className="p-6 space-y-6">
+          {/* 라이브 헌팅 — 오퍼레이터 수동 트리거 */}
+          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-3">
+            <div>
+              <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block mb-0.5">Manual Override</span>
+              <h3 className="text-sm font-black text-indigo-800">라이브 헌팅 (Edge Function)</h3>
+              <p className="text-[10px] text-indigo-600 mt-1 leading-relaxed">
+                Alpaca Universe 전체를 즉시 스캔합니다.<br/>
+                DNA ≥ 80 일반 종목 발굴 → daily_discovery 갱신
+              </p>
             </div>
             <button
-              onClick={() => setIsSettingsOpen(false)}
-              className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
+              onClick={handleLiveHuntingTrigger}
+              disabled={isHunting}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all active:scale-95 disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
-              <X className="w-4 h-4 text-slate-400" />
+              <Activity className={clsx("w-4 h-4", isHunting && "animate-pulse")} />
+              {isHunting ? '헌팅 중...' : '라이브 헌팅 실행'}
             </button>
           </div>
-          <div className="p-6">
-            <CommandSettings />
-          </div>
+          <CommandSettings />
         </div>
       </div>
 
@@ -949,32 +918,20 @@ export const UnifiedDashboard = () => {
           data={terminalData}
           onAddToWatchlist={async () => {
              try {
-               const buyPrice = terminalData.price;
-               const { targetPrice, stopPrice } = calculateDNATargets(
-                 buyPrice, 
-                 buyPrice,
-                 buyPrice,
-                 terminalData.quantData?.atr5
-               );
-               
                await addToWatchlist(
                  terminalData.ticker, 
                  undefined, 
                  'WATCHING', 
-                 buyPrice,
-                 targetPrice,
-                 stopPrice,
+                 terminalData.price, 
+                 undefined, 
+                 undefined, 
                  terminalData.dnaScore
                );
                toast.success(`${terminalData.ticker} — 관심 종목에 추가되었습니다`, {
                  description: `DNA Score: ${terminalData.dnaScore}점`,
                  duration: 3000,
                });
-               if (activeTab === 'command') {
-                 loadCommandData();
-               } else if (activeTab === 'penny') {
-                 loadPennySideData();
-               }
+               loadDashboardData();
              } catch (error) {
                console.error('Failed to add to watchlist:', error);
                toast.error('관심 종목 추가에 실패했습니다', {

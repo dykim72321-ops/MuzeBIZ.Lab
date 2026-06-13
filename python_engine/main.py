@@ -300,6 +300,11 @@ candle_state = TickerDataState(max_bars=100)
 db = DBManager()
 SYSTEM_ARMED = False  # 자동 매매 활성화 상태 (Default: False)
 
+# Penny scan auto-scheduler state
+last_penny_scan_at: Optional[datetime] = None
+penny_scan_results_cache: List[dict] = []
+_current_stream_task: Optional[asyncio.Task] = None  # 장 중 스캔 후 즉시 재시작에 사용
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
@@ -2298,19 +2303,18 @@ class PennyScanRequest(BaseModel):
     top_n: int = PENNY_TOP_N
 
 
-@app.post("/api/penny/scan")
-async def penny_scan(
-    req: PennyScanRequest = Body(PennyScanRequest()),
-    api_key: str = Security(get_api_key),
-):
+async def run_penny_scan_internal(max_price: float = PENNY_MAX_PRICE, top_n: int = PENNY_TOP_N) -> dict:
+    """
+    페니 스캔 핵심 로직 — HTTP 엔드포인트와 자동 스케줄러 양쪽에서 호출.
+    완료 시 last_penny_scan_at, penny_scan_results_cache 갱신.
+    새 종목이 등록되면 장 중인 경우 Pulse Engine 스트림을 즉시 재시작.
+    """
+    global last_penny_scan_at, penny_scan_results_cache, _current_stream_task
     """
     $1 이하 페니 주식 퀀트 스캔.
     - 2개월 일봉 기반 RSI/MACD/ADX/RVOL 계산
     - DNA 점수 산출 + Top N 자동 watchlist 등록
     """
-    max_price = req.max_price
-    top_n = req.top_n
-
     # 1. 페니 주식 유니버스 수집 ─────────────────────────────────────────
     penny_tickers: List[str] = []
     try:
@@ -2559,9 +2563,19 @@ async def penny_scan(
             color=0x22D3EE,
         )
 
-    # 5. 매매 파라미터 정보 포함하여 반환 ──────────────────────────────
+    # 5. 전역 상태 갱신 + 스트림 재시작 ────────────────────────────────
+    last_penny_scan_at = datetime.now()
+    penny_scan_results_cache = results
+
+    if auto_registered and is_market_hours():
+        print(f"🔄 [Auto-Scan] 신규 종목 {auto_registered} 등록됨 — 장 중 스트림 재시작")
+        if _current_stream_task and not _current_stream_task.done():
+            _current_stream_task.cancel()
+        _current_stream_task = asyncio.create_task(start_alpaca_stream())
+
+    # 6. 반환 ──────────────────────────────────────────────────────────
     return {
-        "scanned_at": datetime.now().isoformat(),
+        "scanned_at": last_penny_scan_at.isoformat(),
         "total_scanned": len(results),
         "penny_params": {
             "max_price": max_price,
@@ -2575,6 +2589,33 @@ async def penny_scan(
         },
         "results": results,
         "auto_registered": auto_registered,
+    }
+
+
+@app.post("/api/penny/scan")
+async def penny_scan(
+    req: PennyScanRequest = Body(PennyScanRequest()),
+    _api_key: str = Security(get_api_key),
+):
+    """수동 페니 스캔 트리거 (HTTP endpoint — 내부 로직은 run_penny_scan_internal 사용)"""
+    return await run_penny_scan_internal(max_price=req.max_price, top_n=req.top_n)
+
+
+@app.get("/api/penny/scan/status")
+async def penny_scan_status():
+    """자동 스캔 상태 조회 — 마지막 실행 시각, 캐시 결과 수, 다음 실행까지 남은 시간"""
+    next_scan_seconds: Optional[int] = None
+    if last_penny_scan_at:
+        elapsed = (datetime.now() - last_penny_scan_at).total_seconds()
+        interval = 4 * 3600  # 4시간 주기
+        remaining = interval - elapsed
+        next_scan_seconds = max(0, int(remaining))
+
+    return {
+        "last_scan_at": last_penny_scan_at.isoformat() if last_penny_scan_at else None,
+        "cached_results": len(penny_scan_results_cache),
+        "next_scan_in_seconds": next_scan_seconds,
+        "auto_scan_active": True,
     }
 
 
@@ -2811,23 +2852,48 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
             print("🌙 [Pulse] 시장 폐장 — 스트림 재시작 스킵 (스냅샷 모드 유지)")
 
 
-async def stream_scheduler(active_tickers: list):
-    """개장 시간을 감지해 Alpaca 스트림을 자동 시작/종료하는 스케줄러"""
-    stream_task: asyncio.Task = None
+async def auto_penny_scan_scheduler():
+    """
+    서버 시작 시 즉시 + 이후 4시간 주기로 페니 스캔 자동 실행.
+    watchlist가 비어있으면 첫 스캔을 더 짧은 대기 후 즉시 실행.
+    """
+    # 초기 대기: 서버 워밍업(DB 연결, 스트림 초기화) 완료를 위해 30초 대기
+    await asyncio.sleep(30)
+
+    while True:
+        try:
+            active = await asyncio.to_thread(db.get_active_tickers, limit=15)
+            watching_count = len(active)
+            print(f"🪙 [Auto-Scan] 자동 페니 스캔 시작 (현재 watchlist: {watching_count}개)")
+            await run_penny_scan_internal()
+            print("✅ [Auto-Scan] 페니 스캔 완료 — 다음 실행까지 4시간 대기")
+        except Exception as e:
+            print(f"⚠️ [Auto-Scan] 스캔 중 오류: {e}")
+
+        await asyncio.sleep(4 * 3600)  # 4시간 주기
+
+
+async def stream_scheduler():
+    """개장 시간을 감지해 Alpaca 스트림을 자동 시작/종료하는 스케줄러.
+    매 개장 사이클마다 DB에서 최신 watchlist를 조회하므로 스캔 후 신규 종목이 즉시 반영됨.
+    """
+    global _current_stream_task
     was_market_open = False
 
     while True:
         now_open = is_market_hours()
 
         if now_open and not was_market_open:
-            print("🔔 [Scheduler] 개장 감지 — Alpaca 스트림 시작")
-            stream_task = asyncio.create_task(start_alpaca_stream(active_tickers))
+            print("🔔 [Scheduler] 개장 감지 — DB에서 최신 watchlist 로드 후 스트림 시작")
+            # tickers를 전달하지 않으면 start_alpaca_stream이 DB에서 직접 조회
+            _current_stream_task = asyncio.create_task(start_alpaca_stream())
             was_market_open = True
 
         elif not now_open and was_market_open:
-            print("🌙 [Scheduler] 폐장 감지 — 스트림 종료 대기")
-            if stream_task and not stream_task.done():
-                stream_task.cancel()
+            print("🌙 [Scheduler] 폐장 감지 — 스트림 종료")
+            if _current_stream_task and not _current_stream_task.done():
+                _current_stream_task.cancel()
+            _current_stream_task = None
             was_market_open = False
 
         elif not now_open and not was_market_open:
@@ -2900,10 +2966,8 @@ async def run_startup_sequence():
         await paper_engine.initialize_account()
 
     active_tickers = await asyncio.to_thread(db.get_active_tickers, limit=15)
-    if not active_tickers:
-        return
 
-    # 1. 히스토리 워밍업
+    # 1. 히스토리 워밍업 (기존 watchlist 종목이 있을 때만)
     if active_tickers:
         await candle_state.warm_up(active_tickers)
 
@@ -2953,10 +3017,10 @@ async def run_startup_sequence():
             except Exception as e:
                 print(f"⚠️ Initial pulse for {ticker} failed: {e}")
 
-    # 3. 실시간 스트림 및 하트비트 시작
+    # 3. 실시간 스트림, 하트비트, 자동 페니 스캔 스케줄러 시작
     asyncio.create_task(system_heartbeat())
-    if active_tickers:
-        asyncio.create_task(stream_scheduler(active_tickers))
+    asyncio.create_task(stream_scheduler())
+    asyncio.create_task(auto_penny_scan_scheduler())
 
 
 # --- REALTIME PULSE ENGINE (End) ---

@@ -28,13 +28,13 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 
 // 로딩 폴백 컴포넌트
 const PageLoadingFallback = () => (
-  <div className="p-8 space-y-4 bg-slate-900 min-h-screen">
-    <Skeleton className="h-[60px] w-full bg-slate-800" />
+  <div className="p-8 space-y-4 bg-slate-50 min-h-screen">
+    <Skeleton className="h-[60px] w-full bg-slate-200" />
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <Skeleton className="h-[300px] w-full lg:col-span-2 bg-slate-800" />
-      <Skeleton className="h-[300px] w-full bg-slate-800" />
+      <Skeleton className="h-[300px] w-full lg:col-span-2 bg-slate-200" />
+      <Skeleton className="h-[300px] w-full bg-slate-200" />
     </div>
-    <Skeleton className="h-[400px] w-full bg-slate-800" />
+    <Skeleton className="h-[400px] w-full bg-slate-200" />
   </div>
 );
 
@@ -52,14 +52,14 @@ function App() {
               <Route element={<Layout />}>
                 {/* 1. 홈: 통합 지휘 통제실 (Unified Command Center) */}
                 <Route path="/stock/dashboard" element={<UnifiedDashboard />} />
-                <Route path="command" element={<Navigate to="/stock/dashboard?tab=command" replace />} />
-                <Route path="dashboard" element={<Navigate to="/stock/dashboard?tab=command" replace />} />
-                <Route path="pulse" element={<Navigate to="/stock/dashboard?tab=command" replace />} />
+                <Route path="command" element={<Navigate to="/stock/dashboard" replace />} />
+                <Route path="dashboard" element={<Navigate to="/stock/dashboard" replace />} />
+                <Route path="pulse" element={<Navigate to="/stock/dashboard" replace />} />
 
                 {/* 2. 퀀트 핫 아이템 및 페니 랩 리다이렉트 */}
-                <Route path="scanner" element={<Navigate to="/stock/dashboard?tab=scanner" replace />} />
-                <Route path="scan" element={<Navigate to="/stock/dashboard?tab=scanner" replace />} />
-                <Route path="penny" element={<Navigate to="/stock/dashboard?tab=penny" replace />} />
+                <Route path="scanner" element={<Navigate to="/stock/dashboard" replace />} />
+                <Route path="scan" element={<Navigate to="/stock/dashboard" replace />} />
+                <Route path="penny" element={<Navigate to="/stock/dashboard" replace />} />
 
                 {/* 3. 부품 재고 검색 */}
                 <Route path="parts-search" element={<MuzepartSearchPage />} />

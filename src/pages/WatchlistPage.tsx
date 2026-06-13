@@ -115,20 +115,20 @@ export const WatchlistPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#020617] relative overflow-hidden">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 relative overflow-hidden pb-12">
       {/* Terminal Grid Overlay */}
-      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
-           style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+      <div className="absolute inset-0 opacity-[0.4] pointer-events-none" 
+           style={{ backgroundImage: 'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
       
       {/* Ambient Glows */}
-      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/10 blur-[120px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-cyan-500/10 blur-[120px] rounded-full translate-x-1/2 translate-y-1/2 pointer-events-none" />
+      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/5 blur-[120px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-cyan-500/5 blur-[120px] rounded-full translate-x-1/2 translate-y-1/2 pointer-events-none" />
 
       {/* 🆕 Global Refresh Indicator */}
       {isRefreshing && (
-        <div className="fixed top-20 right-8 z-[100] flex items-center gap-3 bg-[#0b101a]/90 backdrop-blur-xl px-4 py-2 rounded-xl border border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.2)] animate-in fade-in slide-in-from-top-4">
-          <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
-          <span className="text-[10px] font-black text-indigo-300 uppercase tracking-[0.2em]">Synchronizing Orbit...</span>
+        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-white/90 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-slate-100 shadow-xl animate-in fade-in slide-in-from-top-4">
+          <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
+          <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Synchronizing Orbit...</span>
         </div>
       )}
 

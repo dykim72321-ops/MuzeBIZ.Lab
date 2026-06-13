@@ -183,20 +183,51 @@ scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SC
 
 ### 단일 진입점: `src/pages/UnifiedDashboard.tsx`
 
-`/stock/dashboard?tab=<탭명>` URL 파라미터로 탭 전환 (`useSearchParams`).
+탭 없는 단일 스크롤 뷰. `/stock/dashboard` 하나의 URL만 사용한다 (`useSearchParams` 없음).
 
-| 탭 | URL | 설명 |
+구버전 라우트는 모두 이 페이지로 리다이렉트:
+- `/dashboard`, `/pulse`, `/command`, `/scanner`, `/scan`, `/penny` → `/stock/dashboard`
+
+`Dashboard.tsx`, `ScannerPage.tsx`는 삭제됨. UnifiedDashboard가 모든 기능을 흡수.
+
+### 화면 레이아웃 (위 → 아래)
+
+| 섹션 | 내용 |
+|---|---|
+| **헤더** | 시장 개장 상태 · ARM 토글 · 라이브 헌팅 · 페니 스캔 · 설정 |
+| **지표 카드 4개** | 총 자산 · 가용 잔고 · 미실현 손익 · 백테스트 승률 |
+| **메인 2열** | 좌(2/3): 누적 손익 차트 + 퀀트 추천 종목 / 우(1/3): 통합 관심종목 오빗 |
+| **하단 2열** | 좌(2/3): 현재 보유 포지션 테이블 / 우(1/3): 최근 청산 이력 |
+
+### 헤더 버튼 동작
+
+| 버튼 | 동작 | 비고 |
 |---|---|---|
-| `command` | `?tab=command` | 실시간 Pulse 시그널, Alpha Discovery, LiveExecution |
-| `scanner` | `?tab=scanner` | 전체 종목 DNA 필터링 스캐너 |
-| `penny` | `?tab=penny` | Penny Lab (스캔·관심종목·포지션·이력) |
+| **ARM 토글** | `POST /api/broker/arm` → `is_armed` 전환 | 현재 상태 + "→ 전환" 레이블 분리 표시 |
+| **라이브 헌팅** | Edge Function `admin-proxy/api/hunt` 트리거 | Alpaca Universe · DNA ≥ 80 · 일반 종목 |
+| **페니 스캔** | `POST /api/penny/scan` | yfinance · $1.50 이하 · DNA ≥ 70 · 2개월 일봉 |
+| **설정** | NexGuard Control 슬라이드 패널 열기 | 전략 파라미터 수정 |
 
-**구버전 라우트는 모두 리다이렉트**:
-- `/dashboard`, `/pulse`, `/command` → `?tab=command`
-- `/scanner`, `/scan` → `?tab=scanner`
-- `/penny` → `?tab=penny`
+### 관심종목 오빗 패널
 
-`Dashboard.tsx`와 `ScannerPage.tsx`는 삭제됨. UnifiedDashboard가 모든 기능을 흡수.
+- **WATCHING / HOLDING** 종목만 기본 표시
+- **EXITED** 종목은 "청산 완료 N개 ▼ 펼치기" 토글로 숨김 처리
+- 삭제 버튼(휴지통)은 hover 시에만 노출
+
+### 누적 손익 차트
+
+- `paper_history` 기반 실제 청산 이력으로만 구성
+- 이력이 없으면 "청산 이력이 없습니다" 빈 상태 UI 표시 (샘플 데이터 없음)
+- 30초마다 `loadDashboardData()` + `loadArmStatus()` 자동 갱신
+
+### 페니 표시 임계값 (`UnifiedDashboard.tsx` 상단 상수)
+
+```typescript
+const PENNY_DISPLAY_THRESHOLD = 1.5; // 현재가 기준 +50% tolerance
+```
+
+- 관심종목·발굴 종목의 `isPenny` 판정: `currentPrice <= 1.5`
+- 포지션·이력의 `isPenny` 판정: `entry_price <= 1.0` (진입가 기준, 변경 없음)
 
 ### 컴포넌트 연결 구조
 
@@ -214,10 +245,9 @@ Frontend (Vite :5173)
 
 ### 데이터 로딩 패턴 (UnifiedDashboard)
 
-각 탭은 `activeTab` 변경 시점에만 데이터를 fetch (지연 로딩):
-- `command` 탭 활성화 → `loadCommandData()` (watchlist, daily_discovery)
-- `scanner` 탭 활성화 → `fetchScannerStocks()`
-- `penny` 탭 활성화 → `loadPennySideData()` + 30초 폴링 (`setInterval`)
+단일 `loadDashboardData()` 함수가 모든 데이터를 병렬 fetch:
+- watchlist, paper_positions, paper_history, paper_account, daily_discovery
+- 30초 `setInterval`로 자동 갱신 (ARM 상태 포함)
 
 ---
 

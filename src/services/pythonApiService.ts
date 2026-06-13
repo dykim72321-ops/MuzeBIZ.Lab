@@ -260,6 +260,22 @@ export async function fetchStrategyStats(): Promise<StrategyStats | null> {
   }
 }
 
+export interface PennyScanStatus {
+  last_scan_at: string | null;
+  cached_results: number;
+  next_scan_in_seconds: number | null;
+  auto_scan_active: boolean;
+}
+
+export async function fetchPennyScanStatus(): Promise<PennyScanStatus | null> {
+  try {
+    return await apiFetch('/api/penny/scan/status');
+  } catch (error) {
+    console.error('[PythonAPI] Penny scan status error:', error);
+    return null;
+  }
+}
+
 /**
  * [NEW] Admin API Fetch Utility
  * Supabase Edge Function Proxy를 통해 Python Engine 호출
