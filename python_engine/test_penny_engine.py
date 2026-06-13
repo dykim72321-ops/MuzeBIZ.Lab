@@ -71,10 +71,10 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
             dna_score=85.0,
         )
 
-        # Verify initial TS is -15% (0.50 * 0.85 = 0.425)
+        # Verify initial TS is -15% (0.5075 * 0.85 = 0.431375)
         insert_args = self.mock_table_positions.insert.call_args[0][0]
         self.assertEqual(insert_args["ticker"], "SNDL")
-        self.assertAlmostEqual(insert_args["ts_threshold"], 0.425)
+        self.assertAlmostEqual(insert_args["ts_threshold"], 0.431375)
         self.assertFalse(insert_args["is_scaled_out"])
 
         # 2. Regular stock buy (price = $2.00)
@@ -89,10 +89,10 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
             dna_score=85.0,
         )
 
-        # Verify initial TS is -10% (2.00 * 0.90 = 1.80)
+        # Verify initial TS is -10% (2.01 * 0.90 = 1.809)
         insert_args = self.mock_table_positions.insert.call_args[0][0]
         self.assertEqual(insert_args["ticker"], "AAPL")
-        self.assertAlmostEqual(insert_args["ts_threshold"], 1.80)
+        self.assertAlmostEqual(insert_args["ts_threshold"], 1.809)
         self.assertFalse(insert_args["is_scaled_out"])
 
     async def test_penny_breakeven_trigger(self):

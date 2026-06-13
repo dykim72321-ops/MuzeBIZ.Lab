@@ -1215,8 +1215,8 @@ async def validate_candidates(
             df["MA5"] = df["Close"].rolling(window=5).mean()
             df["Deviation"] = (df["Close"] - df["MA5"]) / df["MA5"]
 
-            # 3. RVOL (상대 거래량, 당일 제외 20일 평균 기준)
-            df["Vol_Avg"] = df["Volume"].shift(1).rolling(window=20).mean()
+            # 3. RVOL (상대 거래량, 당일 제외 20일 median 기준)
+            df["Vol_Avg"] = df["Volume"].shift(1).rolling(window=20, min_periods=1).median()
             df["RVOL"] = df["Volume"] / (df["Vol_Avg"] + 1e-9)
 
             latest = df.iloc[-1]
@@ -1982,37 +1982,57 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
 
     # 4. RVOL (Relative Volume) 계산
     # avg_daily_volume 주입 시: 분봉 거래량 / (일평균 / 390분) → 실제 30일 대비 비율
-    # 미주입 시: rolling(30) fallback (1분봉 30개 = 30분 평균이므로 정확도 낮음)
+    # 미주입 시: rolling(30) 중위값(median) fallback
     if avg_daily_volume > 0:
         avg_min_volume = avg_daily_volume / 390  # 하루 390 거래 분
         df["RVOL"] = df["Volume"] / (avg_min_volume + 1e-9)
     else:
-        df["Avg_Vol_30d"] = df["Volume"].shift(1).rolling(window=30).mean()
+        df["Avg_Vol_30d"] = df["Volume"].shift(1).rolling(window=30, min_periods=1).median()
         df["RVOL"] = df["Volume"] / (df["Avg_Vol_30d"] + 1e-9)
 
-    # 5. 추격 매수(FOMO) 방지 필터
-    # 당일 시가 대비 OR 전일 종가 대비 50% 이상 급등한 경우 상투 위험으로 간주
-    df["Is_Extended"] = (df["Close"] > df["Open"] * 1.5) | (
-        df["Close"] > df["Close"].shift(1) * 1.5
-    )
+    # 5. 추격 매수(FOMO) 방지 필터 (25% 및 20일 이평선 이격도)
+    ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
+    df["Is_Extended"] = (df["Close"] > df["Open"] * 1.25) | (
+        df["Close"] > df["Close"].shift(1) * 1.25
+    ) | (df["Close"] > ma20 * 1.30)
 
-    # 6. 전략적 합치 (Confluence) 로직
-    # Strong Buy: RSI < 50 AND MACD Golden Cross AND ADX > 20 AND RVOL > 1.5 AND Not Extended
-    # shift(1) < 0 (strict): 직전 봉이 정확히 0인 경우 거짓 신호 제거
-    df["Strong_Buy"] = (
-        (df["RSI"] < 50)
-        & (df["MACD_Diff"] > 0)
-        & (df["MACD_Diff"].shift(1) < 0)
-        & (df["ADX"] > 20)
-        & (df["RVOL"] > 1.5)
-        & (~df["Is_Extended"])
-    )
+    # 6. DNA Score 벡터 연산 및 Strong_Buy / Strong_Sell 통합
+    score = pd.Series(50.0, index=df.index)
 
-    # Strong Sell: RSI > 65 AND MACD Dead Cross
-    # shift(1) > 0 (strict): 대칭적으로 엄격한 기준 적용
-    df["Strong_Sell"] = (
-        (df["RSI"] > 65) & (df["MACD_Diff"] < 0) & (df["MACD_Diff"].shift(1) > 0)
-    )
+    # RSI scoring (RVOL 돌파 시 패널티 면제 포함)
+    score += np.where(df["RSI"] < 30, 20,
+             np.where(df["RSI"] < 45, 15,
+             np.where(df["RSI"] < 55, 0,
+             np.where(df["RSI"] < 65, np.where(df["RVOL"] >= 3.0, 0, -10),
+                                      np.where(df["RVOL"] >= 3.0, 0, -20)))))
+
+    # MACD scoring (기울기 판정)
+    macd_diff = df["MACD_Diff"]
+    macd_diff_prev = df["MACD_Diff"].shift(1).fillna(0.0)
+    is_golden = (macd_diff > 0) & (macd_diff_prev < 0)
+    is_dead = (macd_diff < 0) & (macd_diff_prev > 0)
+    score += np.where(is_golden, 20,
+             np.where(is_dead, -20,
+             np.where(macd_diff > macd_diff_prev, 8, -8)))
+
+    # ADX scoring
+    score += np.where(df["ADX"] > 25, 10,
+             np.where(df["ADX"] > 20, 5, 0))
+
+    # RVOL scoring
+    score += np.where(df["RVOL"] > 5.0, 15,
+             np.where(df["RVOL"] > 3.0, 10,
+             np.where(df["RVOL"] > 2.0, 5,
+             np.where(df["RVOL"] < 1.0, -5, 0))))
+
+    # Extended scoring
+    score -= np.where(df["Is_Extended"], 25, 0)
+
+    df["DNA_Score"] = score.clip(0.0, 100.0).round(1)
+
+    # DNA Score 기반으로 시그널 단일 통제
+    df["Strong_Buy"] = df["DNA_Score"] >= 85.0
+    df["Strong_Sell"] = df["DNA_Score"] <= 40.0
 
     return df
 
@@ -2082,6 +2102,7 @@ def calculate_dna_score(
     score = 50.0
 
     # RSI (±20): 과매도 = 강세, 과매수 = 약세
+    # 돌파 매매 고려: RVOL >= 3.0일 때는 과매수 패널티 면제(0점) 적용
     if rsi < 30:
         score += 20
     elif rsi < 45:
@@ -2089,21 +2110,20 @@ def calculate_dna_score(
     elif rsi < 55:
         score += 0
     elif rsi < 65:
-        score -= 10
+        score -= 0 if rvol >= 3.0 else 10
     else:
-        score -= 20
+        score -= 0 if rvol >= 3.0 else 20
 
-    # MACD (±20): 골든/데드크로스 최우선, 방향성 차순
-    # Strong_Buy 조건(shift(1) < 0 strict)과 동일한 기준으로 통일
+    # MACD (±20): 골든/데드크로스 최우선, 방향성 차순 (기울기 판정)
     is_golden = macd_diff > 0 and macd_diff_prev < 0
     is_dead = macd_diff < 0 and macd_diff_prev > 0
     if is_golden:
         score += 20
     elif is_dead:
         score -= 20
-    elif macd_diff > 0:
+    elif macd_diff > macd_diff_prev:  # 기울기(상승 모멘텀)
         score += 8
-    else:
+    else:  # 기울기(하락 모멘텀)
         score -= 8
 
     # ADX (+10): 추세 강도
@@ -2339,10 +2359,37 @@ async def run_penny_scan_internal(
             ]
             print(f"📡 [Penny] Alpaca universe: {len(tradable)} tradable US equities")
 
+            # [Guide-1] 누적 풀에서 최근 30일 이내 검증 종목 최대 100개 회수
+            pool_tickers: List[str] = []
+            if supabase:
+                try:
+                    from datetime import timedelta
+                    cutoff = (datetime.now() - timedelta(days=30)).isoformat()
+                    pool_res = await asyncio.to_thread(
+                        supabase.table("penny_universe_pool")
+                        .select("ticker")
+                        .gte("last_seen_at", cutoff)
+                        .order("scan_count", desc=True)
+                        .limit(100)
+                        .execute
+                    )
+                    if pool_res.data:
+                        pool_tickers = [r["ticker"] for r in pool_res.data]
+                        print(f"📦 [Penny Pool] Loaded {len(pool_tickers)} tickers from accumulated pool")
+                except Exception as pool_err:
+                    print(f"⚠️ [Penny Pool] Pool fetch skipped: {pool_err}")
+
             # yfinance batch로 현재가 조회 (100개씩 배치)
             import random
 
-            sampled = random.sample(tradable, min(600, len(tradable)))
+            # [Guide-1] 랜덤 500 + 기존 검증 풀 100 믹스 (중복 제거)
+            pool_set = set(pool_tickers)
+            fresh_sample = random.sample(
+                [t for t in tradable if t not in pool_set],
+                min(500, len(tradable)),
+            )
+            sampled = fresh_sample + pool_tickers
+            print(f"🔀 [Penny] Universe mix: {len(fresh_sample)} fresh + {len(pool_tickers)} pool = {len(sampled)} total")
 
             batch_size = 50
             for i in range(0, len(sampled), batch_size):
@@ -2415,6 +2462,28 @@ async def run_penny_scan_internal(
 
     print(f"🪙 [Penny] Found {len(penny_tickers)} stocks under ${max_price}")
 
+    # [Guide-1] 검증된 페니 종목을 누적 풀에 UPSERT (다음 스캔 시 믹스에 활용)
+    if supabase and penny_tickers:
+        try:
+            now_iso = datetime.now().isoformat()
+            upsert_rows = [
+                {"ticker": t, "last_price": 0.0, "last_seen_at": now_iso}
+                for t in penny_tickers
+            ]
+            await asyncio.to_thread(
+                supabase.table("penny_universe_pool")
+                .upsert(
+                    upsert_rows,
+                    on_conflict="ticker",
+                    # scan_count는 DB에서 +1 처리 불가 → 후처리로 개별 increment 대신
+                    # last_seen_at 갱신만으로 충분 (order by scan_count는 근사치)
+                )
+                .execute
+            )
+            print(f"✅ [Penny Pool] UPSERT {len(penny_tickers)} tickers → penny_universe_pool")
+        except Exception as upsert_err:
+            print(f"⚠️ [Penny Pool] UPSERT skipped: {upsert_err}")
+
     # 2. 각 종목 2개월 일봉 기술적 지표 계산 ─────────────────────────────
     results = []
     for ticker in penny_tickers[:80]:  # 최대 80개 분석 (성능 제한)
@@ -2441,14 +2510,15 @@ async def run_penny_scan_internal(
             )
             df["ADX"] = adx_ind.adx()
 
-            # RVOL (30일 평균 대비 현재)
-            df["Avg_Vol"] = df["Volume"].rolling(window=30).mean()
+            # RVOL (30일 median 대비 현재, self-dilution 방지를 위해 shift(1))
+            df["Avg_Vol"] = df["Volume"].shift(1).rolling(window=30, min_periods=1).median()
             df["RVOL"] = df["Volume"] / (df["Avg_Vol"] + 1e-9)
 
-            # 추격 매수 방지
-            df["Is_Extended"] = (df["Close"] > df["Open"] * 1.5) | (
-                df["Close"] > df["Close"].shift(1) * 1.5
-            )
+            # 추격 매수 방지 (25% 및 20일 이평선 이격도)
+            ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
+            df["Is_Extended"] = (df["Close"] > df["Open"] * 1.25) | (
+                df["Close"] > df["Close"].shift(1) * 1.25
+            ) | (df["Close"] > ma20 * 1.30)
 
             latest = df.iloc[-1]
             prev = df.iloc[-2] if len(df) >= 2 else latest
@@ -2487,24 +2557,19 @@ async def run_penny_scan_internal(
                 rsi, macd_diff, macd_diff_prev, adx, rvol, is_extended
             )
 
-            # Signal / Strength
+            # Signal / Strength (DNA 점수 기준으로 일원화)
             signal_type = "HOLD"
             strength = "NORMAL"
-            is_golden = macd_diff > 0 and macd_diff_prev < 0
 
-            if (
-                rsi < 45
-                and is_golden
-                and adx > 20
-                and rvol >= PENNY_RVOL_MIN
-                and not is_extended
-            ):
+            if dna_score >= 85.0:
                 signal_type = "BUY"
                 strength = "STRONG"
-            elif rsi < 50 and macd_diff > 0:
+            elif dna_score >= 80.0:
                 signal_type = "BUY"
-            elif rsi > 65 and macd_diff < 0:
+                strength = "NORMAL"
+            elif dna_score <= 40.0:
                 signal_type = "SELL"
+                strength = "STRONG"
 
             results.append(
                 {
@@ -2523,6 +2588,17 @@ async def run_penny_scan_internal(
                     "is_watchlisted": False,
                 }
             )
+            # [Guide-1] 분석 완료 후 실제 종가로 풀 가격 갱신
+            if supabase:
+                try:
+                    await asyncio.to_thread(
+                        supabase.table("penny_universe_pool")
+                        .update({"last_price": round(price, 4)})
+                        .eq("ticker", ticker)
+                        .execute
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             print(f"⚠️ [Penny] {ticker} analysis error: {e}")
             continue
@@ -2675,23 +2751,78 @@ except Exception:
     supabase = None
 
 
+# [Guide-2] 메모리 내 HOLD 포지션 셋 — DB 조회 없이 O(1) 분기 결정
+_held_tickers: set = set()
+
+
+def _rsi14_last(df: pd.DataFrame) -> float:
+    """RSI-14 마지막 값만 빠르게 계산 (DNA 전체 연산 대비 약 5× 경량)"""
+    try:
+        return float(ta.momentum.RSIIndicator(df["Close"], window=14).rsi().iloc[-1])
+    except Exception:
+        return 50.0
+
+
 async def on_minute_bar_closed(bar):
     """
-    Alpaca에서 1분봉이 완성(Close)될 때마다 즉시 푸시(Push)해주는 콜백 함수.
-    이곳이 새로운 Pulse Engine의 심장이 됩니다.
+    Alpaca 1분봉 완성 콜백.
+
+    [Guide-2] 역할 분리:
+    - HOLD 포지션 종목 → RSI-14 + 현재가만 계산하는 경량 모니터 경로
+      (DNA 전체 재연산 생략 → CPU/API 레이트 리밋 절감)
+    - 미보유 종목 → 기존 run_pulse_engine() 전체 DNA 경로 (발굴·신호 생성)
     """
     ticker_symbol = bar.symbol
     try:
         # 1. 상태 업데이트 및 히스토리 획득 (Stateful Queue)
         df_hist = candle_state.update(ticker_symbol, bar)
 
-        # 2. 충분한 데이터가 쌓였는지 확인 (MACD/RSI 계산을 위해 최소 35개 필요)
+        # 2. 최소 데이터 확인 (MACD/RSI 계산을 위해 최소 35개 필요)
         if len(df_hist) < 35:
-            # print(f"⏳ {ticker_symbol} 데이터 축적 중... ({len(df_hist)}/35)")
             return
 
+        current_price = float(bar.close)
+
+        # ── [Guide-2] 경량 모니터 경로 (HOLD 포지션 전용) ─────────────────
+        if ticker_symbol in _held_tickers and paper_engine:
+            rsi_val = await asyncio.to_thread(_rsi14_last, df_hist)
+            # WebSocket 프론트엔드에도 최소 페이로드 전송 (현재가 + RSI)
+            await manager.broadcast({
+                "ticker": ticker_symbol,
+                "price": current_price,
+                "rsi": round(rsi_val, 2),
+                "signal": "HOLD",
+                "strength": "MONITOR",
+                "dna_score": None,
+            })
+            await paper_engine.process_signal(
+                ticker=ticker_symbol,
+                price=current_price,
+                signal_type="HOLD",
+                strength="MONITOR",
+                rsi=rsi_val,
+                ai_report="",
+                is_armed=SYSTEM_ARMED,
+                dna_score=0.0,
+                kelly_weight=0.0,
+            )
+            # 포지션 청산 후 셋에서 제거 (process_signal 내부가 DB에서 삭제)
+            if supabase:
+                try:
+                    chk = await asyncio.to_thread(
+                        supabase.table("paper_positions")
+                        .select("ticker")
+                        .eq("ticker", ticker_symbol)
+                        .execute
+                    )
+                    if not chk.data:
+                        _held_tickers.discard(ticker_symbol)
+                except Exception:
+                    pass
+            return  # 경량 경로 종료 — DNA 재연산 없음
+
+        # ── 전체 DNA 경로 (신규 발굴 / 미보유 종목) ───────────────────────
         # 3. 고도화된 페이로드 생성 (수학적 및 AI 로직 오프홀딩)
-        # run_pulse_engine은 내부적으로 ta 라이브러리를 사용함
         payload = await asyncio.to_thread(run_pulse_engine, ticker_symbol, df_hist)
 
         # 4. WebSocket 프론트엔드 실시간 전송
@@ -2740,7 +2871,6 @@ async def on_minute_bar_closed(bar):
                     await webhook.send_alert(title=title, description=desc, color=color)
 
                 # daily_discovery 공통 소스 upsert (ScannerPage + AlphaDiscovery 단일 진실 소스)
-                # payload["dna_score"]가 최상위에 항상 세팅되므로 중첩 경로 대신 직접 접근
                 dna_val = float(payload.get("dna_score", 0.0))
                 try:
                     await asyncio.to_thread(
@@ -2776,6 +2906,14 @@ async def on_minute_bar_closed(bar):
                         dna_score=dna_val,
                         kelly_weight=float(payload.get("recommended_weight", 0.0)),
                     )
+                    # [Guide-2] 매수 성공 시 _held_tickers에 등록 (다음 틱부터 경량 경로)
+                    if (
+                        payload.get("signal") == "BUY"
+                        and payload.get("strength") == "STRONG"
+                        and SYSTEM_ARMED
+                        and dna_val >= (70 if current_price <= 1.0 else 80)
+                    ):
+                        _held_tickers.add(ticker_symbol)
 
                 print(
                     f"⚡ [Alpaca Stream] {ticker_symbol} processed: {payload.get('signal')} ({payload.get('strength')}) | vol_mul={payload.get('volume_multiplier', 1.0):.1f}x"
@@ -3000,6 +3138,22 @@ async def run_startup_sequence():
     # 0b. 페이퍼 트레이딩 계좌 초기화 (필요 시)
     if paper_engine:
         await paper_engine.initialize_account()
+
+    # 0c. [Guide-2] 기존 HOLD 포지션을 _held_tickers에 로드 (서버 재시작 후 경량 경로 유지)
+    if supabase:
+        try:
+            held_res = await asyncio.to_thread(
+                supabase.table("paper_positions")
+                .select("ticker")
+                .eq("status", "HOLD")
+                .execute
+            )
+            if held_res.data:
+                for row in held_res.data:
+                    _held_tickers.add(row["ticker"])
+                print(f"📌 [Guide-2] Restored {len(_held_tickers)} HOLD tickers to monitor set: {sorted(_held_tickers)}")
+        except Exception as e:
+            print(f"⚠️ [Guide-2] Could not restore held tickers: {e}")
 
     active_tickers = await asyncio.to_thread(db.get_active_tickers, limit=15)
 

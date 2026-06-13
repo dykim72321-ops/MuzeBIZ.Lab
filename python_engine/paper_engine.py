@@ -22,6 +22,32 @@ PENNY_SCALE_OUT_RSI = 70  # 1차 매도 RSI 기준 (일반 60 → 페니 70)
 PENNY_SCALE_OUT_PROFIT = 0.20  # 1차 매도 수익률 기준 (+20% OR RSI>70)
 PENNY_TIGHT_TS_PCT = 0.93  # Scale-Out 후 잔여 물량 TS: highest × 93% (-7%)
 
+# ── [Guide-3] 슬리피지 보정 (보수적 시뮬레이션) ─────────────────────────────
+# 페니 종목은 호가 스프레드가 커서 더 높은 슬리피지 적용
+SLIPPAGE_BUY_NORMAL = 0.005   # 일반 종목 매수 슬리피지 +0.5%
+SLIPPAGE_SELL_NORMAL = 0.005  # 일반 종목 매도 슬리피지 -0.5%
+SLIPPAGE_BUY_PENNY = 0.015    # 페니 종목 매수 슬리피지 +1.5% (와이드 스프레드 반영)
+SLIPPAGE_SELL_PENNY = 0.010   # 페니 종목 매도 슬리피지 -1.0%
+# 거래량이 극도로 낮은 종목은 슬리피지를 2× 가중 (유동성 패널티)
+SLIPPAGE_LOW_VOLUME_THRESHOLD = 50_000   # 주/일 거래량 기준
+
+
+def _apply_slippage(price: float, is_buy: bool, is_penny: bool, volume: int = 0) -> float:
+    """
+    체결 불리 방향으로 슬리피지를 반영한 보수적 모의 체결가 반환.
+    - 매수: 시장가보다 높게 체결 (ask 쪽 스프레드)
+    - 매도: 시장가보다 낮게 체결 (bid 쪽 스프레드)
+    - 거래량 < SLIPPAGE_LOW_VOLUME_THRESHOLD → 슬리피지 2× 가중
+    """
+    base_pct = (SLIPPAGE_BUY_PENNY if is_penny else SLIPPAGE_BUY_NORMAL) if is_buy \
+               else (SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL)
+    if volume > 0 and volume < SLIPPAGE_LOW_VOLUME_THRESHOLD:
+        base_pct *= 2.0
+    if is_buy:
+        return round(price * (1.0 + base_pct), 6)
+    else:
+        return round(price * (1.0 - base_pct), 6)
+
 
 class PaperTradingManager:
     def __init__(self, supabase_client: Client):
@@ -188,17 +214,19 @@ class PaperTradingManager:
             if buy_budget < MIN_BUY_BUDGET:
                 return
 
-            units = buy_budget / price
-            ts_init = PENNY_TS_INIT_PCT if price <= PENNY_MAX_PRICE else TS_INIT_PCT
-            ts_threshold = price * ts_init
+            # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결
+            fill_price = _apply_slippage(price, is_buy=True, is_penny=is_penny_signal)
+            units = buy_budget / fill_price
+            ts_init = PENNY_TS_INIT_PCT if is_penny_signal else TS_INIT_PCT
+            ts_threshold = fill_price * ts_init
 
             new_pos = {
                 "ticker": ticker.upper(),
                 "status": "HOLD",
                 "weight": round(effective_fraction, 4),
-                "entry_price": price,
-                "current_price": price,
-                "highest_price": price,
+                "entry_price": fill_price,
+                "current_price": fill_price,
+                "highest_price": fill_price,
                 "ts_threshold": ts_threshold,
                 "units": units,
                 "is_scaled_out": False,
@@ -231,18 +259,19 @@ class PaperTradingManager:
                         f"Cash UPDATE failed for {ticker}, position rolled back"
                     )
 
+                slip_pct = (fill_price / price - 1) * 100
                 report_line = f"\n💡 {ai_report}" if ai_report else ""
                 await self.webhook.send_alert(
                     title=f"🚀 [PAPER BUY] {ticker}",
                     description=(
-                        f"진입가: ${price:.2f} | 수량: {units:.2f}주\n"
-                        f"DNA: {dna_score:.0f} | 손절선: ${ts_threshold:.2f} ({'-15%' if price <= PENNY_MAX_PRICE else '-10%'})\n"
-                        f"비중: {effective_fraction*100:.1f}%{report_line}"
+                        f"시장가: ${price:.4f} → 체결가: ${fill_price:.4f} (슬리피지 {slip_pct:+.2f}%)\n"
+                        f"수량: {units:.2f}주 | DNA: {dna_score:.0f}\n"
+                        f"손절선: ${ts_threshold:.4f} ({'-15%' if is_penny_signal else '-10%'}) | 비중: {effective_fraction*100:.1f}%{report_line}"
                     ),
                     color=0x2ECC71,
                 )
                 # 관심종목 자동 등록 (DNA≥80 매수 → HOLDING)
-                await self._sync_watchlist_buy(ticker, price, ts_threshold, dna_score)
+                await self._sync_watchlist_buy(ticker, fill_price, ts_threshold, dna_score)
             except Exception as e:
                 print(f"❌ Buy Error: {e}")
                 raise
@@ -280,7 +309,9 @@ class PaperTradingManager:
                 scale_trigger = rsi > 60
             if scale_trigger and not is_scaled_out and is_armed and price > entry_price:
                 sell_units = units * SCALE_OUT_RATIO
-                profit_cash = sell_units * price
+                # [Guide-3] 매도 슬리피지 적용
+                fill_sell_price = _apply_slippage(price, is_buy=False, is_penny=is_penny)
+                profit_cash = sell_units * fill_sell_price
 
                 # 가상 계좌 업데이트 (cash_available만 갱신 — total_assets는 /api/broker/paper/account에서
                 # cash + invested_capital로 동적 계산하므로 DB 컬럼을 직접 쓰지 않음)
@@ -313,7 +344,8 @@ class PaperTradingManager:
                     .execute
                 )
 
-                price_str = f"${price:.4f}" if is_penny else f"${price:.2f}"
+                slip_sell_pct = (fill_sell_price / price - 1) * 100
+                price_str = f"${fill_sell_price:.4f}" if is_penny else f"${fill_sell_price:.2f}"
                 ts_desc = (
                     f"-7% TS ${new_ts_val:.4f}"
                     if is_penny
@@ -321,7 +353,7 @@ class PaperTradingManager:
                 )
                 await self.webhook.send_alert(
                     title=f"🟠 [PAPER SCALE-OUT] {ticker}",
-                    description=f"50% 분할 익절 완료: {price_str}\n방어선 상향: {ts_desc}",
+                    description=f"50% 분할 익절 완료: {price_str} (슬리피지 {slip_sell_pct:+.2f}%)\n방어선 상향: {ts_desc}",
                     color=0xE67E22,
                 )
                 # 관심종목 stop_loss 동기화 (TS 이동)
@@ -331,9 +363,11 @@ class PaperTradingManager:
 
             # C. TRAILING STOP 체크 (ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)
             if price < ts_threshold:
-                profit_cash = units * price
-                pnl_pct = (price / entry_price - 1) * 100
-                profit_amt = (price - entry_price) * units
+                # [Guide-3] 손절 매도 슬리피지 적용 (패닉 셀 상황 → 불리한 체결)
+                fill_exit_price = _apply_slippage(price, is_buy=False, is_penny=is_penny)
+                profit_cash = units * fill_exit_price
+                pnl_pct = (fill_exit_price / entry_price - 1) * 100
+                profit_amt = (fill_exit_price - entry_price) * units
 
                 # 가상 계좌 업데이트
                 new_cash = acc["cash_available"] + profit_cash
@@ -348,7 +382,7 @@ class PaperTradingManager:
                 history_data = {
                     "ticker": ticker,
                     "entry_price": entry_price,
-                    "exit_price": price,
+                    "exit_price": fill_exit_price,
                     "pnl_pct": pnl_pct,
                     "profit_amt": profit_amt,
                     "exit_reason": "Trailing Stop",
@@ -366,9 +400,13 @@ class PaperTradingManager:
                 )
 
                 status_emoji = "✅" if pnl_pct > 0 else "🛑"
+                slip_exit_pct = (fill_exit_price / price - 1) * 100
                 await self.webhook.send_alert(
                     title=f"{status_emoji} [PAPER EXIT] {ticker}",
-                    description=f"청산가: ${price:.2f} | 수익률: {pnl_pct:.2f}%\n사유: 트레일링 스탑 발동",
+                    description=(
+                        f"청산가: ${fill_exit_price:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {pnl_pct:.2f}%\n"
+                        f"사유: 트레일링 스탑 발동"
+                    ),
                     color=0x34495E,
                 )
                 # 관심종목 상태 → EXITED
