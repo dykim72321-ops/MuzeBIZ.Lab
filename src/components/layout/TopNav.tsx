@@ -6,14 +6,12 @@ import {
   Bell,
   Menu,
   ChevronDown,
-  Zap,
   Target
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const NAVIGATION = [
   { name: '통합 지휘소', icon: LayoutDashboard, path: '/stock/dashboard' },
-  { name: '퀀트 핫 아이템', icon: Zap, path: '/scanner' },
   { name: '모니터링 오빗', icon: Target, path: '/watchlist' },
   { name: '제품 검색', icon: Search, path: '/parts-search' }
 ];

@@ -15,11 +15,9 @@ import { queryClient } from './lib/queryClient';
 //   /watchlist  → 관심 종목
 //   /backtesting→ 백테스팅 히스토리
 //   /settings   → 환경 설정
-const ScannerPage = lazy(() => import('./pages/ScannerPage').then(m => ({ default: m.ScannerPage })));
 const AlphaFundView = lazy(() => import('./pages/AlphaFundView').then(m => ({ default: m.AlphaFundView })));
 const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
 const MuzepartSearchPage = lazy(() => import('./pages/MuzepartSearchPage').then(m => ({ default: m.MuzepartSearchPage })));
-const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const UnifiedDashboard = lazy(() => import('./pages/UnifiedDashboard').then(m => ({ default: m.UnifiedDashboard })));
 
 
@@ -54,15 +52,14 @@ function App() {
               <Route element={<Layout />}>
                 {/* 1. 홈: 통합 지휘 통제실 (Unified Command Center) */}
                 <Route path="/stock/dashboard" element={<UnifiedDashboard />} />
-                <Route path="command" element={<Navigate to="/stock/dashboard" replace />} />
-                <Route path="dashboard" element={<Dashboard />} />
+                <Route path="command" element={<Navigate to="/stock/dashboard?tab=command" replace />} />
+                <Route path="dashboard" element={<Navigate to="/stock/dashboard?tab=command" replace />} />
+                <Route path="pulse" element={<Navigate to="/stock/dashboard?tab=command" replace />} />
 
-                {/* /pulse는 Dashboard(작전 지휘소)로 redirect — PulseDashboard 기능이 통합됨 */}
-                <Route path="pulse" element={<Navigate to="/dashboard" replace />} />
-
-                {/* 2. 퀀트 핫 아이템 (마켓 스캐너) */}
-                <Route path="scanner" element={<ScannerPage />} />
-                <Route path="scan" element={<Navigate to="/scanner" replace />} />
+                {/* 2. 퀀트 핫 아이템 및 페니 랩 리다이렉트 */}
+                <Route path="scanner" element={<Navigate to="/stock/dashboard?tab=scanner" replace />} />
+                <Route path="scan" element={<Navigate to="/stock/dashboard?tab=scanner" replace />} />
+                <Route path="penny" element={<Navigate to="/stock/dashboard?tab=penny" replace />} />
 
                 {/* 3. 부품 재고 검색 */}
                 <Route path="parts-search" element={<MuzepartSearchPage />} />

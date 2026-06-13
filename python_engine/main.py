@@ -2280,6 +2280,304 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     return payload
 
 
+# ── Penny Lab: $1 이하 페니 주식 전용 퀀트 파라미터 ──────────────────────────
+PENNY_MAX_PRICE = 1.0         # 최대 가격 필터 ($1 이하)
+PENNY_DATA_LOOKBACK = "2mo"   # 지표 계산용 데이터 윈도우 (최소 2개월 일봉)
+PENNY_TS_INIT_PCT = 0.85      # 초기 Trailing Stop: 진입가 × 85% (-15%)
+PENNY_BREAKEVEN_TRIGGER = 1.10  # 수익 +10% 달성 시 TS를 본전으로 락인
+PENNY_SCALE_OUT_RSI = 70      # 1차 매도 RSI 기준
+PENNY_SCALE_OUT_PROFIT = 0.20 # 1차 매도 수익률 기준 (+20%)
+PENNY_SCALE_OUT_RATIO = 0.50  # 1차 매도 비율 (50%)
+PENNY_TIGHT_TS_PCT = 0.93     # 2차 매도: 잔여 물량 Trailing Stop -7%
+PENNY_RVOL_MIN = 3.0          # 최소 상대거래량 기준
+PENNY_TOP_N = 3               # 자동 관심종목 등록 수
+
+
+class PennyScanRequest(BaseModel):
+    max_price: float = PENNY_MAX_PRICE
+    top_n: int = PENNY_TOP_N
+
+
+@app.post("/api/penny/scan")
+async def penny_scan(
+    req: PennyScanRequest = Body(PennyScanRequest()),
+    api_key: str = Security(get_api_key),
+):
+    """
+    $1 이하 페니 주식 퀀트 스캔.
+    - 2개월 일봉 기반 RSI/MACD/ADX/RVOL 계산
+    - DNA 점수 산출 + Top N 자동 watchlist 등록
+    """
+    max_price = req.max_price
+    top_n = req.top_n
+
+    # 1. 페니 주식 유니버스 수집 ─────────────────────────────────────────
+    penny_tickers: List[str] = []
+    try:
+        if trading_client:
+            from alpaca.trading.requests import GetAssetsRequest
+            from alpaca.trading.enums import AssetClass, AssetStatus
+
+            assets_req = GetAssetsRequest(
+                asset_class=AssetClass.US_EQUITY,
+                status=AssetStatus.ACTIVE,
+            )
+            all_assets = await asyncio.to_thread(
+                trading_client.get_all_assets, assets_req
+            )
+            # tradable 주식만 필터 (OTC 제외)
+            tradable = [
+                a.symbol
+                for a in all_assets
+                if a.tradable and a.exchange in ("NASDAQ", "NYSE", "AMEX", "ARCA")
+            ]
+            print(f"📡 [Penny] Alpaca universe: {len(tradable)} tradable US equities")
+
+            # yfinance batch로 현재가 조회 (100개씩 배치)
+            import random
+            sampled = random.sample(tradable, min(600, len(tradable)))
+
+            batch_size = 50
+            for i in range(0, len(sampled), batch_size):
+                batch = sampled[i : i + batch_size]
+                batch_str = " ".join(batch)
+                try:
+                    tickers_data = await asyncio.to_thread(
+                        yf.download,
+                        batch_str,
+                        period="1d",
+                        interval="1d",
+                        progress=False,
+                        threads=True,
+                    )
+                    if tickers_data is not None and not tickers_data.empty:
+                        close_col = tickers_data.get("Close")
+                        if close_col is not None and not close_col.empty:
+                            if isinstance(close_col, pd.Series):
+                                # single ticker
+                                if len(batch) == 1:
+                                    last_price = float(close_col.iloc[-1])
+                                    if 0.01 < last_price <= max_price:
+                                        penny_tickers.append(batch[0])
+                            else:
+                                last_row = close_col.iloc[-1]
+                                for sym in batch:
+                                    if sym in last_row.index:
+                                        p = last_row[sym]
+                                        if pd.notna(p) and 0.01 < float(p) <= max_price:
+                                            penny_tickers.append(sym)
+                except Exception as e:
+                    print(f"⚠️ [Penny] Batch price fetch error: {e}")
+                    continue
+
+        if not penny_tickers:
+            # Fallback: 알려진 페니 주식 목록
+            fallback_tickers = [
+                "SNDL", "NKLA", "CLOV", "TLRY", "GOEV", "GNUS", "CENN",
+                "MULN", "FFIE", "AEMD", "VEON", "HCDI", "WRAP", "RITE",
+                "WISA", "BSFC", "ATNF", "SEEL", "ZVIA", "CTXR",
+            ]
+            for sym in fallback_tickers:
+                try:
+                    tk = yf.Ticker(sym)
+                    info = await asyncio.to_thread(lambda t=tk: t.fast_info)
+                    price = getattr(info, "last_price", None)
+                    if price and 0.01 < price <= max_price:
+                        penny_tickers.append(sym)
+                except Exception:
+                    continue
+    except Exception as e:
+        print(f"❌ [Penny] Universe collection error: {e}")
+
+    print(f"🪙 [Penny] Found {len(penny_tickers)} stocks under ${max_price}")
+
+    # 2. 각 종목 2개월 일봉 기술적 지표 계산 ─────────────────────────────
+    results = []
+    for ticker in penny_tickers[:80]:  # 최대 80개 분석 (성능 제한)
+        try:
+            tk = yf.Ticker(ticker)
+            df = await asyncio.to_thread(
+                tk.history, period=PENNY_DATA_LOOKBACK, interval="1d"
+            )
+            if df is None or df.empty or len(df) < 30:
+                continue
+
+            # RSI (14)
+            df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
+
+            # MACD (12, 26, 9)
+            macd_ind = ta.trend.MACD(
+                df["Close"], window_slow=26, window_fast=12, window_sign=9
+            )
+            df["MACD_Diff"] = macd_ind.macd_diff()
+
+            # ADX (14)
+            adx_ind = ta.trend.ADXIndicator(
+                high=df["High"], low=df["Low"], close=df["Close"], window=14
+            )
+            df["ADX"] = adx_ind.adx()
+
+            # RVOL (30일 평균 대비 현재)
+            df["Avg_Vol"] = df["Volume"].rolling(window=30).mean()
+            df["RVOL"] = df["Volume"] / (df["Avg_Vol"] + 1e-9)
+
+            # 추격 매수 방지
+            df["Is_Extended"] = (df["Close"] > df["Open"] * 1.5) | (
+                df["Close"] > df["Close"].shift(1) * 1.5
+            )
+
+            latest = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) >= 2 else latest
+
+            rsi = float(latest["RSI"]) if not pd.isna(latest["RSI"]) else 50.0
+            macd_diff = (
+                float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
+            )
+            macd_diff_prev = (
+                float(prev["MACD_Diff"]) if not pd.isna(prev["MACD_Diff"]) else 0.0
+            )
+            adx = (
+                float(latest["ADX"])
+                if "ADX" in latest.index and not pd.isna(latest["ADX"])
+                else 0.0
+            )
+            rvol = (
+                float(latest["RVOL"])
+                if "RVOL" in latest.index and not pd.isna(latest["RVOL"])
+                else 1.0
+            )
+            is_extended = (
+                bool(latest["Is_Extended"]) if "Is_Extended" in latest.index else False
+            )
+            price = float(latest["Close"])
+            change_pct = 0.0
+            if len(df) >= 2:
+                prev_close = float(df["Close"].iloc[-2])
+                if prev_close > 0:
+                    change_pct = round((price / prev_close - 1) * 100, 2)
+
+            volume = int(latest["Volume"]) if not pd.isna(latest["Volume"]) else 0
+
+            # DNA Score
+            dna_score = calculate_dna_score(
+                rsi, macd_diff, macd_diff_prev, adx, rvol, is_extended
+            )
+
+            # Signal / Strength
+            signal_type = "HOLD"
+            strength = "NORMAL"
+            is_golden = macd_diff > 0 and macd_diff_prev < 0
+
+            if rsi < 45 and is_golden and adx > 20 and rvol >= PENNY_RVOL_MIN and not is_extended:
+                signal_type = "BUY"
+                strength = "STRONG"
+            elif rsi < 50 and macd_diff > 0:
+                signal_type = "BUY"
+            elif rsi > 65 and macd_diff < 0:
+                signal_type = "SELL"
+
+            results.append(
+                {
+                    "ticker": ticker,
+                    "price": round(price, 4),
+                    "change_pct": change_pct,
+                    "volume": volume,
+                    "dna_score": dna_score,
+                    "rsi": round(rsi, 2),
+                    "macd_diff": round(macd_diff, 4),
+                    "adx": round(adx, 2),
+                    "rvol": round(rvol, 2),
+                    "signal": signal_type,
+                    "strength": strength,
+                    "is_extended": is_extended,
+                    "is_watchlisted": False,
+                }
+            )
+        except Exception as e:
+            print(f"⚠️ [Penny] {ticker} analysis error: {e}")
+            continue
+
+    # 3. DNA 점수 순 정렬 + Top N 관심종목 자동 등록 ────────────────────
+    results.sort(key=lambda x: x["dna_score"], reverse=True)
+    for i, r in enumerate(results):
+        r["rank"] = i + 1
+        r["is_top"] = i < top_n
+
+    auto_registered: List[str] = []
+    if supabase and results:
+        for item in results[:top_n]:
+            try:
+                payload = {
+                    "ticker": item["ticker"],
+                    "status": "WATCHING",
+                    "initial_dna_score": item["dna_score"],
+                }
+                existing = await asyncio.to_thread(
+                    supabase.table("watchlist")
+                    .select("status")
+                    .eq("ticker", item["ticker"])
+                    .is_("user_id", "null")
+                    .execute
+                )
+                if existing.data:
+                    current_status = existing.data[0].get("status")
+                    update_data = {
+                        "initial_dna_score": item["dna_score"],
+                    }
+                    if current_status not in ("HOLDING", "EXITED"):
+                        update_data["status"] = "WATCHING"
+
+                    await asyncio.to_thread(
+                        supabase.table("watchlist")
+                        .update(update_data)
+                        .eq("ticker", item["ticker"])
+                        .is_("user_id", "null")
+                        .execute
+                    )
+                else:
+                    await asyncio.to_thread(
+                        supabase.table("watchlist").insert(payload).execute
+                    )
+                auto_registered.append(item["ticker"])
+                item["is_watchlisted"] = True
+                print(f"⭐ [Penny] {item['ticker']} auto-registered to watchlist (DNA: {item['dna_score']})")
+            except Exception as e:
+                print(f"⚠️ [Penny] Watchlist auto-register error for {item['ticker']}: {e}")
+
+    # 4. Discord 알림 ──────────────────────────────────────────────────
+    if auto_registered:
+        registered_items = [r for r in results if r['ticker'] in auto_registered]
+        top_summary = "\n".join(
+            [
+                f"{'🥇🥈🥉'[i] if i < 3 else '•'} {r['ticker']} — DNA: {r['dna_score']} | ${r['price']:.4f} | RSI: {r['rsi']}"
+                for i, r in enumerate(registered_items)
+            ]
+        )
+        await webhook.send_alert(
+            title="🪙 [PENNY LAB] 주간 Top 3 관심종목 선정",
+            description=f"스캔 종목: {len(results)}개\n\n{top_summary}",
+            color=0x22D3EE,
+        )
+
+    # 5. 매매 파라미터 정보 포함하여 반환 ──────────────────────────────
+    return {
+        "scanned_at": datetime.now().isoformat(),
+        "total_scanned": len(results),
+        "penny_params": {
+            "max_price": max_price,
+            "data_lookback": PENNY_DATA_LOOKBACK,
+            "trailing_stop_pct": (1 - PENNY_TS_INIT_PCT) * 100,
+            "breakeven_trigger_pct": (PENNY_BREAKEVEN_TRIGGER - 1) * 100,
+            "scale_out_rsi": PENNY_SCALE_OUT_RSI,
+            "scale_out_profit_pct": PENNY_SCALE_OUT_PROFIT * 100,
+            "tight_ts_pct": (1 - PENNY_TIGHT_TS_PCT) * 100,
+            "rvol_min": PENNY_RVOL_MIN,
+        },
+        "results": results,
+        "auto_registered": auto_registered,
+    }
+
+
 # --- REALTIME PULSE ENGINE (Start) ---
 
 SUPABASE_URL = os.getenv("VITE_SUPABASE_URL") or os.getenv("SUPABASE_URL")

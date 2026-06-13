@@ -13,6 +13,15 @@ SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
 SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
 POS_WEIGHT = 0.15  # paper_positions.weight 기록값
 
+# ── Penny Lab 전용 파라미터 ($1 이하 종목 동적 적용) ─────────────────────────
+PENNY_MAX_PRICE        = 1.0   # 진입가 ≤ 이 값이면 페니 파라미터 자동 전환
+PENNY_TS_INIT_PCT      = 0.85  # 초기 TS: 진입가 × 85% (-15%)
+PENNY_TS_TRAIL_PCT     = 0.85  # 최고가 추종 TS: highest × 85%
+PENNY_BREAKEVEN_TRIGGER= 1.10  # 수익 +10% 달성 시 TS 하한을 진입가(본전)로 락인
+PENNY_SCALE_OUT_RSI    = 70    # 1차 매도 RSI 기준 (일반 60 → 페니 70)
+PENNY_SCALE_OUT_PROFIT = 0.20  # 1차 매도 수익률 기준 (+20% OR RSI>70)
+PENNY_TIGHT_TS_PCT     = 0.93  # Scale-Out 후 잔여 물량 TS: highest × 93% (-7%)
+
 
 class PaperTradingManager:
     def __init__(self, supabase_client: Client):
@@ -159,12 +168,14 @@ class PaperTradingManager:
             return
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
+        is_penny_signal = price <= PENNY_MAX_PRICE
+        dna_gate = 70 if is_penny_signal else 80
         if (
             signal_type == "BUY"
             and strength == "STRONG"
             and not pos
             and is_armed
-            and dna_score >= 70
+            and dna_score >= dna_gate
         ):
             # Kelly 엔진이 계산한 비중이 유효하면 사용, 없으면 기본값(KELLY_FRACTION)
             effective_fraction = (
@@ -178,7 +189,8 @@ class PaperTradingManager:
                 return
 
             units = buy_budget / price
-            ts_threshold = price * TS_INIT_PCT
+            ts_init = PENNY_TS_INIT_PCT if price <= PENNY_MAX_PRICE else TS_INIT_PCT
+            ts_threshold = price * ts_init
 
             new_pos = {
                 "ticker": ticker.upper(),
@@ -224,7 +236,7 @@ class PaperTradingManager:
                     title=f"🚀 [PAPER BUY] {ticker}",
                     description=(
                         f"진입가: ${price:.2f} | 수량: {units:.2f}주\n"
-                        f"DNA: {dna_score:.0f} | 손절선: ${ts_threshold:.2f} (-10%)\n"
+                        f"DNA: {dna_score:.0f} | 손절선: ${ts_threshold:.2f} ({'-15%' if price <= PENNY_MAX_PRICE else '-10%'})\n"
                         f"비중: {effective_fraction*100:.1f}%{report_line}"
                     ),
                     color=0x2ECC71,
@@ -244,12 +256,30 @@ class PaperTradingManager:
             ts_threshold = pos["ts_threshold"]
 
             # A. 업데이트 (최고가 갱신 시 TS 상향)
+            is_penny = entry_price <= PENNY_MAX_PRICE
             if not is_scaled_out:
-                new_ts = highest_price * TS_TRAIL_PCT
+                trail_pct = PENNY_TS_TRAIL_PCT if is_penny else TS_TRAIL_PCT
+                new_ts = highest_price * trail_pct
+                # 페니: +10% 달성 시 TS 하한을 진입가(본전)로 락인
+                if is_penny and price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
+                    new_ts = max(new_ts, entry_price)
+                ts_threshold = max(ts_threshold, new_ts)
+            elif is_penny:
+                # Scale-Out 후 페니: -7% 타이트 TS로 잔여 랠리 추종 (진입가 이하로 내려가지 않음)
+                new_ts = max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
                 ts_threshold = max(ts_threshold, new_ts)
 
-            # B. SCALE_OUT 체크 (RSI > 60 + 수익권 진입 확인)
-            if rsi > 60 and not is_scaled_out and is_armed and price > entry_price:
+            # B. SCALE_OUT 체크
+            if is_penny:
+                profit_pct = price / entry_price - 1
+                # RSI arm은 최소 +5% 수익 확인 후 허용 (단순 변동성으로 인한 조기 청산 방지)
+                scale_trigger = (
+                    (rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05)
+                    or profit_pct >= PENNY_SCALE_OUT_PROFIT
+                )
+            else:
+                scale_trigger = rsi > 60
+            if scale_trigger and not is_scaled_out and is_armed and price > entry_price:
                 sell_units = units * SCALE_OUT_RATIO
                 profit_cash = sell_units * price
 
@@ -264,7 +294,11 @@ class PaperTradingManager:
                 )
 
                 # 포지션 업데이트: 수량 반토막, TS 본절+1% 상향
-                new_ts_val = entry_price * SCALE_OUT_TS_PCT
+                new_ts_val = (
+                    max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
+                    if is_penny
+                    else entry_price * SCALE_OUT_TS_PCT
+                )
                 update_data = {
                     "status": "SCALE_OUT",
                     "units": units - sell_units,
@@ -280,9 +314,11 @@ class PaperTradingManager:
                     .execute
                 )
 
+                price_str = f"${price:.4f}" if is_penny else f"${price:.2f}"
+                ts_desc = f"-7% TS ${new_ts_val:.4f}" if is_penny else f"본절+1% ${new_ts_val:.2f}"
                 await self.webhook.send_alert(
                     title=f"🟠 [PAPER SCALE-OUT] {ticker}",
-                    description=f"50% 분할 익절 완료: ${price:.2f}\n방어선 상향: ${new_ts_val:.2f} (본절+1%)",
+                    description=f"50% 분할 익절 완료: {price_str}\n방어선 상향: {ts_desc}",
                     color=0xE67E22,
                 )
                 # 관심종목 stop_loss 동기화 (TS 이동)

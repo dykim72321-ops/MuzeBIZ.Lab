@@ -1,4 +1,6 @@
-# CLAUDE.md — MuzeStock.Lab 핵심 시스템 가이드
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 프로젝트 철학
 
@@ -12,7 +14,47 @@
 
 ---
 
-## 핵심 시스템 플로우
+## 개발 명령어
+
+```bash
+# 전체 동시 실행 (권장)
+npm run dev:all
+
+# Frontend만 (port 5173)
+npm run dev
+
+# Backend만 (port 8001)
+npm run dev:python
+# 또는 직접:
+cd python_engine && uvicorn main:app --host 127.0.0.1 --port 8001 --reload
+
+# 프론트 빌드 (TypeScript 타입 검사 포함)
+npm run build
+
+# 린트
+npm run lint
+
+# 페니 엔진 단위 테스트
+python_engine/venv/bin/python python_engine/test_penny_engine.py
+
+# 데이터 파이프라인 테스트
+python_engine/venv/bin/python python_engine/test_pipeline.py
+
+# DNA 백테스트
+cd python_engine && python portfolio_backtester.py
+
+# DNA 파라미터 최적화 (γ, δ, λ 그리드 서치)
+cd python_engine && python optimize_dna.py
+
+# Supabase Edge Functions 배포
+supabase functions deploy
+```
+
+---
+
+## 시스템 아키텍처 전체 플로우
+
+### 일반 퀀트 파이프라인
 
 ```
 [1] 퀀트 스캐너 (DNA ≥ 80)
@@ -28,16 +70,39 @@
         │
         ▼
 [4] 실시간 모니터링 (1분봉 스트림)
-    ├─ RSI > 60 → 50% Scale-Out + TS 상향 + watchlist stop_loss 동기화
+    ├─ RSI > 60 → 50% Scale-Out + TS 본절+1% + watchlist stop_loss 동기화
     └─ 가격 < Trailing Stop → 전량 청산
            - paper_history 기록
            - watchlist status → EXITED
            - Discord ✅/🛑 알림
 ```
 
+### Penny Lab 파이프라인 ($1 이하 전용)
+
+```
+[1] POST /api/penny/scan
+    - Alpaca universe 샘플링 (600개) → $1 이하 필터
+    - yfinance 2개월 일봉 → RSI/MACD/ADX/RVOL → DNA 점수
+        │
+        ▼
+[2] Top 3 자동 watchlist 등록 (status=WATCHING)
+    ※ 단, 기존 HOLDING/EXITED 종목은 갱신 금지 (미수정 버그 — 아래 참고)
+        │
+        ▼
+[3] STRONG BUY 신호 → paper_engine.process_signal()
+    - 진입가 ≤ $1이면 페니 파라미터 자동 전환 (is_penny = entry_price ≤ 1.0)
+    - 초기 TS: -15% (일반: -10%)
+        │
+        ▼
+[4] 페니 상태 머신
+    ├─ 수익 +10% 달성: TS 하한을 진입가(본전)로 락인
+    ├─ RSI > 70 OR 수익률 ≥ +20%: 50% Scale-Out + -7% 타이트 TS
+    └─ 가격 < TS: 전량 청산
+```
+
 ---
 
-## 1단계 — 퀀트 스캐너 (DNA ≥ 80 종목 발굴)
+## 퀀트 스캐너
 
 ### 두 가지 스캐너
 
@@ -45,6 +110,7 @@
 |---|---|---|
 | **Edge Function 스캐너** | `supabase/functions/run-quant-scanner/index.ts` | 수동 또는 스케줄 |
 | **Pulse Engine 스캐너** | `python_engine/main.py → run_pulse_engine()` | Alpaca 1분봉 실시간 |
+| **Penny 스캐너** | `python_engine/main.py → penny_scan()` | 수동 (POST /api/penny/scan) |
 
 ### DNA 점수 기준
 
@@ -54,184 +120,108 @@ HOLD 시그널 → DNA 60
 SELL 시그널 → DNA 40
 ```
 
-### STRONG BUY 조건 (`python_engine/main.py:1667-1674`)
+### STRONG BUY 조건 (`python_engine/main.py`)
 
 ```python
 Strong_Buy = (
-    RSI < 45          # 과매도권
+    RSI < 45           # 과매도권
     AND MACD 골든크로스  # MACD > Signal, 직전 봉은 MACD ≤ Signal
-    AND ADX > 20       # 추세 강도
-    AND RVOL > 3.0     # 거래량 폭증 (3배 이상)
+    AND ADX > 20        # 추세 강도
+    AND RVOL > 3.0      # 거래량 폭증 (3배 이상)
     AND NOT Is_Extended # 당일 50% 이상 급등 종목 제외
 )
 ```
 
-### Edge Function 스캐너 필터
-
-```
-dnaScore ≥ 70 AND rvol > 2.0 AND close > SMA20 AND uptrend
-→ dnaScore ≥ alert_threshold(기본 85) → Discord STRONG BUY 알림
-→ quant_signals 테이블 upsert
-```
-
 ---
 
-## 2단계 — 관심종목 자동 등록
+## Paper Trading 엔진 (`python_engine/paper_engine.py`)
 
-### 테이블: `watchlist`
-
-| 컬럼 | 타입 | 설명 |
-|---|---|---|
-| `ticker` | TEXT NOT NULL | 종목 심볼 |
-| `status` | TEXT | `WATCHING` / `HOLDING` / `EXITED` |
-| `buy_price` | NUMERIC | 매수 진입가 |
-| `stop_loss` | NUMERIC | 현재 트레일링 스탑 (TS와 실시간 동기화) |
-| `initial_dna_score` | NUMERIC | 매수 시점 DNA 점수 |
-| `created_at` | TIMESTAMPTZ | 등록일 (그래프 시작점) |
-| `user_id` | UUID | 수동 등록 시 사용자 ID (자동 등록 시 null) |
-
-### 등록 경로
-
-1. **수동**: `WatchlistPage.tsx` → 티커 입력 → `addToWatchlist()` (status=WATCHING)
-2. **자동**: 퀀트 엔진이 매수 실행 시 → `paper_engine._sync_watchlist_buy()` → status=HOLDING
-
-### 상태 전이
-
-```
-WATCHING → HOLDING   : 퀀트 엔진 매수 실행 시 자동
-HOLDING  → EXITED    : 트레일링 스탑 발동 시 자동
-(수동 제거도 가능)
-```
-
----
-
-## 3단계 — Alpaca 가상 매수 자동화
-
-**파일**: `python_engine/paper_engine.py → process_signal()`
-
-**조건**: `signal_type == "BUY" AND strength == "STRONG" AND SYSTEM_ARMED == True AND DNA ≥ 80`
-
-**진입 로직**:
+### 포지션 사이징 상수
 
 ```python
-buy_budget = cash_available * 0.15   # 3/4 Kelly ≈ 가용 현금의 15%
-units = buy_budget / price
-ts_threshold = price * 0.90          # 초기 손절선 -10%
+KELLY_FRACTION = 0.15   # 가용 현금의 15%
+MIN_BUY_BUDGET = 500.0  # 최소 주문 금액
+TS_INIT_PCT    = 0.90   # 일반: 초기 TS -10%
+TS_TRAIL_PCT   = 0.90   # 일반: 최고가 추종 TS
 ```
 
-**실행 시 처리**:
-1. `paper_positions` INSERT (status=HOLD)
-2. `paper_account.cash_available` 차감
-3. `watchlist` UPSERT (status=HOLDING, buy_price, stop_loss, initial_dna_score)
-4. Discord 🚀 알림
+### Penny Lab 전용 상수 (`paper_engine.py` 상단)
+
+```python
+PENNY_MAX_PRICE        = 1.0   # 이 가격 이하이면 페니 파라미터 자동 전환
+PENNY_TS_INIT_PCT      = 0.85  # 초기 TS -15%
+PENNY_TS_TRAIL_PCT     = 0.85  # 최고가 추종 TS
+PENNY_BREAKEVEN_TRIGGER= 1.10  # +10% 달성 시 TS 하한 → 진입가
+PENNY_SCALE_OUT_RSI    = 70    # 1차 매도 RSI 기준
+PENNY_SCALE_OUT_PROFIT = 0.20  # 1차 매도 수익률 기준 (+20%)
+PENNY_TIGHT_TS_PCT     = 0.93  # Scale-Out 후 잔여 물량 TS -7%
+```
+
+`is_penny` 판정: `entry_price <= PENNY_MAX_PRICE` — **현재가 기준이 아닌 진입가 기준**이므로 보유 중 주가가 $1 이상으로 오르더라도 페니 파라미터 유지.
+
+### Scale-Out 조건 (`process_signal()`)
+
+```python
+# 일반 종목
+scale_trigger = rsi > 60
+
+# 페니 종목 (is_penny=True)
+scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SCALE_OUT_PROFIT
+```
+
+### watchlist 동기화 메서드
+
+| 메서드 | 트리거 | 동작 |
+|---|---|---|
+| `_sync_watchlist_buy()` | 매수 실행 시 | status=HOLDING, buy_price, stop_loss 기록 |
+| `_sync_watchlist_stop_loss()` | Scale-Out 시 | stop_loss 갱신 |
+| `_sync_watchlist_exit()` | 청산 시 | status=EXITED |
 
 ---
 
-## 4단계 — 자동 매도 (관심종목 탈출 기준)
+## 대시보드 구조
 
-**트리거**: Alpaca 1분봉 스트림 → `on_minute_bar_closed()` → `process_signal()`
+### 단일 진입점: `src/pages/UnifiedDashboard.tsx`
 
-### 탈출 기준 A — Scale-Out (50% 부분 익절)
+`/stock/dashboard?tab=<탭명>` URL 파라미터로 탭 전환 (`useSearchParams`).
 
-```
-조건: RSI > 60 AND is_scaled_out == False AND SYSTEM_ARMED
-처리:
-  - 보유 수량의 50% 시장가 매도
-  - TS 상향: entry_price × 1.01 (본절+1%)
-  - paper_positions.status → SCALE_OUT
-  - watchlist.stop_loss 동기화
-  - Discord 🟠 SCALE-OUT 알림
-```
+| 탭 | URL | 설명 |
+|---|---|---|
+| `command` | `?tab=command` | 실시간 Pulse 시그널, Alpha Discovery, LiveExecution |
+| `scanner` | `?tab=scanner` | 전체 종목 DNA 필터링 스캐너 |
+| `penny` | `?tab=penny` | Penny Lab (스캔·관심종목·포지션·이력) |
 
-### 탈출 기준 B — 트레일링 스탑 (전량 청산)
+**구버전 라우트는 모두 리다이렉트**:
+- `/dashboard`, `/pulse`, `/command` → `?tab=command`
+- `/scanner`, `/scan` → `?tab=scanner`
+- `/penny` → `?tab=penny`
 
-```
-조건: price < ts_threshold  ← SYSTEM_ARMED 해제 상태에서도 실행 (손실 확대 방지 우선)
-처리:
-  - 전량 시장가 매도
-  - paper_history INSERT (exit_reason="Trailing Stop")
-  - paper_positions DELETE
-  - paper_account.cash_available 복구
-  - watchlist.status → EXITED
-  - Discord ✅(이익)/🛑(손실) 알림
-```
+`Dashboard.tsx`와 `ScannerPage.tsx`는 삭제됨. UnifiedDashboard가 모든 기능을 흡수.
 
-### 트레일링 스탑 계산
+### 컴포넌트 연결 구조
 
 ```
-일반 보유 중:  ts_threshold = max(ts_threshold, highest_price × 0.90)
-Scale-Out 후: ts_threshold = entry_price × 1.01  (고정)
+Frontend (Vite :5173)
+  ├─ WS   /py-api/ws/pulse             → FastAPI :8001  (Vite proxy: ws 지원)
+  ├─ REST /py-api/api/broker/paper/*   → FastAPI :8001  (X-Admin-Key 인증)
+  ├─ REST /py-api/api/penny/scan       → FastAPI :8001  (X-Admin-Key 인증)
+  ├─ REST /py-api/api/strategy/stats   → FastAPI :8001
+  ├─ REST /py-api/api/pulse/status     → FastAPI :8001
+  ├─ REST /yahoo-api/...               → Yahoo Finance  (Vite proxy, CORS 우회)
+  ├─ Supabase JS  system_settings      → Supabase DB    (RLS: anon UPDATE 허용)
+  └─ Edge Fn  admin-proxy/api/hunt     → Supabase Edge Function
 ```
 
-### 수동 매도 (사령관 매도)
+### 데이터 로딩 패턴 (UnifiedDashboard)
 
-```
-POST /api/broker/paper/sell { ticker }
-→ yfinance 현재가 조회 (fallback: DB current_price)
-→ paper_history INSERT (exit_reason="Manual Sell")
-→ paper_positions DELETE
-→ paper_account 현금 복구
-→ watchlist.status → EXITED
-→ Discord 알림
-```
+각 탭은 `activeTab` 변경 시점에만 데이터를 fetch (지연 로딩):
+- `command` 탭 활성화 → `loadCommandData()` (watchlist, daily_discovery)
+- `scanner` 탭 활성화 → `fetchScannerStocks()`
+- `penny` 탭 활성화 → `loadPennySideData()` + 30초 폴링 (`setInterval`)
 
 ---
 
-## 5단계 — 관심종목 그래프 (등록일~현재)
-
-**컴포넌트**: `src/components/dashboard/OrbitChartPanel.tsx`
-
-```
-addedAt (등록일) → 오늘
-  └─ Yahoo Finance API: /v8/finance/chart/{ticker}?period1={addedTs}&period2={now}&interval=1d
-```
-
-**표시 항목**:
-- **실선 (Cyan)**: 일별 종가
-- **점선 (Rose)**: Chandelier Exit (트레일링 스탑선)
-- **P&L %**: 진입가 대비 현재 수익률
-- **DNA Match Rate**: 초기 DNA vs 현재 DNA 비율
-- **탈출 신호**: HOLD / SELL 상태
-
-**Chandelier Exit 계산**:
-```
-trail = 12% (penny, price < $5) or 8% (regular)
-stop = highest_price_since_entry × (1 - trail)
-```
-
----
-
-## 데이터베이스 테이블 전체 맵
-
-### Paper Trading (Python Engine)
-
-| 테이블 | 역할 |
-|---|---|
-| `paper_account` | 가상 계좌 잔고 |
-| `paper_positions` | 현재 보유 포지션 (TS, 수량, 상태) |
-| `paper_history` | 청산된 거래 이력 (PnL, 사유) |
-
-### 관심종목 / 발굴
-
-| 테이블 | 역할 |
-|---|---|
-| `watchlist` | 관심종목 (수동+자동 등록, 그래프 기준일) |
-| `daily_discovery` | 스캐너 발굴 종목 (DNA, 섹터, 가격) |
-| `quant_signals` | Edge Function 시그널 아카이브 |
-| `realtime_signals` | Pulse Engine 실시간 시그널 |
-
-### 설정 / 백테스트
-
-| 테이블 | 역할 |
-|---|---|
-| `system_settings` | DNA 임계값, Discord 웹훅 URL |
-| `backtest_cache` | 백테스트 결과 캐시 |
-| `trade_history` | Edge Function 청산 이력 |
-| `active_positions` | Edge Function 포지션 추적 |
-
----
-
-## API 엔드포인트 전체 맵
+## API 엔드포인트
 
 ### Paper Trading
 
@@ -243,93 +233,75 @@ stop = highest_price_since_entry × (1 - trail)
 | `/api/broker/paper/sell` | POST | 수동 청산 `{ticker}` |
 | `/api/broker/arm` | POST | 자동 매매 ON/OFF `{arm: bool}` |
 
-### 분석 / 포트폴리오
+### Penny Lab
+
+| Endpoint | Method | 설명 |
+|---|---|---|
+| `/api/penny/scan` | POST | 페니 스캔 `{max_price, top_n}` |
+
+### 분석 / 인프라
 
 | Endpoint | Method | 설명 |
 |---|---|---|
 | `/api/analyze` | POST | DNA 분석 `{ticker, period}` |
 | `/api/strategy/stats` | GET | 승률, PF, MDD 통계 |
 | `/api/broker/status` | GET | Alpaca 연결 상태 |
-| `/api/broker/account` | GET | Alpaca 계좌 현황 |
 | `/api/pulse/status` | GET | 펄스 엔진 시장 상태 |
 | `/ws/pulse` | WebSocket | 1분봉 실시간 스트림 |
 
 ---
 
+## 데이터베이스 테이블
+
+### Paper Trading
+
+| 테이블 | 역할 |
+|---|---|
+| `paper_account` | 가상 계좌 잔고 |
+| `paper_positions` | 현재 보유 포지션 (TS, 수량, 상태) |
+| `paper_history` | 청산된 거래 이력 (PnL, 사유) |
+
+### 관심종목 / 발굴
+
+| 테이블 | 역할 |
+|---|---|
+| `watchlist` | 관심종목 (수동+자동 등록). `user_id IS NULL` = 엔진 자동 등록 |
+| `daily_discovery` | 스캐너 발굴 종목 (DNA, 섹터, 가격) |
+| `quant_signals` | Edge Function 시그널 아카이브 |
+| `realtime_signals` | Pulse Engine 실시간 시그널 |
+
+### watchlist 상태 전이
+
+```
+WATCHING → HOLDING  : 퀀트 엔진 매수 실행 시 (_sync_watchlist_buy)
+HOLDING  → EXITED   : 트레일링 스탑 발동 또는 수동 매도 시 (_sync_watchlist_exit)
+```
+
+watchlist 자동 조작 시 반드시 `.is_("user_id", "null")` 필터를 포함해야 다른 사용자 행을 건드리지 않는다.
+
+---
+
 ## SYSTEM_ARMED 플래그
 
-`python_engine/main.py` 전역 변수. `False`이면 스캐닝은 하되 매수/매도 실행 없음.
+`python_engine/main.py` 전역 변수. `False`이면 스캐닝은 하되 매수 실행 없음. 트레일링 스탑 청산은 ARMED 해제 상태에서도 실행됨(손실 확대 방지 우선).
 
-```python
-# Toggle via:
-POST /api/broker/arm { "arm": true }   # 전투 모드 (자동 매매 활성화)
-POST /api/broker/arm { "arm": false }  # 안전 모드 (관제만)
 ```
-
-UI에서: **작전지휘소 → System Control Panel → ARMED 토글**
+POST /api/broker/arm { "arm": true }   # 자동 매매 활성화
+POST /api/broker/arm { "arm": false }  # 관제 전용
+```
 
 ---
 
-## 작전지휘소 대시보드 컴포넌트 맵
+## 새 기능 추가 가이드
 
-| 컴포넌트 | 파일 | 데이터 소스 | 상태 |
-|---|---|---|---|
-| `Dashboard` (페이지) | `src/pages/Dashboard.tsx` | `/api/strategy/stats`, `/api/pulse/status` | ✅ |
-| `MarketCommandHeader` | `src/components/layout/MarketCommandHeader.tsx` | Edge Fn `admin-proxy` (헌팅 트리거) | ✅ |
-| `PortfolioStatus` | `src/components/ui/PortfolioStatus.tsx` | `/api/broker/paper/*` FastAPI | ✅ |
-| `CommandSettings` | `src/components/dashboard/CommandSettings.tsx` | `system_settings` Supabase 직접 | ✅ |
-| `QuantSignalCard` | `src/components/ui/QuantSignalCard.tsx` | `WS /ws/pulse` 실시간 | ✅ |
+### FastAPI 엔드포인트 추가
+`python_engine/main.py` — Pydantic `BaseModel`로 요청 스키마 정의 후 `api_key: str = Security(get_api_key)` 인증 패턴 사용.
 
-| 컴포넌트 | 파일 | 데이터 소스 | 상태 |
-|---|---|---|---|
-| `WatchlistPage` | `src/pages/WatchlistPage.tsx` | `watchlist` Supabase | ✅ |
-| `WatchlistItemCard` | `src/components/watchlist/WatchlistItemCard.tsx` | `useDNACalculator` 훅 | ✅ |
-| `OrbitChartPanel` | `src/components/dashboard/OrbitChartPanel.tsx` | `/yahoo-api` Vite 프록시 | ✅ |
+### Frontend API 호출 추가
+`src/services/pythonApiService.ts` — `brokerApiFetch()` (X-Admin-Key 인증) 또는 `apiFetch()` (공개) 사용.
 
-### 대시보드 연결 구조
-
-```
-Frontend (Vite :5173)
-  ├─ WS   /py-api/ws/pulse          → FastAPI :8001  (Vite proxy: ws 지원)
-  ├─ REST /py-api/api/broker/paper/* → FastAPI :8001  (X-Admin-Key 인증)
-  ├─ REST /py-api/api/strategy/stats → FastAPI :8001
-  ├─ REST /py-api/api/pulse/status   → FastAPI :8001
-  ├─ REST /yahoo-api/...             → Yahoo Finance  (Vite proxy, CORS 우회)
-  ├─ Supabase JS  system_settings    → Supabase DB    (RLS: anon UPDATE 허용)
-  └─ Edge Fn  admin-proxy/api/hunt   → Supabase Edge Function
-```
-
-### 과거 버그 및 수정 이력
-
-| 버그 | 파일 | 원인 | 수정 |
-|---|---|---|---|
-| Save Configuration 버튼 크래시 | `CommandSettings.tsx:31` | `(window as any).apiFetch` 미정의 전역 사용 | `supabase.from('system_settings').update()` 직접 호출로 교체 |
-| Dashboard 계좌 잔고 $0 표시 | `main.py` + `LiveExecutionCenter.tsx` | `paper/account` 응답 필드가 `buying_power`/`equity`인데 프론트는 `cash_available`/`total_assets` 기대 | 백엔드 반환 필드명 통일, 컴포넌트 인터페이스 수정 |
-| watchlist 타 유저 행 덮어쓰기 | `paper_engine.py` | `eq("ticker")` 필터만 사용 | `.is_("user_id", "null")` 필터 추가 |
-| 수동 매도 시 watchlist 미동기화 | `main.py` | `_sync_watchlist_exit()` 미호출 | position 삭제 후 sync 호출 추가 |
-| BUY 조건에 DNA 게이트 없음 | `paper_engine.py:129` | `dna_score >= 80` 조건 누락 | BUY 조건에 `and dna_score >= 80` 추가 |
-| 손실 구간 Scale-Out | `paper_engine.py:188` | `price > entry_price` 체크 없음 | SCALE_OUT 조건에 수익 확인 추가 |
-
----
-
-## 개발 명령어
-
-```bash
-# Frontend (port 5173)
-npm run dev
-
-# Backend (port 8001)
-cd python_engine && uvicorn main:app --host 127.0.0.1 --port 8001 --reload
-
-# Supabase Edge Functions 배포
-supabase functions deploy
-
-# DNA 백테스트
-cd python_engine && python portfolio_backtester.py
-
-# DNA 파라미터 최적화 (γ, δ, λ 그리드 서치)
-cd python_engine && python optimize_dna.py
-```
+### Supabase 테이블 추가
+`supabase/migrations/` 에 타임스탬프 prefix로 마이그레이션 파일 생성 → `supabase db push`.
 
 ---
 
@@ -358,13 +330,26 @@ ADMIN_SECRET_KEY
 
 ---
 
-## 새 기능 추가 가이드
+## 알려진 버그 (미수정)
 
-### FastAPI 엔드포인트 추가
-`python_engine/main.py` — Pydantic `BaseModel`로 요청 스키마 정의 후 `api_key: str = Security(get_api_key)` 인증 패턴 사용.
+| 버그 | 파일 | 위치 | 현상 |
+|---|---|---|---|
+| Discord 알림 본문 불일치 | `main.py` | `penny_scan()` Discord 블록 | `auto_registered`(성공) 기준이 아닌 `results[:top_n]`(전체) 기준으로 알림 생성 |
 
-### Frontend API 호출 추가
-`src/services/pythonApiService.ts` — `brokerApiFetch()` (인증 필요) 또는 `apiFetch()` (공개) 사용.
+## 과거 수정된 버그
 
-### Supabase 테이블 추가
-`supabase/migrations/` 에 타임스탬프 prefix로 마이그레이션 파일 생성 → `supabase db push`.
+| 버그 | 파일 | 원인 | 수정 |
+|---|---|---|---|
+| Penny scan이 HOLDING/EXITED 상태 덮어씀 | `main.py` | `penny_scan()` auto-register | `!= "HOLDING"` 조건이 EXITED를 보호 못함 | `not in ("HOLDING","EXITED")` 로 수정 |
+| pennyPositions에 일반 포지션 혼입 | `UnifiedDashboard.tsx` | `loadPennySideData()` | entry_price 필터 없이 ALL 포지션 저장 | `entry_price <= 1.0` 필터 추가 |
+| pennyWatchlist가 현재가 기준 필터 | `UnifiedDashboard.tsx` | `loadPennySideData()` | 현재가 > $1 이면 활성 페니 포지션이 탭에서 사라짐 | `buyPrice <= 1.0` 기준으로 변경 |
+| DNA 게이트 80이 페니 시그널 차단 | `paper_engine.py` | `process_signal()` BUY 조건 | 페니 종목 DNA 70~79 구간 자동 매수 불발 | 페니는 70, 일반은 80으로 분기 |
+| Scale-Out RSI arm 최소 수익 가드 없음 | `paper_engine.py` | `process_signal()` SCALE_OUT | RSI > 70만으로 +0.1% 수익에서 50% 청산 가능 | RSI arm에 `profit >= 5%` 가드 추가 |
+| unrealized_plpc NaN 표시 | `UnifiedDashboard.tsx` | `pennyPositions` map | current_price=null 시 NaN/-100% 표시 | null 가드 후 undefined 저장, UI에서 0 폴백 |
+| Lambda 클로저 버그 (fallback 루프) | `main.py` | `penny_scan()` fallback | `lambda: tk.fast_info` 가 tk를 레퍼런스 캡처 | `lambda t=tk: t.fast_info` 로 수정 |
+| pennyWatchlist 분류 위해 전체 종목 가격 조회 | `UnifiedDashboard.tsx` | `loadPennySideData()` | 30초마다 전체 watchlist Yahoo 가격 조회 후 버림 | buyPrice 직접 필터로 대체, 외부 요청 제거 |
+| Save Configuration 버튼 크래시 | `CommandSettings.tsx` | `(window as any).apiFetch` 미정의 전역 사용 | `supabase.from('system_settings').update()` 직접 호출로 교체 |
+| Dashboard 계좌 잔고 $0 표시 | `main.py` + `LiveExecutionCenter.tsx` | 응답 필드명 불일치 | 백엔드 반환 필드명 통일 |
+| watchlist 타 유저 행 덮어쓰기 | `paper_engine.py` | `eq("ticker")` 필터만 사용 | `.is_("user_id", "null")` 필터 추가 |
+| 수동 매도 시 watchlist 미동기화 | `main.py` | `_sync_watchlist_exit()` 미호출 | position 삭제 후 sync 호출 추가 |
+| 손실 구간 Scale-Out | `paper_engine.py` | `price > entry_price` 체크 없음 | SCALE_OUT 조건에 수익 확인 추가 |
