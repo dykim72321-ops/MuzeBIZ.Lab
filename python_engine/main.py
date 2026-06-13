@@ -1981,18 +1981,27 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     df["ADX"] = adx_indicator.adx()
 
     # 4. RVOL (Relative Volume) 계산
-    # avg_daily_volume 주입 시: 분봉 거래량 / (일평균 / 390분) → 실제 30일 대비 비율
-    # 미주입 시: rolling(30) 중위값(median) fallback
+    # avg_daily_volume 주입 시: 분봉 거래량 / (30일 일평균 / 390분) → 역사적 기준 대비 비율
+    # 미주입 시: RVOL=1.0 중립 고정
+    #   → 이전 30분 rolling median fallback은 급등 구간에서 기준선 자체가 올라가
+    #      RVOL이 과소 측정되어 DNA 보너스가 누락되는 왜곡이 있었음 (Bug-3 수정)
     if avg_daily_volume > 0:
         avg_min_volume = avg_daily_volume / 390  # 하루 390 거래 분
         df["RVOL"] = df["Volume"] / (avg_min_volume + 1e-9)
     else:
-        df["Avg_Vol_30d"] = df["Volume"].shift(1).rolling(window=30, min_periods=1).median()
-        df["RVOL"] = df["Volume"] / (df["Avg_Vol_30d"] + 1e-9)
+        df["RVOL"] = 1.0  # warm-up 미완료 시 중립값 → DNA RVOL 보너스 미적용
 
-    # 5. 추격 매수(FOMO) 방지 필터 (25% 및 20일 이평선 이격도)
+    # 5. 추격 매수(FOMO) 방지 필터 (25% 및 20분 이평선 이격도)
+    # 분봉 df의 경우 df["Open"]은 그 분의 시가이므로, 당일 첫 바의 Open으로 교정.
+    # tz-aware 인덱스(Alpaca UTC)를 ET로 변환 후 날짜별 그룹핑.
+    if df.index.tz is not None:
+        _dates = df.index.tz_convert("America/New_York").date
+    else:
+        _dates = df.index.date
+    day_open = df.groupby(_dates)["Open"].transform("first")
+
     ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
-    df["Is_Extended"] = (df["Close"] > df["Open"] * 1.25) | (
+    df["Is_Extended"] = (df["Close"] > day_open * 1.25) | (
         df["Close"] > df["Close"].shift(1) * 1.25
     ) | (df["Close"] > ma20 * 1.30)
 
@@ -2009,8 +2018,8 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     # MACD scoring (기울기 판정)
     macd_diff = df["MACD_Diff"]
     macd_diff_prev = df["MACD_Diff"].shift(1).fillna(0.0)
-    is_golden = (macd_diff > 0) & (macd_diff_prev < 0)
-    is_dead = (macd_diff < 0) & (macd_diff_prev > 0)
+    is_golden = (macd_diff > 0) & (macd_diff_prev <= 0)
+    is_dead = (macd_diff < 0) & (macd_diff_prev >= 0)
     score += np.where(is_golden, 20,
              np.where(is_dead, -20,
              np.where(macd_diff > macd_diff_prev, 8, -8)))
@@ -2115,8 +2124,9 @@ def calculate_dna_score(
         score -= 0 if rvol >= 3.0 else 20
 
     # MACD (±20): 골든/데드크로스 최우선, 방향성 차순 (기울기 판정)
-    is_golden = macd_diff > 0 and macd_diff_prev < 0
-    is_dead = macd_diff < 0 and macd_diff_prev > 0
+    # CLAUDE.md 명세: "직전 봉은 MACD ≤ Signal" → prev <= 0 (등호 포함)
+    is_golden = macd_diff > 0 and macd_diff_prev <= 0
+    is_dead = macd_diff < 0 and macd_diff_prev >= 0
     if is_golden:
         score += 20
     elif is_dead:
