@@ -14,13 +14,13 @@ SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
 POS_WEIGHT = 0.15  # paper_positions.weight 기록값
 
 # ── Penny Lab 전용 파라미터 ($1 이하 종목 동적 적용) ─────────────────────────
-PENNY_MAX_PRICE        = 1.0   # 진입가 ≤ 이 값이면 페니 파라미터 자동 전환
-PENNY_TS_INIT_PCT      = 0.85  # 초기 TS: 진입가 × 85% (-15%)
-PENNY_TS_TRAIL_PCT     = 0.85  # 최고가 추종 TS: highest × 85%
-PENNY_BREAKEVEN_TRIGGER= 1.10  # 수익 +10% 달성 시 TS 하한을 진입가(본전)로 락인
-PENNY_SCALE_OUT_RSI    = 70    # 1차 매도 RSI 기준 (일반 60 → 페니 70)
+PENNY_MAX_PRICE = 1.0  # 진입가 ≤ 이 값이면 페니 파라미터 자동 전환
+PENNY_TS_INIT_PCT = 0.85  # 초기 TS: 진입가 × 85% (-15%)
+PENNY_TS_TRAIL_PCT = 0.85  # 최고가 추종 TS: highest × 85%
+PENNY_BREAKEVEN_TRIGGER = 1.10  # 수익 +10% 달성 시 TS 하한을 진입가(본전)로 락인
+PENNY_SCALE_OUT_RSI = 70  # 1차 매도 RSI 기준 (일반 60 → 페니 70)
 PENNY_SCALE_OUT_PROFIT = 0.20  # 1차 매도 수익률 기준 (+20% OR RSI>70)
-PENNY_TIGHT_TS_PCT     = 0.93  # Scale-Out 후 잔여 물량 TS: highest × 93% (-7%)
+PENNY_TIGHT_TS_PCT = 0.93  # Scale-Out 후 잔여 물량 TS: highest × 93% (-7%)
 
 
 class PaperTradingManager:
@@ -274,9 +274,8 @@ class PaperTradingManager:
                 profit_pct = price / entry_price - 1
                 # RSI arm은 최소 +5% 수익 확인 후 허용 (단순 변동성으로 인한 조기 청산 방지)
                 scale_trigger = (
-                    (rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05)
-                    or profit_pct >= PENNY_SCALE_OUT_PROFIT
-                )
+                    rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
+                ) or profit_pct >= PENNY_SCALE_OUT_PROFIT
             else:
                 scale_trigger = rsi > 60
             if scale_trigger and not is_scaled_out and is_armed and price > entry_price:
@@ -315,7 +314,11 @@ class PaperTradingManager:
                 )
 
                 price_str = f"${price:.4f}" if is_penny else f"${price:.2f}"
-                ts_desc = f"-7% TS ${new_ts_val:.4f}" if is_penny else f"본절+1% ${new_ts_val:.2f}"
+                ts_desc = (
+                    f"-7% TS ${new_ts_val:.4f}"
+                    if is_penny
+                    else f"본절+1% ${new_ts_val:.2f}"
+                )
                 await self.webhook.send_alert(
                     title=f"🟠 [PAPER SCALE-OUT] {ticker}",
                     description=f"50% 분할 익절 완료: {price_str}\n방어선 상향: {ts_desc}",

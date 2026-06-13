@@ -2286,16 +2286,16 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
 
 
 # ── Penny Lab: $1 이하 페니 주식 전용 퀀트 파라미터 ──────────────────────────
-PENNY_MAX_PRICE = 1.0         # 최대 가격 필터 ($1 이하)
-PENNY_DATA_LOOKBACK = "2mo"   # 지표 계산용 데이터 윈도우 (최소 2개월 일봉)
-PENNY_TS_INIT_PCT = 0.85      # 초기 Trailing Stop: 진입가 × 85% (-15%)
+PENNY_MAX_PRICE = 1.0  # 최대 가격 필터 ($1 이하)
+PENNY_DATA_LOOKBACK = "2mo"  # 지표 계산용 데이터 윈도우 (최소 2개월 일봉)
+PENNY_TS_INIT_PCT = 0.85  # 초기 Trailing Stop: 진입가 × 85% (-15%)
 PENNY_BREAKEVEN_TRIGGER = 1.10  # 수익 +10% 달성 시 TS를 본전으로 락인
-PENNY_SCALE_OUT_RSI = 70      # 1차 매도 RSI 기준
-PENNY_SCALE_OUT_PROFIT = 0.20 # 1차 매도 수익률 기준 (+20%)
+PENNY_SCALE_OUT_RSI = 70  # 1차 매도 RSI 기준
+PENNY_SCALE_OUT_PROFIT = 0.20  # 1차 매도 수익률 기준 (+20%)
 PENNY_SCALE_OUT_RATIO = 0.50  # 1차 매도 비율 (50%)
-PENNY_TIGHT_TS_PCT = 0.93     # 2차 매도: 잔여 물량 Trailing Stop -7%
-PENNY_RVOL_MIN = 3.0          # 최소 상대거래량 기준
-PENNY_TOP_N = 3               # 자동 관심종목 등록 수
+PENNY_TIGHT_TS_PCT = 0.93  # 2차 매도: 잔여 물량 Trailing Stop -7%
+PENNY_RVOL_MIN = 3.0  # 최소 상대거래량 기준
+PENNY_TOP_N = 3  # 자동 관심종목 등록 수
 
 
 class PennyScanRequest(BaseModel):
@@ -2303,7 +2303,9 @@ class PennyScanRequest(BaseModel):
     top_n: int = PENNY_TOP_N
 
 
-async def run_penny_scan_internal(max_price: float = PENNY_MAX_PRICE, top_n: int = PENNY_TOP_N) -> dict:
+async def run_penny_scan_internal(
+    max_price: float = PENNY_MAX_PRICE, top_n: int = PENNY_TOP_N
+) -> dict:
     """
     페니 스캔 핵심 로직 — HTTP 엔드포인트와 자동 스케줄러 양쪽에서 호출.
     완료 시 last_penny_scan_at, penny_scan_results_cache 갱신.
@@ -2339,6 +2341,7 @@ async def run_penny_scan_internal(max_price: float = PENNY_MAX_PRICE, top_n: int
 
             # yfinance batch로 현재가 조회 (100개씩 배치)
             import random
+
             sampled = random.sample(tradable, min(600, len(tradable)))
 
             batch_size = 50
@@ -2377,9 +2380,26 @@ async def run_penny_scan_internal(max_price: float = PENNY_MAX_PRICE, top_n: int
         if not penny_tickers:
             # Fallback: 알려진 페니 주식 목록
             fallback_tickers = [
-                "SNDL", "NKLA", "CLOV", "TLRY", "GOEV", "GNUS", "CENN",
-                "MULN", "FFIE", "AEMD", "VEON", "HCDI", "WRAP", "RITE",
-                "WISA", "BSFC", "ATNF", "SEEL", "ZVIA", "CTXR",
+                "SNDL",
+                "NKLA",
+                "CLOV",
+                "TLRY",
+                "GOEV",
+                "GNUS",
+                "CENN",
+                "MULN",
+                "FFIE",
+                "AEMD",
+                "VEON",
+                "HCDI",
+                "WRAP",
+                "RITE",
+                "WISA",
+                "BSFC",
+                "ATNF",
+                "SEEL",
+                "ZVIA",
+                "CTXR",
             ]
             for sym in fallback_tickers:
                 try:
@@ -2472,7 +2492,13 @@ async def run_penny_scan_internal(max_price: float = PENNY_MAX_PRICE, top_n: int
             strength = "NORMAL"
             is_golden = macd_diff > 0 and macd_diff_prev < 0
 
-            if rsi < 45 and is_golden and adx > 20 and rvol >= PENNY_RVOL_MIN and not is_extended:
+            if (
+                rsi < 45
+                and is_golden
+                and adx > 20
+                and rvol >= PENNY_RVOL_MIN
+                and not is_extended
+            ):
                 signal_type = "BUY"
                 strength = "STRONG"
             elif rsi < 50 and macd_diff > 0:
@@ -2544,13 +2570,17 @@ async def run_penny_scan_internal(max_price: float = PENNY_MAX_PRICE, top_n: int
                     )
                 auto_registered.append(item["ticker"])
                 item["is_watchlisted"] = True
-                print(f"⭐ [Penny] {item['ticker']} auto-registered to watchlist (DNA: {item['dna_score']})")
+                print(
+                    f"⭐ [Penny] {item['ticker']} auto-registered to watchlist (DNA: {item['dna_score']})"
+                )
             except Exception as e:
-                print(f"⚠️ [Penny] Watchlist auto-register error for {item['ticker']}: {e}")
+                print(
+                    f"⚠️ [Penny] Watchlist auto-register error for {item['ticker']}: {e}"
+                )
 
     # 4. Discord 알림 ──────────────────────────────────────────────────
     if auto_registered:
-        registered_items = [r for r in results if r['ticker'] in auto_registered]
+        registered_items = [r for r in results if r["ticker"] in auto_registered]
         top_summary = "\n".join(
             [
                 f"{'🥇🥈🥉'[i] if i < 3 else '•'} {r['ticker']} — DNA: {r['dna_score']} | ${r['price']:.4f} | RSI: {r['rsi']}"
@@ -2568,7 +2598,9 @@ async def run_penny_scan_internal(max_price: float = PENNY_MAX_PRICE, top_n: int
     penny_scan_results_cache = results
 
     if auto_registered and is_market_hours():
-        print(f"🔄 [Auto-Scan] 신규 종목 {auto_registered} 등록됨 — 장 중 스트림 재시작")
+        print(
+            f"🔄 [Auto-Scan] 신규 종목 {auto_registered} 등록됨 — 장 중 스트림 재시작"
+        )
         if _current_stream_task and not _current_stream_task.done():
             _current_stream_task.cancel()
         _current_stream_task = asyncio.create_task(start_alpaca_stream())
@@ -2864,7 +2896,9 @@ async def auto_penny_scan_scheduler():
         try:
             active = await asyncio.to_thread(db.get_active_tickers, limit=15)
             watching_count = len(active)
-            print(f"🪙 [Auto-Scan] 자동 페니 스캔 시작 (현재 watchlist: {watching_count}개)")
+            print(
+                f"🪙 [Auto-Scan] 자동 페니 스캔 시작 (현재 watchlist: {watching_count}개)"
+            )
             await run_penny_scan_internal()
             print("✅ [Auto-Scan] 페니 스캔 완료 — 다음 실행까지 4시간 대기")
         except Exception as e:
@@ -2884,7 +2918,9 @@ async def stream_scheduler():
         now_open = is_market_hours()
 
         if now_open and not was_market_open:
-            print("🔔 [Scheduler] 개장 감지 — DB에서 최신 watchlist 로드 후 스트림 시작")
+            print(
+                "🔔 [Scheduler] 개장 감지 — DB에서 최신 watchlist 로드 후 스트림 시작"
+            )
             # tickers를 전달하지 않으면 start_alpaca_stream이 DB에서 직접 조회
             _current_stream_task = asyncio.create_task(start_alpaca_stream())
             was_market_open = True
