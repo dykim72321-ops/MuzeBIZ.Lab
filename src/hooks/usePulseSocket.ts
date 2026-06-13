@@ -30,7 +30,10 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
   // 최신 수신된 단일 결과 (기존 컴포넌트 호환용)
   const [pulseData, setPulseData] = useState<PulseData | null>(null);
   // 전체 종목별 최신 상태 맵 (Live Dashboard용)
+  // 전체 종목별 최신 상태 맵 (Live Dashboard용)
   const [pulseMap, setPulseMap] = useState<Record<string, PulseData>>({});
+  // 실시간 시그널 상태 전환 감지용 Ref (onmessage 클로저 stale 상태 및 중복 알림 방지)
+  const pulseMapRef = useRef<Record<string, PulseData>>({});
   // Live Flash: 마지막으로 업데이트된 티커 (2초 후 자동 초기화)
   const [lastUpdatedTicker, setLastUpdatedTicker] = useState<string | null>(null);
   
@@ -60,20 +63,29 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
           // 1. 단일 최신 데이터 업데이트
           setPulseData(data);
           
-          // 2. 종목 맵 업데이트
+          // 2. 이전 데이터 추출 및 Ref 업데이트
+          const prevData = pulseMapRef.current[data.ticker];
+          pulseMapRef.current[data.ticker] = data;
+          
+          // 3. 종목 맵 업데이트
           setPulseMap((prev) => ({
             ...prev,
             [data.ticker]: data
           }));
 
-          // 3. Live Flash: 방금 수신된 티커 설정 → 2초 후 자동 초기화
+          // 4. Live Flash: 방금 수신된 티커 설정 → 2초 후 자동 초기화
           setLastUpdatedTicker(data.ticker);
           setTimeout(() => setLastUpdatedTicker(null), 2000);
           
           console.log(`💓 Pulse received for ${data.ticker}:`, data);
 
-          // 강한 시그널일 경우 전역 알림(Toast) 발생
-          if (data.strength === 'STRONG') {
+          // 시그널 상태가 실제로 변했는지 감지 (이전 데이터가 없거나, 시그널 종류 혹은 강도가 달라진 경우만)
+          const isTransition = !prevData || 
+            prevData.signal !== data.signal || 
+            prevData.strength !== data.strength;
+
+          // 강한 시그널로의 새로운 상태 전환일 때만 전역 알림(Toast) 발생 (중복 알림 도배 방지)
+          if (isTransition && data.strength === 'STRONG') {
             if (data.signal === 'BUY') {
               toast.success(`🚀 [STRONG BUY] ${data.ticker} 포착!`, {
                 description: `RSI: ${data.rsi} | MACD 확인 완료`,
@@ -137,6 +149,7 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
         // 기존 실시간 데이터가 더 최신일 수 있으므로 우선순위 확인 (생략 가능하면 단순 병합)
         if (!newMap[item.ticker]) {
           newMap[item.ticker] = item;
+          pulseMapRef.current[item.ticker] = item;
         }
       });
       return newMap;
