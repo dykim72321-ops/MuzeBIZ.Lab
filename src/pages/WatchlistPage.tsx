@@ -115,20 +115,20 @@ export const WatchlistPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-800 relative overflow-hidden pb-12">
+    <div className="min-h-screen bg-[#0b1222] text-slate-200 relative overflow-hidden pb-12">
       {/* Terminal Grid Overlay */}
-      <div className="absolute inset-0 opacity-[0.4] pointer-events-none" 
-           style={{ backgroundImage: 'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+           style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
       
       {/* Ambient Glows */}
-      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/5 blur-[120px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-cyan-500/5 blur-[120px] rounded-full translate-x-1/2 translate-y-1/2 pointer-events-none" />
+      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/10 blur-[130px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none animate-pulse-glow" />
+      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-cyan-500/10 blur-[130px] rounded-full translate-x-1/2 translate-y-1/2 pointer-events-none animate-pulse-glow" />
 
       {/* 🆕 Global Refresh Indicator */}
       {isRefreshing && (
-        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-white/90 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-slate-100 shadow-xl animate-in fade-in slide-in-from-top-4">
-          <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
-          <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">오빗 감시 동기화 중...</span>
+        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-[#0d1527]/90 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-slate-800 shadow-2xl animate-in fade-in slide-in-from-top-4 glow-border-indigo">
+          <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
+          <span className="text-xs font-bold text-slate-350 uppercase tracking-[0.2em] font-mono">오빗 감시 동기화 중...</span>
         </div>
       )}
 
@@ -146,7 +146,7 @@ export const WatchlistPage = () => {
               <div className="w-20 h-20 border-4 border-indigo-500/10 border-t-indigo-500 rounded-full animate-spin" />
               <Zap className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-indigo-400 animate-pulse" />
             </div>
-            <p className="font-black text-[10px] text-slate-500 tracking-[0.4em] uppercase animate-pulse">모니터링 오빗 시스템 초기화 중...</p>
+            <p className="font-bold text-xs text-slate-400 tracking-[0.4em] uppercase animate-pulse">모니터링 오빗 시스템 초기화 중...</p>
           </div>
         ) : filteredItems.length === 0 ? (
           <div className={addLoading ? "opacity-50 pointer-events-none transition-opacity" : ""}>

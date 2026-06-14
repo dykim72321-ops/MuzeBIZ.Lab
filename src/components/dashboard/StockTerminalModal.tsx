@@ -209,7 +209,7 @@ export const StockTerminalModal = ({
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
                         transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-                        className="relative w-full max-w-4xl bg-[#0A0F1C]/90 backdrop-blur-3xl border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-[0_0_100px_rgba(34,211,238,0.1)] flex flex-col"
+                        className="relative w-full max-w-4xl bg-[#0A0F1C]/95 backdrop-blur-3xl border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-[0_0_100px_rgba(34,211,238,0.15)] flex flex-col"
                     >
                         {/* 1. HUD Header Section */}
                         <div className="p-8 border-b border-slate-800/80 flex justify-between items-start bg-gradient-to-b from-slate-900/50 to-transparent relative z-10">
@@ -218,18 +218,18 @@ export const StockTerminalModal = ({
                                     <Dna className="w-8 h-8 text-indigo-400" />
                                 </div>
                                 <div>
-                                    <div className="flex items-center gap-2 mb-1.5">
+                                    <div className="flex items-center gap-2 mb-1.5 font-mono">
                                         <span className="px-2 py-0.5 rounded text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-black tracking-[0.2em] uppercase">Deep Dive Mode</span>
                                         <span className="px-2 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-black tracking-[0.2em] uppercase">Neural Engine Sync Active</span>
                                     </div>
                                     <h1 className="text-4xl font-black text-white tracking-tighter flex items-center gap-4">
                                         <span className="text-slate-500 opacity-40">/</span>
                                         {displayData.ticker}
-                                        <span className="text-xs font-bold text-slate-500 opacity-60 uppercase tracking-widest bg-slate-800/50 px-2 py-0.5 rounded">NASDAQ</span>
+                                        <span className="text-xs font-bold text-slate-400 opacity-80 uppercase tracking-widest bg-slate-950/80 px-2 py-0.5 rounded border border-slate-850 font-mono">NASDAQ</span>
                                     </h1>
                                 </div>
                             </div>
-                            <button onClick={onClose} className="p-3 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-colors group">
+                            <button onClick={onClose} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all duration-300 group">
                                 <X className="w-5 h-5 text-slate-400 group-hover:text-white" />
                             </button>
                         </div>
@@ -238,19 +238,19 @@ export const StockTerminalModal = ({
                         <div className="p-8 space-y-8 overflow-y-auto max-h-[70vh] custom-scrollbar relative z-10">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
                                 <div className="space-y-3">
-                                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] flex items-center gap-2 mb-3">
-                                        <Activity className="w-4 h-4 text-indigo-500" /> Neural Projection Matrix
+                                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] flex items-center gap-2 mb-3 font-mono">
+                                        <Activity className="w-4 h-4 text-indigo-400" /> Neural Projection Matrix
                                     </h3>
                                     <NeuralProjectionChart
                                         currentPrice={displayData.price || 0}
                                         targetPrice={displayData.targetPrice || (displayData.price ? displayData.price * 1.05 : 0)}
                                     />
                                     <div className="grid grid-cols-2 gap-4 mt-6">
-                                        <div className="bg-[#020617]/50 p-4 rounded-2xl border border-slate-800 font-mono">
+                                        <div className="bg-slate-950/45 p-4 rounded-2xl border border-slate-855/60 font-mono">
                                             <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">Day High</span>
                                             <span className="text-lg font-black text-white">$825.40</span>
                                         </div>
-                                        <div className="bg-[#020617]/50 p-4 rounded-2xl border border-slate-800 font-mono">
+                                        <div className="bg-slate-950/45 p-4 rounded-2xl border border-slate-855/60 font-mono">
                                             <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-1">Volume (24H)</span>
                                             <span className="text-lg font-black text-white">42.8M</span>
                                         </div>
@@ -264,7 +264,7 @@ export const StockTerminalModal = ({
                                     <div className="relative z-10">
                                         <div className="flex justify-between items-end mb-6">
                                             <div>
-                                                <h3 className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.3em] mb-1">Core DNA Matrix</h3>
+                                                <h3 className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.3em] mb-1 font-mono">Core DNA Matrix</h3>
                                                 <p className="text-[10px] text-slate-500 font-medium tracking-tight">Confidence Verification Node</p>
                                             </div>
                                             <span className="text-5xl font-black text-white font-mono tracking-tighter drop-shadow-[0_0_15px_rgba(34,211,238,0.4)]">
@@ -280,30 +280,30 @@ export const StockTerminalModal = ({
                                 </div>
                             </div>
 
-                            <div className="bg-[#020617]/50 rounded-3xl border border-slate-800/50 p-8 space-y-6">
-                                <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] flex items-center gap-2 mb-4">
-                                    <Zap className="w-4 h-4 text-indigo-500 fill-indigo-500/20" /> System Verdict & Catalysts
+                            <div className="bg-[#0d1527]/40 rounded-3xl border border-white/5 p-8 space-y-6">
+                                <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] flex items-center gap-2 mb-4 font-mono">
+                                    <Zap className="w-4 h-4 text-indigo-400 fill-indigo-400/10" /> System Verdict & Catalysts
                                 </h3>
                                 <p className="text-md text-slate-300 font-medium leading-relaxed mb-6">
                                     {displayData.formulaVerdict || "시스템 분석 결과를 불러오는 중입니다..."}
                                 </p>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-slate-800/50">
                                     <div className="space-y-3">
-                                        <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest block mb-2">Alpha Catalysts</span>
+                                        <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest block mb-2 font-mono">Alpha Catalysts</span>
                                         <ul className="space-y-2">
                                             {displayData.bullPoints?.slice(0, 3).map((pt, i) => (
                                                 <li key={i} className="flex gap-2 text-xs text-slate-400 font-medium items-start">
-                                                    <TrendingUp className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" /> {pt}
+                                                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" /> {pt}
                                                 </li>
                                             ))}
                                         </ul>
                                     </div>
                                     <div className="space-y-3">
-                                        <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest block mb-2">Delta Risks</span>
+                                        <span className="text-[9px] font-black text-rose-450 uppercase tracking-widest block mb-2 font-mono">Delta Risks</span>
                                         <ul className="space-y-2">
                                             {displayData.bearPoints?.slice(0, 3).map((pt, i) => (
                                                 <li key={i} className="flex gap-2 text-xs text-slate-500 font-medium items-start">
-                                                    <TrendingDown className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" /> {pt}
+                                                    <TrendingDown className="w-3.5 h-3.5 text-rose-450 shrink-0 mt-0.5" /> {pt}
                                                 </li>
                                             ))}
                                         </ul>
@@ -313,9 +313,9 @@ export const StockTerminalModal = ({
                         </div>
 
                         {/* 3. Smart Execute Action Footer */}
-                        <div className="p-8 border-t border-slate-800/80 bg-[#020617] flex justify-between items-center relative z-10">
+                        <div className="p-8 border-t border-slate-800/80 bg-[#020617] flex justify-between items-center relative z-10 font-mono">
                             <div className="flex items-center gap-4">
-                                <button onClick={onClose} className="text-[10px] font-black text-slate-500 hover:text-slate-300 uppercase tracking-[0.2em] transition-colors bg-white/5 px-6 py-3 rounded-xl border border-white/5">
+                                <button onClick={onClose} className="text-[10px] font-black text-slate-400 hover:text-white uppercase tracking-[0.2em] transition-all bg-white/5 px-6 py-3 rounded-xl border border-white/5">
                                     Close
                                 </button>
                                 
@@ -328,7 +328,7 @@ export const StockTerminalModal = ({
                                                 console.error("Watchlist add error:", error);
                                             }
                                         }}
-                                        className="text-[10px] font-black text-cyan-400 hover:text-cyan-300 uppercase tracking-[0.2em] transition-colors bg-cyan-500/5 px-6 py-3 rounded-xl border border-cyan-500/10 flex items-center gap-2"
+                                        className="text-[10px] font-black text-cyan-400 hover:text-cyan-300 uppercase tracking-[0.2em] transition-all bg-cyan-500/10 px-6 py-3 rounded-xl border border-cyan-500/20 flex items-center gap-2"
                                     >
                                         <List className="w-3.5 h-3.5" />
                                         Watchlist
@@ -339,7 +339,7 @@ export const StockTerminalModal = ({
                             <div className="flex items-center gap-4">
                                 <div className="hidden md:flex flex-col items-end mr-2 text-right">
                                     <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Confidence Allocation</span>
-                                    <span className="text-xs font-black text-indigo-400 font-mono">{displayData.kellyWeight || 25}% Q-Kelly</span>
+                                    <span className="text-xs font-black text-indigo-400">{displayData.kellyWeight || 25}% Q-Kelly</span>
                                 </div>
                                 <button 
                                     onClick={() => onExecuteTrade && onExecuteTrade({
@@ -349,7 +349,7 @@ export const StockTerminalModal = ({
                                         stopPrice: displayData.stopPrice,
                                         lotSize: displayData.kellyWeight
                                     })}
-                                    className="group relative px-10 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-[0.2em] transition-all shadow-[0_0_30px_rgba(79,70,229,0.4)] flex items-center gap-3 active:scale-95"
+                                    className="group relative px-10 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-[0.2em] transition-all shadow-lg active:scale-95 flex items-center gap-3"
                                 >
                                     <ShieldCheck className="w-4 h-4 text-white" />
                                     <span>Execute Trade</span>

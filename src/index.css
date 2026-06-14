@@ -8,7 +8,7 @@
   --font-mono: "JetBrains Mono", monospace;
 
   /* MuzeBIZ.Lab Deep Dark & Neon Theme Tokens */
-  --color-abyss-900: #0a0f1c; /* Deepest background */
+  --color-abyss-900: #0b1222; /* Deepest background */
   --color-abyss-800: #101828; /* Surface/Card background */
   
   --color-neon-blue: #3b82f6;
@@ -139,6 +139,64 @@
     @apply shadow-xl;
   }
 
+  /* Neo-Glassmorphism Panels (Dark Theme - Premium Financial Look) */
+  .dark-glass-panel {
+    background: rgba(15, 23, 42, 0.85); /* Slightly lighter Slate-900 base for better contrast */
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255, 255, 255, 0.15); /* Crisper, brighter borders */
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
+  }
+
+  .dark-glass-panel-hover {
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .dark-glass-panel-hover:hover {
+    background: rgba(30, 41, 59, 0.95); /* Slate-800 base on hover */
+    border-top-color: rgba(255, 255, 255, 0.25);
+    border-left-color: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 15px 45px -10px rgba(0, 0, 0, 0.7);
+    @apply scale-[1.005];
+  }
+
+  /* Glowing Custom Borders and Shadows */
+  .glow-border-indigo {
+    @apply border border-indigo-500/25 shadow-[0_0_25px_rgba(99,102,241,0.08)];
+  }
+  .glow-border-indigo-hover:hover {
+    @apply border-indigo-400/40 shadow-[0_0_35px_rgba(99,102,241,0.18)] scale-[1.005] transition-all duration-300;
+  }
+  
+  .glow-border-cyan {
+    @apply border border-cyan-500/25 shadow-[0_0_25px_rgba(34,211,238,0.08)];
+  }
+  .glow-border-cyan-hover:hover {
+    @apply border-cyan-400/40 shadow-[0_0_35px_rgba(34,211,238,0.18)] scale-[1.005] transition-all duration-300;
+  }
+
+  .glow-border-rose {
+    @apply border border-rose-500/25 shadow-[0_0_20px_rgba(244,63,94,0.08)];
+  }
+  
+  .glow-border-emerald {
+    @apply border border-emerald-500/25 shadow-[0_0_20px_rgba(16,185,129,0.08)];
+  }
+
+  .glow-border-amber {
+    @apply border border-amber-500/25 shadow-[0_0_20px_rgba(245,158,11,0.08)];
+  }
+
   .glass-card {
     @apply bg-white/80 backdrop-blur-md border border-slate-200/50 shadow-lg shadow-slate-100/50;
   }
@@ -164,10 +222,10 @@
   }
 }
 
-/* Scrollbar Custom (Light Theme) */
+/* Scrollbar Custom (Dark Theme Friendly) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -177,11 +235,12 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 10px;
   border: 1px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(255, 255, 255, 0.25);
 }
+

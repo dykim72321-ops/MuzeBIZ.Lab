@@ -2,17 +2,17 @@
 
 /* MuzepartSearchPage - Organized Stylings */
 :root {
-  --primary: #0176d3;
-  --primary-glow: rgba(1, 118, 211, 0.15);
-  --secondary: #1b264f;
+  --primary: #22d3ee; /* Cyan highlight */
+  --primary-glow: rgba(34, 211, 238, 0.15);
+  --secondary: #0d1527;
   --accent: #10b981;
   --danger: #ef4444;
   --warning: #f59e0b;
-  --text-main: #0f172a;
-  --text-secondary: #64748b;
-  --border: #e2e8f0;
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.4);
+  --text-main: #ffffff; /* High readability pure white text */
+  --text-secondary: #cbd5e1; /* slate-300 for readable descriptions */
+  --border: rgba(255, 255, 255, 0.1); /* Visible crisp borders on dark backgrounds */
+  --glass-bg: rgba(15, 23, 42, 0.85); /* Slate-900 glass backdrop */
+  --glass-border: rgba(255, 255, 255, 0.12);
   --font-family: 'Outfit', sans-serif;
 }
 
@@ -59,7 +59,7 @@ body {
   border-radius: 50%;
   margin: 0 auto 2rem;
   animation: spin 1s linear infinite;
-  box-shadow: 0 0 20px rgba(1, 118, 211, 0.2);
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.2);
 }
 
 .terminal-feed {
@@ -92,16 +92,17 @@ body {
   white-space: nowrap;
 }
 
-.dist-mouser { background: #e0f2fe; color: #0369a1; border-left: 2px solid #0ea5e9; }
-.dist-digikey { background: #fef2f2; color: #991b1b; border-left: 2px solid #ef4444; }
-.dist-arrow { background: #fff7ed; color: #c2410c; border-left: 2px solid #f97316; }
-.dist-general { background: #f1f5f9; color: #475569; border-left: 2px solid #94a3b8; }
+.dist-mouser { background: rgba(3, 105, 161, 0.2); color: #38bdf8; border-left: 2px solid #0ea5e9; }
+.dist-digikey { background: rgba(153, 27, 27, 0.2); color: #f87171; border-left: 2px solid #ef4444; }
+.dist-arrow { background: rgba(194, 65, 12, 0.2); color: #fb923c; border-left: 2px solid #f97316; }
+.dist-general { background: rgba(71, 85, 105, 0.2); color: #cbd5e1; border-left: 2px solid #94a3b8; }
 
 /* Custom Form Components */
 .sfdc-input {
   padding: 0.5rem 1rem;
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background-color: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  color: var(--text-main);
   border-radius: 0.5rem;
   font-size: 0.875rem;
   font-weight: 500;
@@ -110,41 +111,42 @@ body {
 }
 
 .sfdc-input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+  border-color: #22d3ee;
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.15);
 }
 
 .sfdc-select {
   padding: 0.375rem 0.75rem;
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background-color: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  color: var(--text-main);
   border-radius: 0.5rem;
   font-size: 0.875rem;
   font-weight: 700;
-  color: #334155;
   outline: none;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .sfdc-select:hover {
-  background-color: #f1f5f9;
+  background-color: rgba(30, 41, 59, 0.8);
 }
 
 .sfdc-button-primary {
   padding: 0.5rem 1.5rem;
-  background-color: #0176d3;
-  color: white;
-  font-weight: 700;
+  background-color: #06b6d4; /* cyan-500 */
+  color: #0d1527; /* dark text for high contrast */
+  font-weight: 900;
   border-radius: 0.5rem;
   border: none;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
 }
 
 .sfdc-button-primary:hover {
-  background-color: #1e40af;
+  background-color: #22d3ee; /* cyan-400 */
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.5);
 }
 
 .sfdc-button-primary:active {
@@ -157,33 +159,33 @@ body {
   -webkit-backdrop-filter: blur(12px) saturate(180%);
   border-radius: 1rem;
   border: 1px solid var(--glass-border);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .sfdc-card:hover {
-  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.7);
 }
 
 .sfdc-card-header {
   padding: 1rem 1.25rem;
-  background-color: rgba(248, 250, 252, 0.5);
+  background-color: rgba(15, 23, 42, 0.4);
   border-bottom: 1px solid var(--border);
 }
 
 /* Stock Status Helper */
 .in-stock { color: #10b981; }
 .low-stock { color: #f59e0b; }
-.out-of-stock { color: #94a3b8; font-style: italic; }
+.out-of-stock { color: #64748b; font-style: italic; }
 
 /* Family Match Tag */
 .family-tag {
   display: inline-block;
   padding: 1px 6px;
-  background: #f0f7ff;
-  color: #0070d2;
-  border: 1px solid #b0d3ff;
+  background: rgba(6, 182, 212, 0.15);
+  color: #22d3ee;
+  border: 1px solid rgba(6, 182, 212, 0.3);
   border-radius: 4px;
   font-size: 9px;
   font-weight: 800;

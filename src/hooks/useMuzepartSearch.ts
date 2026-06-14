@@ -18,7 +18,7 @@ export const useMuzepartSearch = () => {
   const handleRetryConnection = useCallback(async () => {
     setConnectionError(null);
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/market/stats');
+      const res = await fetch('/py-api/api/market/stats');
       if (res.ok) setIsBackendConnected(true);
     } catch {
       setIsBackendConnected(false);
@@ -64,7 +64,7 @@ export const useMuzepartSearch = () => {
     setSearchParams({ q: targetQuery });
 
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/parts/search?q=${encodeURIComponent(targetQuery)}`);
+      const response = await fetch(`/py-api/api/parts/search?q=${encodeURIComponent(targetQuery)}`);
       
       if (!response.ok) throw new Error('System link failure');
       const data = await response.json();
@@ -254,7 +254,7 @@ export const useMuzepartSearch = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/market/stats');
+        const res = await fetch('/py-api/api/market/stats');
         if (!res.ok) throw new Error('API 연결 실패');
         const data = await res.json();
         setIsBackendConnected(true);
@@ -298,7 +298,7 @@ export const useMuzepartSearch = () => {
     setResults(prev => prev.map(p => p.id === part.id ? { ...p, is_processing: true } : p));
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/procurement/lock', {
+      const response = await fetch('/py-api/procurement/lock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ part_id: part.id, quantity: 1 })
@@ -324,7 +324,7 @@ export const useMuzepartSearch = () => {
   const fetchPartDetails = useCallback(async (productUrl: string) => {
     if (!productUrl) return null;
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/parts/details?url=${encodeURIComponent(productUrl)}`);
+      const response = await fetch(`/py-api/api/parts/details?url=${encodeURIComponent(productUrl)}`);
       if (!response.ok) throw new Error('Detail fetch failed');
       const details = await response.json();
       
