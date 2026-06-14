@@ -104,8 +104,10 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
       };
 
       ws.onerror = (event) => {
-        console.error('❌ WebSocket Error:', event);
-        setError('WebSocket error occurred');
+        const ts = new Date().toLocaleTimeString('ko-KR');
+        const errMsg = `WebSocket 연결 오류 (${ts}) — ${url} 응답 없음`;
+        console.error('❌ WebSocket Error:', event.type, '|', url, '@', ts);
+        setError(errMsg);
         setIsConnected(false);
       };
 

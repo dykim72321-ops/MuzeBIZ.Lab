@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import {
@@ -25,7 +25,9 @@ import {
   TrendingUp,
   TrendingDown,
   Lock,
-  Unlock
+  Unlock,
+  Plus,
+  Loader2
 } from 'lucide-react';
 
 // Hooks & Services
@@ -85,6 +87,10 @@ export const UnifiedDashboard = () => {
   const [pennyHistory, setPennyHistory] = useState<any[]>([]);
   const [pennyAccount, setPennyAccount] = useState<any>(null);
 
+  // 4. Discovery watchlist-add in-flight guard (ref = synchronous, avoids double-click race)
+  const addingTickersRef = useRef<Set<string>>(new Set());
+  const [addingTickers, setAddingTickers] = useState<Set<string>>(new Set());
+
   // US 시장 개장 여부 체크 (ET 기준 평일 09:30~16:00)
   useEffect(() => {
     const checkMarket = () => {
@@ -129,6 +135,8 @@ export const UnifiedDashboard = () => {
           .from('daily_discovery')
           .select('*')
           .gte('updated_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .not('dna_score', 'is', null)
+          .gt('dna_score', 0)
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
@@ -151,7 +159,7 @@ export const UnifiedDashboard = () => {
 
       setWatchlistItems(normalizedWatchlist);
       setWatchlistStocks(wlStocks);
-      setDiscoveryStocks(discoveryResult.data || []);
+      setDiscoveryStocks((discoveryResult.data || []).filter(s => s.dna_score != null && s.price != null));
       
       setPennyPositions(
         pp.map((pos: any) => ({
@@ -263,6 +271,38 @@ export const UnifiedDashboard = () => {
     });
   };
 
+  // EXITED 종목은 재등록 가능하도록 제외
+  const watchlistedTickers = useMemo(
+    () => new Set(watchlistItems.filter(i => i.status !== 'EXITED').map(i => i.ticker)),
+    [watchlistItems]
+  );
+
+  const handleAddDiscoveryToWatchlist = async (e: React.MouseEvent, stock: any) => {
+    e.stopPropagation();
+    const ticker: string = stock.ticker;
+    if (addingTickersRef.current.has(ticker)) return; // synchronous double-click guard
+    addingTickersRef.current.add(ticker);
+    setAddingTickers(new Set(addingTickersRef.current));
+    try {
+      await addToWatchlist(ticker, undefined, 'WATCHING', undefined, undefined, undefined, stock.dna_score ?? undefined);
+      toast.success(`${ticker} 관심종목 등록`, { description: '오빗 패널에 추가되었습니다.' });
+      const wl = await getWatchlist();
+      const wlStocks = wl.length > 0 ? await fetchMultipleStocksOptimized(wl.map(i => i.ticker)) : [];
+      const normalized = wl.map(item => {
+        const s = wlStocks.find(s => s.ticker === item.ticker);
+        const price = s?.price ?? item.buyPrice ?? 0;
+        return { ...item, currentPrice: price, changePercent: s?.changePercent ?? 0, isPenny: price <= PENNY_DISPLAY_THRESHOLD };
+      });
+      setWatchlistItems(normalized);
+      setWatchlistStocks(wlStocks);
+    } catch (e: any) {
+      toast.error(`${ticker} 등록 실패`, { description: e.message });
+    } finally {
+      addingTickersRef.current.delete(ticker);
+      setAddingTickers(new Set(addingTickersRef.current));
+    }
+  };
+
   const handleRemoveWatchlist = async (ticker: string) => {
     try {
       await removeFromWatchlist(ticker);
@@ -297,9 +337,9 @@ export const UnifiedDashboard = () => {
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="bg-white/95 backdrop-blur-md p-4 border border-slate-100 rounded-xl shadow-lg leading-none">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">{payload[0].payload.name}</p>
-          <p className="text-lg font-black text-slate-800 tabular-nums">
+        <div className="bg-[#0d1527]/90 backdrop-blur-xl p-4 border border-white/10 rounded-xl shadow-2xl leading-none">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">{payload[0].payload.name}</p>
+          <p className="text-lg font-black text-white tabular-nums">
             ${Number(payload[0].value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
@@ -309,33 +349,33 @@ export const UnifiedDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-800 relative overflow-hidden pb-12">
+    <div className="min-h-screen bg-[#0b1222] text-slate-200 relative overflow-hidden pb-12 font-sans">
       {/* Decorative Grid Background Overlay */}
-      <div className="absolute inset-0 opacity-[0.4] pointer-events-none" 
-           style={{ backgroundImage: 'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+           style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
       
       {/* Soft Ambient Light Glows */}
-      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/5 blur-[120px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-      <div className="absolute bottom-1/2 right-0 w-[500px] h-[500px] bg-cyan-500/5 blur-[120px] rounded-full translate-x-1/2 pointer-events-none" />
+      <div className="absolute top-0 left-0 w-[600px] h-[600px] bg-indigo-500/10 blur-[130px] rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none animate-pulse-glow" />
+      <div className="absolute bottom-1/2 right-0 w-[500px] h-[500px] bg-cyan-500/10 blur-[130px] rounded-full translate-x-1/2 pointer-events-none animate-pulse-glow" style={{ animationDelay: '1s' }} />
 
       {loading && (
-        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-white/90 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-slate-100 shadow-xl animate-in fade-in slide-in-from-top-4">
-          <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
-          <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Synchronizing Command Data...</span>
+        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-[#0d1527]/90 backdrop-blur-xl px-4 py-2.5 rounded-xl border border-slate-800 shadow-2xl animate-in fade-in slide-in-from-top-4 glow-border-indigo">
+          <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
+          <span className="text-xs font-bold text-slate-200 uppercase tracking-[0.2em] font-mono">Synchronizing Command Data...</span>
         </div>
       )}
 
       <div className="max-w-[1700px] mx-auto px-6 py-8 space-y-8 animate-in fade-in duration-700 relative z-10">
         
         {/* ════════ HEADER ════════ */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200 pb-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/15 pb-6">
           <div>
             <div className="flex items-center gap-3 mb-1.5">
-              <span className="w-1.5 h-4 bg-indigo-600 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.4)]" />
-              <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.4em]">Integrated Intelligence Dashboard</span>
+              <span className="w-1.5 h-4 bg-indigo-500 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.4)]" />
+              <span className="text-xs font-black text-indigo-400 uppercase tracking-[0.4em]">Integrated Intelligence Dashboard</span>
             </div>
-            <h1 className="text-3xl font-black text-slate-950 flex items-center gap-3 tracking-tighter">
-              <Zap className="w-8 h-8 text-indigo-600" />
+            <h1 className="text-3xl font-black text-white flex items-center gap-3 tracking-tighter">
+              <Zap className="w-8 h-8 text-indigo-400" />
               통합 자산 지휘소
             </h1>
             <div className="flex flex-wrap items-center gap-2 mt-1">
@@ -343,11 +383,11 @@ export const UnifiedDashboard = () => {
                 "w-2 h-2 rounded-full",
                 isMarketOpen ? "bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-slate-400"
               )} />
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+              <span className="text-xs font-black text-slate-400 uppercase tracking-wider">
                 US Market {isMarketOpen ? 'Open' : 'Closed'}
               </span>
-              <span className="text-slate-300">|</span>
-              <p className="text-xs text-slate-500 font-bold">실시간 시장 펄스 감시, 오늘의 알파 발굴, 그리고 포트폴리오의 실시간 가상 매매 현황 통합 관제</p>
+              <span className="text-slate-500">|</span>
+              <p className="text-xs text-slate-400 font-bold">실시간 시장 펄스 감시, 오늘의 알파 발굴, 그리고 포트폴리오의 실시간 가상 매매 현황 통합 관제</p>
             </div>
           </div>
 
@@ -359,35 +399,35 @@ export const UnifiedDashboard = () => {
               className={clsx(
                 "flex items-center gap-0 rounded-2xl border font-black text-xs uppercase tracking-wider transition-all duration-300 active:scale-95 shadow-md overflow-hidden",
                 isArmed
-                  ? "border-rose-200"
-                  : "border-emerald-200"
+                  ? "border-rose-500/30"
+                  : "border-emerald-500/30"
               )}
             >
               {/* 현재 상태 레이블 */}
               <span className={clsx(
                 "flex items-center gap-2 px-4 py-3",
-                isArmed ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"
+                isArmed ? "bg-rose-500/10 text-rose-400" : "bg-emerald-500/10 text-emerald-400"
               )}>
                 {isArmed ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                 {isArmed ? 'ARMED' : 'SAFE'}
               </span>
               {/* 클릭 시 전환 방향 */}
               <span className={clsx(
-                "flex items-center gap-1.5 px-3 py-3 text-[9px] border-l",
+                "flex items-center gap-1.5 px-3 py-3 text-[10px] border-l",
                 isArmed
-                  ? "bg-slate-50 border-rose-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600"
-                  : "bg-slate-50 border-emerald-100 text-slate-500 hover:bg-emerald-100 hover:text-emerald-600"
+                  ? "bg-slate-900/40 border-rose-500/20 text-slate-400 hover:bg-rose-500/20 hover:text-rose-300"
+                  : "bg-slate-900/40 border-emerald-500/20 text-slate-400 hover:bg-emerald-500/20 hover:text-emerald-300"
               )}>
                 {isArmed ? '→ 해제' : '→ 활성화'}
               </span>
             </button>
 
             {/* Auto Penny Scan Status Badge */}
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-cyan-50 border border-cyan-100 rounded-2xl shadow-sm">
-              <Coins className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-2xl shadow-sm">
+              <Coins className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
               <div className="leading-none">
-                <span className="text-[9px] font-black text-cyan-700 uppercase tracking-widest block">Auto Penny Scan</span>
-                <span className="text-[9px] text-cyan-600 font-bold block mt-0.5">
+                <span className="text-[10px] font-black text-cyan-300 uppercase tracking-widest block">Auto Penny Scan</span>
+                <span className="text-[10px] text-cyan-400 font-bold block mt-0.5">
                   {pennyScanStatus?.last_scan_at
                     ? `최근: ${new Date(pennyScanStatus.last_scan_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
                     : '서버 시작 후 30초 내 실행'}
@@ -399,20 +439,20 @@ export const UnifiedDashboard = () => {
             <button
               onClick={() => setIsSettingsOpen(true)}
               title="퀀트 전략 파라미터 설정"
-              className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-200 rounded-2xl shadow-sm transition-colors text-xs font-black uppercase tracking-wider"
+              className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 text-slate-350 hover:text-indigo-400 hover:border-indigo-500/30 rounded-2xl shadow-sm transition-colors text-xs font-black uppercase tracking-wider cursor-pointer"
             >
-              <ShieldCheck className="w-4 h-4" />
+              <ShieldCheck className="w-4 h-4 text-indigo-400" />
               설정
             </button>
           </div>
         </div>
 
         {/* 💡 SYSTEM STATUS INFO BAR */}
-        <div className="bg-indigo-50/50 border border-indigo-100/50 rounded-[1.5rem] p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-2.5 text-indigo-950 font-bold">
-            <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)] shrink-0" />
-            <span className="shrink-0 font-extrabold text-[10px] uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">시스템 가이드</span>
-            <span className="text-slate-600 font-medium">
+        <div className="bg-indigo-950/20 border border-indigo-500/20 rounded-[1.5rem] p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-2.5 text-indigo-200 font-bold">
+            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)] shrink-0" />
+            <span className="shrink-0 font-extrabold text-[10px] uppercase tracking-wider bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded">시스템 가이드</span>
+            <span className="text-slate-300 font-medium">
               {isArmed 
                 ? '자동 매매 활성(ARMED) 모드입니다. 관심 종목 중 퀀트 매수 지표 조건 충족 시 실시간 자동 매수가 구동됩니다.' 
                 : '현재 안전 관제(SAFE) 모드입니다. 실시간 탐색 및 알림은 유지되나 가상 주문은 실행되지 않습니다.'}
@@ -432,7 +472,7 @@ export const UnifiedDashboard = () => {
               sub: '현금 + 포지션 평가액',
               info: '가상 예수금과 보유 주식 평가 가치를 합산한 실시간 포트폴리오 평가 총액입니다.',
               icon: BarChart3,
-              color: 'text-indigo-600 bg-indigo-50 border-indigo-100'
+              color: 'text-indigo-400 bg-indigo-550/10 border-indigo-500/20'
             },
             {
               label: '가용 주문 잔고 (Available Cash)',
@@ -440,7 +480,7 @@ export const UnifiedDashboard = () => {
               sub: '가상 매수 가능 예치금',
               info: '새로운 퀀트 종목 시그널 매치 시 즉시 투입할 수 있는 미결제 현금 잔고입니다.',
               icon: Coins,
-              color: 'text-cyan-600 bg-cyan-50 border-cyan-100'
+              color: 'text-cyan-400 bg-cyan-550/10 border-cyan-500/20'
             },
             {
               label: '진행중 포지션 평가손익 (Current P&L)',
@@ -448,7 +488,7 @@ export const UnifiedDashboard = () => {
               sub: '현재 보유 종목의 미실현 손익',
               info: '보유 중인 미청산 가상 주식들의 평균 매수가 대비 현재 평가손익 합계입니다.',
               icon: totalPnl >= 0 ? TrendingUp : TrendingDown,
-              color: totalPnl >= 0 ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-rose-600 bg-rose-50 border-rose-100'
+              color: totalPnl >= 0 ? 'text-emerald-400 bg-emerald-550/10 border-emerald-500/20' : 'text-rose-400 bg-rose-550/10 border-rose-500/20'
             },
             {
               label: '백테스트 엔진 승률 (Win Rate)',
@@ -456,21 +496,21 @@ export const UnifiedDashboard = () => {
               sub: statsLoading ? '연산 중...' : `Profit Factor: ${strategyStats ? strategyStats.profit_factor.toFixed(2) : '1.14'}x`,
               info: '과거 거래 데이터 기반 시뮬레이션 및 백테스트의 종합 승률 및 이익 지수입니다.',
               icon: Star,
-              color: 'text-amber-600 bg-amber-50 border-amber-100'
+              color: 'text-amber-400 bg-amber-550/10 border-amber-500/20'
             }
           ].map((metric, i) => (
-            <div key={i} className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xl shadow-slate-100/40 flex flex-col justify-between min-h-[140px]">
+            <div key={i} className="dark-glass-panel border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col justify-between min-h-[140px]">
               <div className="flex justify-between items-start">
                 <div className="space-y-1">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none block">{metric.label}</span>
-                  <span className="text-2xl font-black text-slate-900 leading-none tabular-nums block">{metric.value}</span>
-                  <span className="text-[10px] text-slate-500 font-bold leading-none block pt-1">{metric.sub}</span>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest leading-none block">{metric.label}</span>
+                  <span className="text-3xl font-black text-white leading-none tabular-nums block pt-1.5">{metric.value}</span>
+                  <span className="text-xs text-slate-300 font-bold leading-none block pt-2">{metric.sub}</span>
                 </div>
                 <div className={clsx("p-2.5 rounded-xl border shrink-0", metric.color)}>
                   <metric.icon className="w-4 h-4" />
                 </div>
               </div>
-              <p className="text-[9px] text-slate-400 font-medium leading-normal border-t border-slate-50 pt-2 mt-2">{metric.info}</p>
+              <p className="text-xs text-slate-400 font-medium leading-normal border-t border-white/5 pt-2 mt-4">{metric.info}</p>
             </div>
           ))}
         </div>
@@ -482,26 +522,26 @@ export const UnifiedDashboard = () => {
           <div className="lg:col-span-2 space-y-8">
             
             {/* A. PERFORMANCE GROWTH CHART */}
-            <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div className="dark-glass-panel border border-white/10 rounded-[2rem] p-6 shadow-2xl space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-4 gap-2">
                 <div>
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Asset & Profit Metrics</span>
-                  <h2 className="text-base font-black text-slate-800">포트폴리오 자산 성장 및 누적 손익 곡선</h2>
-                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">실시간 청산 완료된 거래 내역에 기반한 가상 자산의 누적 성장 흐름을 시각화합니다.</p>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-0.5">Asset & Profit Metrics</span>
+                  <h2 className="text-base font-black text-white">포트폴리오 자산 성장 및 누적 손익 곡선</h2>
+                  <p className="text-xs text-slate-350 mt-0.5">실시간 청산 완료된 거래 내역에 기반한 가상 자산의 누적 성장 흐름을 시각화합니다.</p>
                 </div>
-                <div className="flex items-center gap-4 text-[10px] text-slate-500 font-bold">
+                <div className="flex items-center gap-4 text-xs text-slate-300 font-bold">
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500" /> 가상 자산 평가액</span>
-                  <span className="text-slate-300">|</span>
+                  <span className="text-slate-500">|</span>
                   <span>최종 갱신: {lastFetchedTime}</span>
                 </div>
               </div>
 
               <div className="h-72 w-full">
                 {chartData.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center gap-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                    <BarChart3 className="w-8 h-8 text-slate-300" />
+                  <div className="h-full flex flex-col items-center justify-center gap-3 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                    <BarChart3 className="w-8 h-8 text-slate-600" />
                     <p className="text-xs font-bold text-slate-400">청산 이력이 없습니다</p>
-                    <p className="text-[10px] text-slate-400">매매가 완료되면 누적 손익 곡선이 표시됩니다.</p>
+                    <p className="text-xs text-slate-400">매매가 완료되면 누적 손익 곡선이 표시됩니다.</p>
                   </div>
                 ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -512,11 +552,11 @@ export const UnifiedDashboard = () => {
                         <stop offset="95%" stopColor="#6366f1" stopOpacity={0.01}/>
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={9} tickLine={false} axisLine={false} dy={8} />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} dy={8} />
                     <YAxis
                       stroke="#94a3b8"
-                      fontSize={9}
+                      fontSize={11}
                       tickLine={false}
                       axisLine={false}
                       domain={['dataMin - 1000', 'dataMax + 1000']}
@@ -531,61 +571,61 @@ export const UnifiedDashboard = () => {
             </div>
 
             {/* B. TODAY QUANT DISCOVERIES */}
-            <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div className="dark-glass-panel border border-white/10 rounded-[2rem] p-6 shadow-2xl space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-4 gap-2">
                 <div>
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Top Quantitative Picks</span>
-                  <h2 className="text-base font-black text-slate-800">퀀트 엔진 추천 & 오늘의 알파 종목</h2>
-                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">수학적 기술 지표 분석으로 엄선된 매수 후보 종목입니다. 클릭 시 상세 지표(RSI/ADX/RVOL)가 노출됩니다.</p>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-0.5">Top Quantitative Picks</span>
+                  <h2 className="text-base font-black text-white">퀀트 엔진 추천 & 오늘의 알파 종목</h2>
+                  <p className="text-xs text-slate-350 mt-0.5">수학적 기술 지표 분석으로 엄선된 매수 후보 종목입니다. 클릭 시 상세 지표(RSI/ADX/RVOL)가 노출됩니다.</p>
                 </div>
-                <span className="text-[10px] font-black bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg border border-indigo-100 shrink-0">
+                <span className="text-xs font-black bg-indigo-500/10 text-indigo-300 px-3 py-1.5 rounded-lg border border-indigo-500/20 shrink-0 self-start sm:self-auto">
                   DNA 80점 이상 엄선
                 </span>
               </div>
 
               {discoveryStocks.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                  <Activity className="w-8 h-8 text-slate-300 mx-auto mb-3 animate-pulse" />
-                  <p className="text-xs font-bold">발굴된 오늘의 추천 종목이 없습니다.</p>
-                  <p className="text-[10px] text-slate-400 mt-1">상단의 "라이브 헌팅" 또는 "페니 스캔"을 가동해 보세요.</p>
+                <div className="text-center py-12 text-slate-400 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                  <Activity className="w-8 h-8 text-slate-600 mx-auto mb-3 animate-pulse" />
+                  <p className="text-xs font-bold text-slate-400">발굴된 오늘의 추천 종목이 없습니다.</p>
+                  <p className="text-xs text-slate-400 mt-1">상단의 "라이브 헌팅" 또는 "페니 스캔"을 가동해 보세요.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {discoveryStocks.map((stock) => {
-                    const isPenny = (stock.price || stock.buy_price) <= PENNY_DISPLAY_THRESHOLD;
+                    const isPenny = (stock.price ?? 0) <= PENNY_DISPLAY_THRESHOLD && (stock.price ?? 0) > 0;
                     return (
                       <div
                         key={stock.ticker}
                         onClick={() => handleDeepDive(stock)}
-                        className="p-4 bg-slate-50/50 border border-slate-100 rounded-2xl hover:border-indigo-400/40 hover:bg-slate-50 transition-all cursor-pointer flex items-center justify-between group"
+                        className="p-4 bg-white/5 border border-white/10 rounded-2xl hover:border-indigo-500/40 hover:bg-[#111c35]/40 transition-all cursor-pointer flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-3">
                           <div className={clsx(
                             "w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs border",
-                            isPenny ? "bg-cyan-50 border-cyan-100 text-cyan-600" : "bg-indigo-50 border-indigo-100 text-indigo-600"
+                            isPenny ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" : "bg-indigo-500/10 border-indigo-500/20 text-indigo-400"
                           )}>
                             {stock.ticker}
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors">{stock.ticker}</span>
+                              <span className="font-extrabold text-white group-hover:text-indigo-400 transition-colors">{stock.ticker}</span>
                               <span className={clsx(
-                                "text-[7px] font-black px-1 rounded tracking-widest border",
-                                isPenny ? "bg-cyan-50 border-cyan-200 text-cyan-600" : "bg-indigo-50 border-indigo-200 text-indigo-600"
+                                "text-[10px] font-black px-1.5 py-0.5 rounded tracking-widest border leading-none",
+                                isPenny ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" : "bg-indigo-500/10 border-indigo-500/20 text-indigo-400"
                               )}>
                                 {isPenny ? '페니' : '일반'}
                               </span>
                             </div>
-                            <span className="text-[10px] text-slate-500 font-bold block mt-0.5">{stock.sector || 'US Stock'}</span>
+                            <span className="text-xs text-slate-400 font-bold block mt-0.5">{stock.sector || 'US Stock'}</span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3">
                           <div className="text-right">
-                            <span className="text-sm font-extrabold text-slate-900 tabular-nums">${stock.price.toFixed(isPenny ? 4 : 2)}</span>
+                            <span className="text-base font-extrabold text-white tabular-nums">${stock.price != null ? stock.price.toFixed(isPenny ? 4 : 2) : '--'}</span>
                             <span className={clsx(
-                              "text-[10px] font-black block mt-0.5 tabular-nums",
-                              (stock.change_percent ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+                              "text-xs font-black block mt-0.5 tabular-nums",
+                              (stock.change_percent ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
                             )}>
                               {(stock.change_percent ?? 0) >= 0 ? '+' : ''}{(stock.change_percent ?? 0).toFixed(2)}%
                             </span>
@@ -593,6 +633,20 @@ export const UnifiedDashboard = () => {
                           <div className="w-12">
                             <PennyQuantScoreBar score={stock.dna_score} size="sm" showLabel={false} />
                           </div>
+                          {/* 관심종목 등록 버튼 */}
+                          {watchlistedTickers.has(stock.ticker) ? (
+                            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                          ) : addingTickers.has(stock.ticker) ? (
+                            <Loader2 className="w-5 h-5 text-indigo-400 animate-spin shrink-0" />
+                          ) : (
+                            <button
+                              onClick={(e) => handleAddDiscoveryToWatchlist(e, stock)}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-indigo-500/20 hover:border-indigo-500/40 text-slate-400 hover:text-indigo-300 transition-all shrink-0"
+                              title="관심종목 추가"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -618,14 +672,14 @@ export const UnifiedDashboard = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           {/* LEFT 2/3 COLUMN: Positions */}
-          <div className="lg:col-span-2 bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div className="lg:col-span-2 dark-glass-panel border border-white/10 rounded-[2rem] p-6 shadow-2xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-4 gap-2">
               <div>
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Active Positions</span>
-                <h2 className="text-base font-black text-slate-800">현재 보유 중인 매수 포지션</h2>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">실시간 매수가 완료되어 운용 중인 가상 주식 자산입니다. 트레일링 스탑에 도달하거나 우측 청산 클릭 시 즉시 전량 매도됩니다.</p>
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-0.5">Active Positions</span>
+                <h2 className="text-base font-black text-white">현재 보유 중인 매수 포지션</h2>
+                <p className="text-xs text-slate-350 mt-0.5">실시간 매수가 완료되어 운용 중인 가상 주식 자산입니다. 트레일링 스탑에 도달하거나 우측 청산 클릭 시 즉시 전량 매도됩니다.</p>
               </div>
-              <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg shrink-0">
+              <span className="text-xs font-black text-emerald-450 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg shrink-0 self-start sm:self-auto">
                 {pennyPositions.length}개 보유 중
               </span>
             </div>
@@ -633,7 +687,7 @@ export const UnifiedDashboard = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <tr className="border-b border-white/10 text-xs font-bold text-slate-400 uppercase tracking-widest">
                     <th className="pb-3">종목</th>
                     <th className="pb-3 text-right">구분</th>
                     <th className="pb-3 text-right">수량</th>
@@ -644,10 +698,10 @@ export const UnifiedDashboard = () => {
                     <th className="pb-3 text-right"></th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50/50">
+                <tbody className="divide-y divide-white/5">
                   {pennyPositions.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-slate-400 font-bold text-xs">
+                      <td colSpan={8} className="py-12 text-center text-slate-400 font-bold text-sm">
                         보유중인 가상 매수 포지션이 없습니다.
                       </td>
                     </tr>
@@ -657,25 +711,25 @@ export const UnifiedDashboard = () => {
                       const pnlAmt = pos.unrealized_pl;
                       const isProfit = pnlAmt >= 0;
                       return (
-                        <tr key={pos.ticker} className="hover:bg-slate-50/40 transition-colors text-xs font-bold">
+                        <tr key={pos.ticker} className="hover:bg-white/5 transition-colors text-xs font-bold">
                           <td className="py-4">
-                            <span className="font-extrabold text-slate-900 text-sm">{pos.ticker}</span>
+                            <span className="font-extrabold text-white text-base">{pos.ticker}</span>
                           </td>
                           <td className="py-4 text-right">
                             <span className={clsx(
-                              "text-[8px] font-black px-1.5 py-0.5 rounded border tracking-widest",
-                              pos.isPenny ? "bg-cyan-50 border-cyan-200 text-cyan-600" : "bg-indigo-50 border-indigo-200 text-indigo-600"
+                              "text-[10px] font-black px-1.5 py-0.5 rounded border tracking-widest",
+                              pos.isPenny ? "bg-cyan-500/10 border-cyan-500/25 text-cyan-400" : "bg-indigo-500/10 border-indigo-500/25 text-indigo-400"
                             )}>
                               {pos.isPenny ? '페니' : '일반'}
                             </span>
                           </td>
-                          <td className="py-4 text-right font-mono text-slate-600 tabular-nums">{Number(pos.units).toFixed(2)}</td>
-                          <td className="py-4 text-right font-mono text-slate-600 tabular-nums">${Number(pos.entry_price).toFixed(pos.isPenny ? 4 : 2)}</td>
-                          <td className="py-4 text-right font-mono text-slate-900 tabular-nums">${Number(pos.current_price).toFixed(pos.isPenny ? 4 : 2)}</td>
-                          <td className="py-4 text-right font-mono text-rose-500 tabular-nums">
+                          <td className="py-4 text-right font-mono text-slate-300 text-sm font-semibold tabular-nums">{Number(pos.units).toFixed(2)}</td>
+                          <td className="py-4 text-right font-mono text-slate-300 text-sm font-semibold tabular-nums">${Number(pos.entry_price).toFixed(pos.isPenny ? 4 : 2)}</td>
+                          <td className="py-4 text-right font-mono text-white text-sm font-bold tabular-nums">${Number(pos.current_price).toFixed(pos.isPenny ? 4 : 2)}</td>
+                          <td className="py-4 text-right font-mono text-rose-400 text-sm font-semibold tabular-nums">
                             {pos.ts_threshold ? `$${Number(pos.ts_threshold).toFixed(pos.isPenny ? 4 : 2)}` : 'N/A'}
                           </td>
-                          <td className={clsx("py-4 text-right font-mono tabular-nums text-sm font-black", isProfit ? "text-emerald-600" : "text-rose-600")}>
+                          <td className={clsx("py-4 text-right font-mono tabular-nums text-base font-black", isProfit ? "text-emerald-400" : "text-rose-400")}>
                             <div className="flex items-center justify-end gap-1.5">
                               {isProfit ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
                               <span>{isProfit ? '+' : ''}{pnlAmt.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
@@ -684,7 +738,7 @@ export const UnifiedDashboard = () => {
                           <td className="py-4 text-right">
                             <button
                               onClick={() => handleClosePosition(pos.ticker)}
-                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-600 border border-rose-200 text-rose-600 hover:text-white text-[10px] font-bold rounded-lg transition-all"
+                              className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-600 border border-rose-500/20 text-rose-450 hover:text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
                             >
                               즉시 청산
                             </button>
@@ -699,57 +753,57 @@ export const UnifiedDashboard = () => {
           </div>
 
           {/* RIGHT 1/3 COLUMN: Trade History */}
-          <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-xl shadow-slate-100/30 space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div className="dark-glass-panel border border-white/10 rounded-[2rem] p-6 shadow-2xl space-y-6">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <div>
                 <div className="flex items-center gap-2">
                   <Clock className="w-4 h-4 text-slate-400" />
-                  <h2 className="text-base font-black text-slate-800">최근 청산 이력</h2>
+                  <h2 className="text-base font-black text-white">최근 청산 이력</h2>
                 </div>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">매도가 완료되어 최종 손익금과 사유가 확정된 거래 내역입니다.</p>
+                <p className="text-xs text-slate-350 mt-0.5">매도가 완료되어 최종 손익금과 사유가 확정된 거래 내역입니다.</p>
               </div>
-              <span className="text-[10px] font-bold text-slate-500">{pennyHistory.length}건 기록</span>
+              <span className="text-xs font-semibold text-slate-300">{pennyHistory.length}건 기록</span>
             </div>
 
             <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
               {pennyHistory.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                  <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2 opacity-60" />
-                  <p className="text-xs font-bold">최근 종료된 매매 기록이 없습니다.</p>
+                <div className="text-center py-12 text-slate-400 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                  <Clock className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
+                  <p className="text-xs font-bold text-slate-400">최근 종료된 매매 기록이 없습니다.</p>
                 </div>
               ) : (
                 pennyHistory.slice(0, 15).map((trade, idx) => {
                   const isProfit = (trade.pnl_pct ?? 0) >= 0;
                   const isPenny = Number(trade.entry_price || 0) <= 1.0;
                   return (
-                    <div key={trade.id || idx} className="p-3 bg-slate-50/50 border border-slate-100 rounded-xl flex items-center justify-between">
+                    <div key={trade.id || idx} className="p-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className={clsx(
                           "w-8 h-8 rounded-lg flex items-center justify-center border",
-                          isProfit ? "bg-emerald-50 border-emerald-100" : "bg-rose-50 border-rose-100"
+                          isProfit ? "bg-emerald-500/10 border-emerald-500/20" : "bg-rose-500/10 border-rose-500/20"
                         )}>
-                          {isProfit ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-rose-500" />}
+                          {isProfit ? <CheckCircle className="w-4 h-4 text-emerald-450" /> : <XCircle className="w-4 h-4 text-rose-450" />}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-slate-900 text-sm leading-none">{trade.ticker}</span>
+                            <span className="font-extrabold text-white text-base leading-none">{trade.ticker}</span>
                             <span className={clsx(
-                              "text-[8px] font-black px-1.5 py-0.5 rounded border leading-none",
-                              isProfit ? "bg-emerald-50 border-emerald-200 text-emerald-600" : "bg-rose-50 border-rose-200 text-rose-600"
+                              "text-[10px] font-black px-1.5 py-0.5 rounded border leading-none",
+                              isProfit ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-450" : "bg-rose-500/10 border-rose-500/20 text-rose-450"
                             )}>
                               {(trade.pnl_pct ?? 0) >= 0 ? '+' : ''}{Number(trade.pnl_pct ?? 0).toFixed(1)}%
                             </span>
                           </div>
-                          <span className="text-[9px] text-slate-500 font-bold block mt-1.5">
+                          <span className="text-xs text-slate-400 font-bold block mt-1.5">
                             진입: ${Number(trade.entry_price || 0).toFixed(isPenny ? 4 : 2)} ➔ 청산: ${Number(trade.exit_price || 0).toFixed(isPenny ? 4 : 2)}
                           </span>
                         </div>
                       </div>
                       <div className="text-right">
-                        <span className={clsx("text-sm font-black tabular-nums block", isProfit ? "text-emerald-600" : "text-rose-600")}>
+                        <span className={clsx("text-base font-black tabular-nums block", isProfit ? "text-emerald-400" : "text-rose-400")}>
                           {isProfit ? '+' : ''}${Number(trade.profit_amt ?? 0).toFixed(2)}
                         </span>
-                        <span className="text-[8px] text-slate-400 font-medium block mt-0.5">
+                        <span className="text-xs text-slate-400 font-medium block mt-0.5">
                           {trade.exit_reason || 'Exit'}
                         </span>
                       </div>
@@ -767,32 +821,32 @@ export const UnifiedDashboard = () => {
       {/* Settings Sideout Backdrop */}
       {isSettingsOpen && (
         <div
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[200]"
+          className="fixed inset-0 bg-[#0b1222]/60 backdrop-blur-sm z-[200]"
           onClick={() => setIsSettingsOpen(false)}
         />
       )}
 
       {/* Settings Slideout Panel */}
-      <div className={`fixed top-0 right-0 h-full w-full max-w-lg bg-white border-l border-slate-200 z-[210] overflow-y-auto transition-transform duration-300 ease-in-out ${isSettingsOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200 sticky top-0 bg-white z-10">
+      <div className={`fixed top-0 right-0 h-full w-full max-w-lg bg-[#0d1527] border-l border-white/10 z-[210] overflow-y-auto transition-transform duration-300 ease-in-out ${isSettingsOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 sticky top-0 bg-[#0d1527] z-10">
           <div className="flex items-center gap-3">
-            <ShieldCheck className="w-5 h-5 text-indigo-600" />
-            <span className="text-sm font-black text-slate-800 uppercase tracking-[0.2em]">NexGuard Control</span>
+            <ShieldCheck className="w-5 h-5 text-indigo-400" />
+            <span className="text-sm font-black text-white uppercase tracking-[0.2em]">NexGuard Control</span>
           </div>
           <button
             onClick={() => setIsSettingsOpen(false)}
-            className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 transition-colors cursor-pointer"
           >
-            <X className="w-4 h-4 text-slate-500" />
+            <X className="w-4 h-4" />
           </button>
         </div>
         <div className="p-6 space-y-6">
           {/* 라이브 헌팅 — 오퍼레이터 수동 트리거 */}
-          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-3">
+          <div className="bg-indigo-950/20 border border-indigo-500/20 rounded-2xl p-4 space-y-3">
             <div>
-              <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block mb-0.5">Manual Override</span>
-              <h3 className="text-sm font-black text-indigo-800">라이브 헌팅 (Edge Function)</h3>
-              <p className="text-[10px] text-indigo-600 mt-1 leading-relaxed">
+              <span className="text-xs font-bold text-indigo-400 uppercase tracking-widest block mb-0.5">Manual Override</span>
+              <h3 className="text-sm font-black text-indigo-300">라이브 헌팅 (Edge Function)</h3>
+              <p className="text-xs text-indigo-200 mt-1 leading-relaxed">
                 Alpaca Universe 전체를 즉시 스캔합니다.<br/>
                 DNA ≥ 80 일반 종목 발굴 → daily_discovery 갱신
               </p>
@@ -800,7 +854,7 @@ export const UnifiedDashboard = () => {
             <button
               onClick={handleLiveHuntingTrigger}
               disabled={isHunting}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all active:scale-95 disabled:bg-slate-300 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all active:scale-95 disabled:bg-slate-350 disabled:cursor-not-allowed cursor-pointer"
             >
               <Activity className={clsx("w-4 h-4", isHunting && "animate-pulse")} />
               {isHunting ? '헌팅 중...' : '라이브 헌팅 실행'}
