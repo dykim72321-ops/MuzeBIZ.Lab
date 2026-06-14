@@ -42,7 +42,8 @@ except ImportError:
     SearchAggregator = None
 from db_manager import DBManager
 import asyncio
-from datetime import datetime
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 import pandas as pd
 import numpy as np
@@ -61,8 +62,6 @@ paper_engine = None
 
 def is_market_hours() -> bool:
     """US 시장 개장 여부 (ET 기준 평일 09:30~16:00). DST 자동 처리."""
-    from zoneinfo import ZoneInfo
-
     now_et = datetime.now(ZoneInfo("America/New_York"))
     if now_et.weekday() >= 5:
         return False
@@ -777,7 +776,7 @@ class SourcingEngine:
         tasks = [
             asyncio.wait_for(
                 self._fetch_from_provider("Market Aggregator", aggregator, q),
-                timeout=10.0,
+                timeout=30.0,
             ),
             asyncio.wait_for(self._fetch_from_local(q), timeout=5.0),
         ]
@@ -2062,7 +2061,11 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     df["DNA_Score"] = score.clip(0.0, 100.0).round(1)
 
     # DNA Score 기반으로 시그널 단일 통제
-    df["Strong_Buy"] = df["DNA_Score"] >= 85.0
+    # Tier-1: DNA ≥ 85 (RVOL > 3.0 포함, 기존 기준)
+    # Tier-2: DNA ≥ 82 AND RVOL > 2.0 (RVOL 2~3 구간 진입 기회 확보)
+    tier1 = df["DNA_Score"] >= 85.0
+    tier2 = (df["DNA_Score"] >= 82.0) & (df["RVOL"] > 2.0)
+    df["Strong_Buy"] = tier1 | tier2
     df["Strong_Sell"] = df["DNA_Score"] <= 40.0
 
     return df
@@ -2829,24 +2832,29 @@ async def on_minute_bar_closed(bar):
         # ── [Guide-2] 경량 모니터 경로 (HOLD 포지션 전용) ─────────────────
         if ticker_symbol in _held_tickers and paper_engine:
             rsi_val = await asyncio.to_thread(_rsi14_last, df_hist)
+
+            # EOD 강제 청산: 15:30 ET 이후 오버나이트 갭 리스크 방지
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            is_eod = now_et.time() >= dtime(15, 30)
+
             # WebSocket 프론트엔드에도 최소 페이로드 전송 (현재가 + RSI)
             await manager.broadcast(
                 {
                     "ticker": ticker_symbol,
                     "price": current_price,
                     "rsi": round(rsi_val, 2),
-                    "signal": "HOLD",
-                    "strength": "MONITOR",
+                    "signal": "SELL" if is_eod else "HOLD",
+                    "strength": "EOD_FORCE" if is_eod else "MONITOR",
                     "dna_score": None,
                 }
             )
             await paper_engine.process_signal(
                 ticker=ticker_symbol,
                 price=current_price,
-                signal_type="HOLD",
-                strength="MONITOR",
+                signal_type="SELL" if is_eod else "HOLD",
+                strength="EOD_FORCE" if is_eod else "MONITOR",
                 rsi=rsi_val,
-                ai_report="",
+                ai_report="[EOD] 장 마감 강제 청산" if is_eod else "",
                 is_armed=SYSTEM_ARMED,
                 dna_score=0.0,
                 kelly_weight=0.0,
@@ -3116,8 +3124,6 @@ async def stream_scheduler():
             was_market_open = False
 
         elif not now_open and not was_market_open:
-            from zoneinfo import ZoneInfo
-
             now_et = datetime.now(ZoneInfo("America/New_York"))
             open_min = 9 * 60 + 30
             cur_min = now_et.hour * 60 + now_et.minute
