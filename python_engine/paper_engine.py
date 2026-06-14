@@ -7,7 +7,7 @@ INITIAL_CAPITAL = 100000.0
 
 # ── 포지션 사이징 / 리스크 상수 ──────────────────────────────────────────────
 KELLY_FRACTION = 0.15  # 가용 현금 대비 진입 비중 (3/4 Kelly ≈ 15%)
-MIN_BUY_BUDGET = 10.0   # 최소 주문 금액 (달러)
+MIN_BUY_BUDGET = 10.0  # 최소 주문 금액 (달러)
 MAX_BUY_BUDGET = 100.0  # 종목당 최대 매수 금액 (달러) — 리스크 상한
 MAX_CONCURRENT_POSITIONS = 10  # 동시 보유 최대 종목 수
 TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%)
@@ -244,11 +244,15 @@ class PaperTradingManager:
                 .execute
             )
             if (pos_count_res.count or 0) >= MAX_CONCURRENT_POSITIONS:
-                print(f"⛔ [{ticker}] 동시 포지션 한도 초과 ({MAX_CONCURRENT_POSITIONS}개) — 진입 차단")
+                print(
+                    f"⛔ [{ticker}] 동시 포지션 한도 초과 ({MAX_CONCURRENT_POSITIONS}개) — 진입 차단"
+                )
                 return
             # 재진입 쿨다운 체크 (청산 후 60분 이내 재진입 차단)
             if await self._is_in_cooldown(ticker):
-                print(f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단")
+                print(
+                    f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
+                )
                 return
             # Kelly 엔진이 계산한 비중이 유효하면 사용, 없으면 기본값(KELLY_FRACTION)
             effective_fraction = (
@@ -470,12 +474,14 @@ class PaperTradingManager:
             if is_scaled_out and bar_count < SCALE_OUT_COOLDOWN_BARS:
                 await asyncio.to_thread(
                     self.supabase.table("paper_positions")
-                    .update({
-                        "scale_out_bar_count": bar_count + 1,
-                        "current_price": price,
-                        "highest_price": highest_price,
-                        "ts_threshold": ts_threshold,
-                    })
+                    .update(
+                        {
+                            "scale_out_bar_count": bar_count + 1,
+                            "current_price": price,
+                            "highest_price": highest_price,
+                            "ts_threshold": ts_threshold,
+                        }
+                    )
                     .eq("ticker", ticker)
                     .execute
                 )
