@@ -3105,7 +3105,7 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
         )
         # connection limit exceeded 는 더 긴 백오프 (API 연결 누적 방지)
         if "connection limit" in str(e).lower():
-            wait_sec = 30
+            wait_sec = 300
             print(f"⏳ Connection limit hit — {wait_sec}초 후 재연결 시도...")
         else:
             wait_sec = 60
