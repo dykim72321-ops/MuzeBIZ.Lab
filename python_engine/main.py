@@ -2803,14 +2803,23 @@ try:
         # Load Discord Webhook URL from system_settings DB if not set in local env variables
         if not webhook.webhook_url:
             try:
-                res = supabase.table("system_settings").select("webhook_url").limit(1).execute()
+                res = (
+                    supabase.table("system_settings")
+                    .select("webhook_url")
+                    .limit(1)
+                    .execute()
+                )
                 if res.data and res.data[0].get("webhook_url"):
                     webhook.webhook_url = res.data[0]["webhook_url"]
                     if paper_engine and paper_engine.webhook:
                         paper_engine.webhook.webhook_url = webhook.webhook_url
-                    print("🔗 [INIT] Loaded Discord Webhook URL from system_settings DB table.")
+                    print(
+                        "🔗 [INIT] Loaded Discord Webhook URL from system_settings DB table."
+                    )
             except Exception as db_err:
-                print(f"⚠️ [INIT] Failed to load webhook from system_settings DB: {db_err}")
+                print(
+                    f"⚠️ [INIT] Failed to load webhook from system_settings DB: {db_err}"
+                )
 except Exception:
     supabase = None
 
@@ -2948,8 +2957,12 @@ async def on_minute_bar_closed(bar):
                 # daily_discovery 공통 소스 upsert (ScannerPage + AlphaDiscovery 단일 진실 소스)
                 dna_val = float(payload.get("dna_score", 0.0))
                 price_val = float(payload.get("price", 0.0))
-                prev_price = df_hist["Close"].iloc[-2] if len(df_hist) >= 2 else price_val
-                change_pct = ((price_val / prev_price - 1) * 100) if prev_price > 0 else 0.0
+                prev_price = (
+                    df_hist["Close"].iloc[-2] if len(df_hist) >= 2 else price_val
+                )
+                change_pct = (
+                    ((price_val / prev_price - 1) * 100) if prev_price > 0 else 0.0
+                )
                 volume_val = int(df_hist["Volume"].iloc[-1]) if len(df_hist) >= 1 else 0
                 try:
                     await asyncio.to_thread(
