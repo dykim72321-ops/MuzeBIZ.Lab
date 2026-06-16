@@ -303,6 +303,7 @@ SYSTEM_ARMED = False  # 자동 매매 활성화 상태 (Default: False)
 last_penny_scan_at: Optional[datetime] = None
 penny_scan_results_cache: List[dict] = []
 _current_stream_task: Optional[asyncio.Task] = None  # 장 중 스캔 후 즉시 재시작에 사용
+_current_ws_stream = None  # type: ignore  # Alpaca StockDataStream — 재시작 전 명시적 close용
 
 # CORS
 app.add_middleware(
@@ -2726,8 +2727,7 @@ async def run_penny_scan_internal(
         print(
             f"🔄 [Auto-Scan] 신규 종목 {auto_registered} 등록됨 — 장 중 스트림 재시작"
         )
-        if _current_stream_task and not _current_stream_task.done():
-            _current_stream_task.cancel()
+        await _stop_current_stream()
         _current_stream_task = asyncio.create_task(start_alpaca_stream())
 
     # 6. 반환 ──────────────────────────────────────────────────────────
@@ -3024,7 +3024,9 @@ async def on_minute_bar_closed(bar):
 async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     """Alpaca WebSocket 스트림 데몬 시작"""
     if os.getenv("DISABLE_ALPACA_STREAM", "false").lower() == "true":
-        print("🔌 [Pulse Engine] Alpaca Stream is disabled (DISABLE_ALPACA_STREAM=true). Running in API-only mode.")
+        print(
+            "🔌 [Pulse Engine] Alpaca Stream is disabled (DISABLE_ALPACA_STREAM=true). Running in API-only mode."
+        )
         return
     print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
 
@@ -3056,6 +3058,9 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
         # 3a. Alpaca 스트림 초기화 (공식 라이브러리가 인증을 처리하도록 함)
         # Note: IEX 피드는 실계좌/모의투자 키 모두 동일한 주소를 사용합니다.
         stream = StockDataStream(api_key, api_secret, feed=DataFeed.IEX)
+
+        global _current_ws_stream
+        _current_ws_stream = stream
 
         # 4. 구독 설정 (1분봉 닫힘 이벤트)
         stream.subscribe_bars(on_minute_bar_closed, *active_tickers)
@@ -3093,7 +3098,18 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
                     auth_failure_count = 0  # Reset on non-auth errors
                     await asyncio.sleep(30)
 
-        await _guarded_run_forever()
+        try:
+            await _guarded_run_forever()
+        finally:
+            # [Fix] 어떤 경로로 종료되든(취소 포함) 소켓을 명시적으로 닫아야
+            # Alpaca 서버가 연결 슬롯을 즉시 회수한다. 그렇지 않으면 바로 이어지는
+            # 재연결 시도가 "connection limit exceeded"로 즉시 실패한다.
+            try:
+                await stream.close()
+            except Exception:
+                pass
+            if _current_ws_stream is stream:
+                _current_ws_stream = None
 
     except Exception as e:
         error_msg = f"❌ Alpaca Stream Lifecycle Error: {e}"
@@ -3140,6 +3156,21 @@ async def auto_penny_scan_scheduler():
         await asyncio.sleep(4 * 3600)  # 4시간 주기
 
 
+async def _stop_current_stream():
+    """현재 실행 중인 Alpaca 스트림 태스크를 취소하고, 종료(finally의 stream.close())까지
+    기다린 뒤 반환한다. 취소만 하고 곧바로 재연결하면 Alpaca 서버가 이전 소켓을 아직
+    살아있는 것으로 간주해 다음 연결이 "connection limit exceeded"로 즉시 실패한다."""
+    global _current_stream_task
+    task = _current_stream_task
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    _current_stream_task = None
+
+
 async def stream_scheduler():
     """개장 시간을 감지해 Alpaca 스트림을 자동 시작/종료하는 스케줄러.
     매 개장 사이클마다 DB에서 최신 watchlist를 조회하므로 스캔 후 신규 종목이 즉시 반영됨.
@@ -3160,9 +3191,7 @@ async def stream_scheduler():
 
         elif not now_open and was_market_open:
             print("🌙 [Scheduler] 폐장 감지 — 스트림 종료")
-            if _current_stream_task and not _current_stream_task.done():
-                _current_stream_task.cancel()
-            _current_stream_task = None
+            await _stop_current_stream()
             was_market_open = False
 
         elif not now_open and not was_market_open:
