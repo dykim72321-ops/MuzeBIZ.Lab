@@ -3023,6 +3023,9 @@ async def on_minute_bar_closed(bar):
 
 async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     """Alpaca WebSocket 스트림 데몬 시작"""
+    if os.getenv("DISABLE_ALPACA_STREAM", "false").lower() == "true":
+        print("🔌 [Pulse Engine] Alpaca Stream is disabled (DISABLE_ALPACA_STREAM=true). Running in API-only mode.")
+        return
     print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
 
     active_tickers = (
@@ -3102,7 +3105,7 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
         )
         # connection limit exceeded 는 더 긴 백오프 (API 연결 누적 방지)
         if "connection limit" in str(e).lower():
-            wait_sec = 300
+            wait_sec = 30
             print(f"⏳ Connection limit hit — {wait_sec}초 후 재연결 시도...")
         else:
             wait_sec = 60
