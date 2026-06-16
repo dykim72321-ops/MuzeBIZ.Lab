@@ -214,6 +214,9 @@ serve(async (req) => {
                 signal_date: current.date,
                 dna_score: Number(dnaScore.toFixed(0)),
                 rvol: Number(rvol.toFixed(2)),
+                price: current.close,
+                change: change.toFixed(2),
+                volume: String(current.volume),
                 target_entry_action: 'BUY_OPEN',
                 status: 'PENDING'
             });
@@ -260,9 +263,17 @@ serve(async (req) => {
 
     if (signals.length > 0) {
       // 1. quant_signals 아카이브 저장 (기존)
+      const signalDbPayload = signals.map(s => ({
+        ticker: s.ticker,
+        signal_date: s.signal_date,
+        dna_score: s.dna_score,
+        rvol: s.rvol,
+        target_entry_action: s.target_entry_action,
+        status: s.status
+      }));
       const { error: signalError } = await supabase
         .from('quant_signals')
-        .upsert(signals, { onConflict: 'ticker,signal_date' });
+        .upsert(signalDbPayload, { onConflict: 'ticker,signal_date' });
 
       if (signalError) throw signalError;
 
@@ -270,7 +281,9 @@ serve(async (req) => {
       const discoveries = signals.map(s => ({
         ticker: s.ticker,
         dna_score: s.dna_score,
-        rvol: s.rvol,
+        price: s.price,
+        change: s.change,
+        volume: s.volume,
         updated_at: new Date().toISOString(),
       }));
 

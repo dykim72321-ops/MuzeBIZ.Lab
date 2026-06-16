@@ -21,6 +21,19 @@ interface DeepDiveData {
   bearPoints: string[];
   riskLevel: 'Low' | 'Medium' | 'High';
   quantSummary: string;
+  // 실측 데이터 확장 필드
+  dayHigh?: number;
+  volume?: number;
+  changePercent?: number;
+  history?: { price: number; date: string }[];
+  buyPrice?: number;
+  targetPrice?: number;
+  stopPrice?: number;
+  formulaVerdict?: string;
+  rsi?: number;
+  macdDiff?: number;
+  adx?: number;
+  rvol?: number;
 }
 
 interface WatchlistItemCardProps {
@@ -110,7 +123,21 @@ export const WatchlistItemCard = ({
       bullPoints: analysisCache?.bullCase || ["모멘텀 지표 분석 중"],
       bearPoints: analysisCache?.bearCase || ["리스크 요인 스캔 중"],
       riskLevel,
-      quantSummary: analysisCache?.quantSummary || "해당 종목에 대한 시스템 분석 데이터가 존재하지 않습니다.",
+      quantSummary: analysisCache?.quantSummary || "",
+      // 실측 데이터 전달
+      dayHigh: stock?.currentHigh || 0,
+      volume: stock?.volume || 0,
+      changePercent: stock?.changePercent || 0,
+      history: stock?.history?.map(h => ({ price: h.price, date: h.date })) || [],
+      buyPrice: item.buyPrice || 0,
+      targetPrice: targetPrice,
+      stopPrice: stopPrice,
+      formulaVerdict: analysisCache?.matchReasoning || "",
+      // 실측 기술적 지표 전달
+      rsi: stock?.rsi,
+      macdDiff: stock?.macdDiff,
+      adx: stock?.adx,
+      rvol: stock?.rvol,
     });
   };
 

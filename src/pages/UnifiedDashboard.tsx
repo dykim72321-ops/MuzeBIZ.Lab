@@ -190,7 +190,7 @@ export const UnifiedDashboard = () => {
   }, [loadDashboardData, loadArmStatus]);
 
   // ── Handlers ─────────────────────────────────────────────────────────
-  const handleDeepDive = (stock: any) => {
+  const handleDeepDive = async (stock: any) => {
     const displaySignal = processSignal(stock);
     const rawSummary = stock.rawAiSummary || "";
 
@@ -205,7 +205,8 @@ export const UnifiedDashboard = () => {
       quantData = stock.quant_metadata;
     }
 
-    setTerminalData({
+    // 1. 모달이 즉시 반응하도록 로컬 데이터로 초기화
+    const initialData = {
       ticker: stock.ticker,
       dnaScore: stock.dna_score || stock.dnaScore || 0,
       bullPoints: displaySignal.bullPoints,
@@ -216,8 +217,41 @@ export const UnifiedDashboard = () => {
       change: `${(stock.change_percent || stock.changePercent || 0).toFixed(2)}%`,
       efficiencyRatio: stock.efficiency_ratio || stock.efficiencyRatio || 0,
       kellyWeight: stock.kelly_weight || stock.kellyWeight || 0,
-      quantData
-    });
+      quantData,
+      rsi: stock.rsi,
+      macdDiff: stock.macdDiff,
+      adx: stock.adx,
+      rvol: stock.rvol,
+      history: stock.history || [],
+    };
+
+    setTerminalData(initialData);
+
+    // 2. 백그라운드에서 실시간 지표 및 30일 가격 히스토리를 가져와 모달 업데이트
+    try {
+      const { fetchStockQuote } = await import('../services/stockService');
+      const enrichedStock = await fetchStockQuote(stock.ticker, '1mo');
+      if (enrichedStock) {
+        setTerminalData((prev: any) => {
+          if (!prev || prev.ticker !== stock.ticker) return prev;
+          return {
+            ...prev,
+            price: enrichedStock.price,
+            change: `${enrichedStock.changePercent.toFixed(2)}%`,
+            changePercent: enrichedStock.changePercent,
+            dayHigh: enrichedStock.currentHigh,
+            volume: enrichedStock.volume,
+            rsi: enrichedStock.rsi,
+            macdDiff: enrichedStock.macdDiff,
+            adx: enrichedStock.adx,
+            rvol: enrichedStock.rvol,
+            history: enrichedStock.history?.map(h => ({ price: h.price, date: h.date })) || [],
+          };
+        });
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch enriched quote in handleDeepDive for ${stock.ticker}:`, err);
+    }
   };
 
   const handleLiveHuntingTrigger = async () => {

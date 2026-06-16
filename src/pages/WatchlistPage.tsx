@@ -180,7 +180,10 @@ export const WatchlistPage = () => {
         <StockTerminalModal 
           isOpen={!!terminalData}
           onClose={() => setTerminalData(null)}
-          data={terminalData}
+          data={{
+            ...terminalData,
+            formulaVerdict: terminalData.formulaVerdict || "",
+          }}
           onAddToWatchlist={async () => {
             try {
               await addToWatchlist(

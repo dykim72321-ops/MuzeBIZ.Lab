@@ -46,6 +46,10 @@ export interface Stock {
   stock_analysis_cache?: { analysis: any }[]; // 🆕 AI Analysis Cache for deep-dives
   rawAiSummary?: string; // Fallback text from daily_discovery
   history?: HistoricalDataPoint[];
+  rsi?: number;
+  macdDiff?: number;
+  adx?: number;
+  rvol?: number;
 }
 
 export interface HistoricalDataPoint {

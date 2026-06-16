@@ -273,6 +273,27 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
       history: data.history || [], // 🆕 Received from Edge Function (CORS-safe)
     };
 
+    // Fetch realtime signal for this ticker if available to populate indicators
+    try {
+      const { data: sigData } = await supabase
+        .from('realtime_signals')
+        .select('rsi, macd_diff, adx, rvol, dna_score')
+        .eq('ticker', ticker)
+        .maybeSingle();
+
+      if (sigData) {
+        stock.rsi = sigData.rsi ?? undefined;
+        stock.macdDiff = sigData.macd_diff ?? undefined;
+        stock.adx = sigData.adx ?? undefined;
+        stock.rvol = sigData.rvol ?? undefined;
+        if (sigData.dna_score !== null && sigData.dna_score !== undefined && sigData.dna_score > 0) {
+          stock.dnaScore = sigData.dna_score;
+        }
+      }
+    } catch (err) {
+      console.warn(`[SmartQuote] Failed to fetch realtime signal for ${ticker}:`, err);
+    }
+
     // Log source information
     console.log(`[SmartQuote] ${ticker}: $${data.price} (Sources: ${JSON.stringify(data.sources)})`);
 
@@ -352,6 +373,31 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
     }
   } catch (err) {
     console.warn('[Fetch Optimization] Failed to fetch analysis cache:', err);
+  }
+
+  // 🆕 Batch fetch realtime signals for technical indicators
+  try {
+    const { data: signalData } = await supabase
+      .from('realtime_signals')
+      .select('ticker, rsi, macd_diff, adx, rvol, dna_score')
+      .in('ticker', results.map(s => s.ticker));
+    
+    if (signalData) {
+      results.forEach(stock => {
+        const match = signalData.find(sig => sig.ticker === stock.ticker);
+        if (match) {
+          stock.rsi = match.rsi ?? undefined;
+          stock.macdDiff = match.macd_diff ?? undefined;
+          stock.adx = match.adx ?? undefined;
+          stock.rvol = match.rvol ?? undefined;
+          if (match.dna_score !== null && match.dna_score !== undefined && match.dna_score > 0) {
+            stock.dnaScore = match.dna_score;
+          }
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('[Fetch Optimization] Failed to fetch realtime signals:', err);
   }
   
   return results;
@@ -528,7 +574,7 @@ export async function getTopStocks(historical: boolean = false, limit: number = 
     const stocks: Stock[] = realTimeData.map((rtItem: { ticker: string, price?: number, changePercent?: number, rawVolume?: number }) => {
       const discoveryInfo = discoveryData?.find(d => d.ticker === rtItem.ticker);
       const price = rtItem.price || discoveryInfo?.price || 0;
-      const changePercent = rtItem.changePercent || discoveryInfo?.change_percent || 0;
+      const changePercent = rtItem.changePercent || (discoveryInfo?.change ? parseFloat(discoveryInfo.change) : 0);
       const volume = rtItem.rawVolume || 0;
 
       // daily_discovery.dna_score 우선 사용 — 백엔드(Python/EdgeFn) 계산값

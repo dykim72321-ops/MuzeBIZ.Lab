@@ -2063,9 +2063,12 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     # DNA Score 기반으로 시그널 단일 통제
     # Tier-1: DNA ≥ 85 (RVOL > 3.0 포함, 기존 기준)
     # Tier-2: DNA ≥ 82 AND RVOL > 2.0 (RVOL 2~3 구간 진입 기회 확보)
-    tier1 = df["DNA_Score"] >= 85.0
-    tier2 = (df["DNA_Score"] >= 82.0) & (df["RVOL"] > 2.0)
-    df["Strong_Buy"] = tier1 | tier2
+    # 페니 종목 (Close <= 1.0)의 경우: DNA ≥ 70 이면 Strong_Buy 허용
+    is_penny = df["Close"] <= 1.0
+    tier1 = (~is_penny) & (df["DNA_Score"] >= 85.0)
+    tier2 = (~is_penny) & (df["DNA_Score"] >= 82.0) & (df["RVOL"] > 2.0)
+    tier_penny = is_penny & (df["DNA_Score"] >= 70.0)
+    df["Strong_Buy"] = tier1 | tier2 | tier_penny
     df["Strong_Sell"] = df["DNA_Score"] <= 40.0
 
     return df
@@ -2884,29 +2887,33 @@ async def on_minute_bar_closed(bar):
         # 5. 서비스 연동 (DB, Discord, Paper Trading)
         if supabase:
             try:
-                # DB 저장 (Resilient Insert)
+                # DB 저장 (Filter columns to match table schema)
                 try:
+                    allowed_keys = {
+                        "ticker",
+                        "rsi",
+                        "macd_line",
+                        "macd_signal",
+                        "macd_diff",
+                        "adx",
+                        "rvol",
+                        "volatility_ann",
+                        "vol_weight",
+                        "kelly_f",
+                        "recommended_weight",
+                        "price",
+                        "signal",
+                        "strength",
+                        "ai_report",
+                        "timestamp",
+                        "dna_score",
+                    }
+                    db_payload = {k: v for k, v in payload.items() if k in allowed_keys}
                     await asyncio.to_thread(
-                        supabase.table("realtime_signals").insert(payload).execute
+                        supabase.table("realtime_signals").insert(db_payload).execute
                     )
                 except Exception as db_err:
-                    err_str = str(db_err)
-                    # If column is missing (PGRST204), retry with common missing columns removed
-                    if (
-                        "PGRST204" in err_str
-                        or "data_source" in err_str
-                        or "volume_multiplier" in err_str
-                    ):
-                        safe_payload = payload.copy()
-                        safe_payload.pop("data_source", None)
-                        safe_payload.pop("volume_multiplier", None)
-                        await asyncio.to_thread(
-                            supabase.table("realtime_signals")
-                            .insert(safe_payload)
-                            .execute
-                        )
-                    else:
-                        raise db_err
+                    print(f"❌ [realtime_signals] insert failed: {db_err}")
 
                 # 강력한 신호 시 Discord 알림
                 if payload.get("strength") == "STRONG":
@@ -2925,6 +2932,10 @@ async def on_minute_bar_closed(bar):
 
                 # daily_discovery 공통 소스 upsert (ScannerPage + AlphaDiscovery 단일 진실 소스)
                 dna_val = float(payload.get("dna_score", 0.0))
+                price_val = float(payload.get("price", 0.0))
+                prev_price = df_hist["Close"].iloc[-2] if len(df_hist) >= 2 else price_val
+                change_pct = ((price_val / prev_price - 1) * 100) if prev_price > 0 else 0.0
+                volume_val = int(df_hist["Volume"].iloc[-1]) if len(df_hist) >= 1 else 0
                 try:
                     await asyncio.to_thread(
                         supabase.table("daily_discovery")
@@ -2932,9 +2943,9 @@ async def on_minute_bar_closed(bar):
                             {
                                 "ticker": ticker_symbol,
                                 "dna_score": round(dna_val, 1),
-                                "rvol": float(payload.get("rvol", 1.0)),
-                                "price": float(payload.get("price", 0.0)),
-                                "change_percent": 0.0,
+                                "price": price_val,
+                                "change": str(round(change_pct, 2)),
+                                "volume": str(volume_val),
                                 "updated_at": datetime.now().isoformat(),
                             },
                             on_conflict="ticker",

@@ -23,6 +23,7 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
 
         # Setup mock tables
         self.mock_table_positions = MagicMock()
+        self.mock_table_positions.select.return_value.execute.return_value.count = 0
         self.mock_table_account = MagicMock()
         self.mock_table_watchlist = MagicMock()
         self.mock_table_history = MagicMock()
