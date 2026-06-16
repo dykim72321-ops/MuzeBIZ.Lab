@@ -62,6 +62,7 @@ class PaperTradingManager:
     def __init__(self, supabase_client: Client):
         self.supabase = supabase_client
         self.webhook = WebhookManager()
+        self.webhook.set_supabase_client(supabase_client)
 
     async def get_account(self):
         query = self.supabase.table("paper_account").select("*").limit(1)

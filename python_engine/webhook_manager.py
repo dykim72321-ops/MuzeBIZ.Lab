@@ -11,11 +11,35 @@ from datetime import datetime
 class WebhookManager:
     def __init__(self):
         self.webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "")
+        self.supabase = None
+        self.has_warned = False
+
+    def set_supabase_client(self, supabase_client) -> None:
+        """Supabase 클라이언트를 연결하여 DB에서 webhook_url을 동적으로 조회 가능하게 함"""
+        self.supabase = supabase_client
+        # 클라이언트가 설정되면 경고 플래그 초기화
+        self.has_warned = False
 
     async def _post(self, payload: dict) -> None:
         """내부 공통 Webhook 전송 헬퍼"""
+        # webhook_url이 비어있고 supabase 클라이언트가 설정되어 있으면 DB에서 동적으로 로드 시도
+        if not self.webhook_url and self.supabase:
+            try:
+                import asyncio
+                res = await asyncio.to_thread(
+                    self.supabase.table("system_settings").select("webhook_url").limit(1).execute
+                )
+                if res.data and res.data[0].get("webhook_url"):
+                    self.webhook_url = res.data[0]["webhook_url"]
+                    print("🔗 [Webhook] Dynamically loaded Discord Webhook URL from system_settings DB.")
+            except Exception as db_err:
+                if not self.has_warned:
+                    print(f"⚠️ [Webhook] Failed to dynamic-load webhook from DB: {db_err}")
+
         if not self.webhook_url:
-            print("⚠️ DISCORD_WEBHOOK_URL이 설정되지 않았습니다. (알림 건너뜀)")
+            if not self.has_warned:
+                print("⚠️ DISCORD_WEBHOOK_URL이 설정되지 않았습니다. (알림 건너뜀 - 이후 알림 무시)")
+                self.has_warned = True
             return
         try:
             async with aiohttp.ClientSession() as session:

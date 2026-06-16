@@ -2796,6 +2796,21 @@ try:
             f"🚀 [INIT] Supabase Client Connected (Role: {'Service' if is_service else 'Anon'})"
         )
         paper_engine = PaperTradingManager(supabase)
+
+        # Set supabase client on global webhook manager to enable dynamic DB fallback loading
+        webhook.set_supabase_client(supabase)
+
+        # Load Discord Webhook URL from system_settings DB if not set in local env variables
+        if not webhook.webhook_url:
+            try:
+                res = supabase.table("system_settings").select("webhook_url").limit(1).execute()
+                if res.data and res.data[0].get("webhook_url"):
+                    webhook.webhook_url = res.data[0]["webhook_url"]
+                    if paper_engine and paper_engine.webhook:
+                        paper_engine.webhook.webhook_url = webhook.webhook_url
+                    print("🔗 [INIT] Loaded Discord Webhook URL from system_settings DB table.")
+            except Exception as db_err:
+                print(f"⚠️ [INIT] Failed to load webhook from system_settings DB: {db_err}")
 except Exception:
     supabase = None
 
