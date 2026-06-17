@@ -1465,9 +1465,7 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
 
 
 @app.delete("/api/broker/paper/history/{history_id}")
-async def delete_paper_history(
-    history_id: str, _api_key: str = Security(get_api_key)
-):
+async def delete_paper_history(history_id: str, _api_key: str = Security(get_api_key)):
     """청산 이력 단건 삭제"""
     try:
         res = await asyncio.to_thread(
