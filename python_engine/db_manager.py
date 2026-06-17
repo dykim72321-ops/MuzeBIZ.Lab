@@ -91,6 +91,28 @@ class DBManager:
             print("⚠️ Warning: DB Client not available. Using fallback tickers.")
             return ["TSLA", "AAPL"]
 
+        # 0순위: 오래된 WATCHING 종목 만료 처리 (7일 경과 시 EXITED로 전환하여 백엔드 감시 대상에서 자동 제외)
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            res = (
+                self.supabase.table("watchlist")
+                .update({"status": "EXITED"})
+                .eq("status", "WATCHING")
+                .lt("created_at", cutoff)
+                .execute()
+            )
+            if res.data:
+                expired_cnt = len(res.data)
+                if expired_cnt > 0:
+                    expired_tickers = [row.get("ticker") for row in res.data]
+                    print(
+                        f"🧹 [Watchlist Cleanup] Expired {expired_cnt} WATCHING tickers (older than 7 days): {expired_tickers}"
+                    )
+        except Exception as e:
+            print(f"⚠️ Watchlist expiry cleanup error: {e}")
+
         tickers = []
 
         # 1순위: watchlist WATCHING/HOLDING
