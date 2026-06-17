@@ -2432,7 +2432,9 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
                 .execute()
             )
             if res.data:
-                recent_pnls = [float(row.get("pnl_pct") or 0.0) for row in reversed(res.data)]
+                recent_pnls = [
+                    float(row.get("pnl_pct") or 0.0) for row in reversed(res.data)
+                ]
                 stats_cache["recent_pnls"] = recent_pnls
         except Exception as e:
             print(f"⚠️ [Dynamic Kelly DB Fetch Error] {e}")
@@ -3546,9 +3548,12 @@ async def startup_event():
     try:
         import subprocess
         import sys
+
         watchdog_path = os.path.join(os.path.dirname(__file__), "watchdog.py")
         subprocess.Popen([sys.executable, watchdog_path])
-        print("🐕 [Startup] Watchdog daemon started successfully as a separate process.")
+        print(
+            "🐕 [Startup] Watchdog daemon started successfully as a separate process."
+        )
     except Exception as e:
         print(f"⚠️ [Startup] Failed to start Watchdog: {e}")
 
