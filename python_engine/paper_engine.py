@@ -213,6 +213,7 @@ class PaperTradingManager:
         is_armed: bool = False,
         dna_score: float = 85.0,
         kelly_weight: float = 0.0,
+        vol_weight: float = 0.0,
     ):
         """
         v4 State Machine:
@@ -265,13 +266,15 @@ class PaperTradingManager:
                     f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
                 )
                 return
-            # Kelly 엔진이 계산한 비중이 유효하면 사용, 없으면 기본값(KELLY_FRACTION)
-            effective_fraction = (
-                kelly_weight / 100.0 if kelly_weight > 0 else KELLY_FRACTION
-            )
-            effective_fraction = min(
-                effective_fraction, 0.25
-            )  # 단일 종목 최대 25% 제한
+            # Anti-Martingale 사이징: kelly(ATR+Kelly min)가 있으면 우선 사용,
+            # 없으면 ATR vol_weight만으로 fallback, 둘 다 없으면 고정 KELLY_FRACTION
+            if kelly_weight > 0:
+                effective_fraction = kelly_weight / 100.0
+            elif vol_weight > 0:
+                effective_fraction = vol_weight / 100.0
+            else:
+                effective_fraction = KELLY_FRACTION
+            effective_fraction = min(effective_fraction, 0.25)  # 단일 종목 최대 25% 제한
             buy_budget = min(
                 acc["cash_available"] * effective_fraction,
                 MAX_BUY_BUDGET,

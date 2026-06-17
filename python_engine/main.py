@@ -317,6 +317,7 @@ last_penny_scan_at: Optional[datetime] = None
 penny_scan_results_cache: List[dict] = []
 _current_stream_task: Optional[asyncio.Task] = None  # 장 중 스캔 후 즉시 재시작에 사용
 _current_ws_stream = None  # type: ignore  # Alpaca StockDataStream — 재시작 전 명시적 close용
+_last_bar_received_at: Optional[datetime] = None  # WSS liveness 추적용
 
 # CORS
 app.add_middleware(
@@ -2082,6 +2083,24 @@ async def get_strategy_stats():
         return _base_stats(True, f"통계 계산 오류: {e}", "⚠️ 오류")
 
 
+@app.post("/api/edge/monitor")
+async def run_edge_monitor_endpoint(_api_key: str = Security(get_api_key)):
+    """Edge Monitor 수동 실행 — 실제 vs 이론 승률 비교 후 system_settings에 기록."""
+    if not supabase:
+        return {"error": "DB 미연결"}
+    try:
+        from portfolio_backtester import run_edge_monitor
+
+        result = await asyncio.to_thread(
+            run_edge_monitor,
+            os.getenv("SUPABASE_URL", ""),
+            os.getenv("SUPABASE_KEY", "") or os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/discoveries")
 async def get_discoveries(limit: int = 10, sort_by: str = "updated_at"):
     """오늘의 추천 종목(Alpha Discovery Picks) 목록 반환"""
@@ -3102,7 +3121,9 @@ async def on_minute_bar_closed(bar):
       (DNA 전체 재연산 생략 → CPU/API 레이트 리밋 절감)
     - 미보유 종목 → 기존 run_pulse_engine() 전체 DNA 경로 (발굴·신호 생성)
     """
+    global _last_bar_received_at
     ticker_symbol = bar.symbol
+    _last_bar_received_at = datetime.now()
     try:
         # 1. 상태 업데이트 및 히스토리 획득 (Stateful Queue)
         df_hist = candle_state.update(ticker_symbol, bar)
@@ -3256,6 +3277,7 @@ async def on_minute_bar_closed(bar):
                         is_armed=SYSTEM_ARMED,
                         dna_score=dna_val,
                         kelly_weight=float(payload.get("recommended_weight", 0.0)),
+                        vol_weight=float(payload.get("vol_weight", 0.0)) * 100,
                     )
                     # [Guide-2] 매수 성공 시 _held_tickers에 등록 (다음 틱부터 경량 경로)
                     if (
@@ -3539,6 +3561,36 @@ async def stream_scheduler():
         await asyncio.sleep(60)
 
 
+async def stream_liveness_watchdog():
+    """3분 주기로 Alpaca WebSocket 생존 여부를 확인.
+    장 중 5분 이상 봉 수신이 없으면 연결이 Cloud NAT에 의해 끊어진 것으로 판단,
+    스트림을 강제 재시작한다."""
+    STALE_THRESHOLD_SEC = 300  # 5분 무응답 = 연결 끊김으로 판단
+    CHECK_INTERVAL_SEC = 180  # 3분마다 확인
+    print("🛡️ [Liveness] Stream watchdog started.")
+    while True:
+        await asyncio.sleep(CHECK_INTERVAL_SEC)
+        if not is_market_hours():
+            continue
+        if _last_bar_received_at is None:
+            continue
+        elapsed = (datetime.now() - _last_bar_received_at).total_seconds()
+        if elapsed > STALE_THRESHOLD_SEC:
+            print(
+                f"⚠️ [Liveness] No bar received for {elapsed:.0f}s — forcing stream reconnect."
+            )
+            if _current_ws_stream is not None:
+                try:
+                    await _current_ws_stream.close()
+                except Exception:
+                    pass
+            active_tickers = list(_held_tickers) or await asyncio.to_thread(
+                db.get_active_tickers, limit=15
+            )
+            if active_tickers:
+                asyncio.create_task(start_alpaca_stream(active_tickers))
+
+
 async def system_heartbeat():
     """10분 주기 시스템 상태 보고 (Dead Man's Switch)"""
     print("💓 [Heartbeat] System Monitor Started.")
@@ -3576,6 +3628,7 @@ async def startup_event():
 
     # 백그라운드 태스크로 실행
     asyncio.create_task(run_startup_sequence())
+    asyncio.create_task(stream_liveness_watchdog())
 
 
 async def run_startup_sequence():

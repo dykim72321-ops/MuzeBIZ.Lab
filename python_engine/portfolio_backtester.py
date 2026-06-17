@@ -524,6 +524,119 @@ class DNAValidator:
         return self.report(total_oos_trades)
 
 
+EDGE_MONITOR_UNIVERSE = ["SOFI", "PLTR", "AMC", "GME", "RIOT", "MARA", "NIO", "TLRY"]
+EDGE_DIVERGENCE_THRESHOLD = 10.0  # 실제 vs 이론 승률 괴리가 이 값(%) 이상이면 경보
+
+
+def run_edge_monitor(supabase_url: str, supabase_key: str, n_trades: int = 30) -> dict:
+    """
+    실제 거래 승률(paper_history)과 DNA 이론 승률(백테스트)을 비교한다.
+    괴리 > EDGE_DIVERGENCE_THRESHOLD % 이면 system_settings에 경보 플래그를 기록한다.
+
+    반환: {
+        "actual_win_rate": float,
+        "theoretical_win_rate": float,
+        "divergence": float,
+        "alert_triggered": bool,
+        "n_actual_trades": int,
+    }
+    """
+    from supabase import create_client
+
+    sb = create_client(supabase_url, supabase_key)
+
+    # ── 1. 실제 승률 조회 ─────────────────────────────────────────────────────
+    res = (
+        sb.table("paper_history")
+        .select("pnl_pct")
+        .order("created_at", desc=True)
+        .limit(n_trades)
+        .execute()
+    )
+    rows = res.data or []
+    n_actual = len(rows)
+
+    if n_actual < 10:
+        print(f"⚠️ [EdgeMonitor] 실거래 데이터 부족 ({n_actual}건 < 10건). 모니터링 생략.")
+        return {
+            "actual_win_rate": None,
+            "theoretical_win_rate": None,
+            "divergence": None,
+            "alert_triggered": False,
+            "n_actual_trades": n_actual,
+        }
+
+    pnls = [float(r.get("pnl_pct") or 0.0) for r in rows]
+    actual_win_rate = sum(1 for p in pnls if p > 0) / len(pnls) * 100
+
+    # ── 2. 이론 승률 (빠른 백테스트, 6개월 일봉) ────────────────────────────────
+    end_dt = datetime.now().strftime("%Y-%m-%d")
+    start_dt = (datetime.now() - pd.Timedelta(days=180)).strftime("%Y-%m-%d")
+    validator = DNAValidator(
+        tickers=EDGE_MONITOR_UNIVERSE,
+        start_date=start_dt,
+        end_date=end_dt,
+    )
+    try:
+        backtest_stats = validator.run()
+        theoretical_win_rate = backtest_stats.get("win_rate", 0.0)
+        if backtest_stats.get("is_empty"):
+            print("⚠️ [EdgeMonitor] 백테스트 거래 없음. 이론 승률 산출 불가.")
+            return {
+                "actual_win_rate": actual_win_rate,
+                "theoretical_win_rate": None,
+                "divergence": None,
+                "alert_triggered": False,
+                "n_actual_trades": n_actual,
+            }
+    except Exception as e:
+        print(f"⚠️ [EdgeMonitor] 백테스트 오류: {e}")
+        return {
+            "actual_win_rate": actual_win_rate,
+            "theoretical_win_rate": None,
+            "divergence": None,
+            "alert_triggered": False,
+            "n_actual_trades": n_actual,
+        }
+
+    # ── 3. 괴리 판단 ──────────────────────────────────────────────────────────
+    divergence = theoretical_win_rate - actual_win_rate
+    alert_triggered = divergence > EDGE_DIVERGENCE_THRESHOLD
+
+    print(
+        f"📊 [EdgeMonitor] 실제 승률: {actual_win_rate:.1f}% | "
+        f"이론 승률: {theoretical_win_rate:.1f}% | 괴리: {divergence:.1f}%"
+    )
+
+    # ── 4. system_settings에 경보 기록 ────────────────────────────────────────
+    alert_message = (
+        f"알고리즘 Edge 이상 감지: 최근 {n_actual}건 실제 승률 {actual_win_rate:.1f}% vs "
+        f"DNA 이론 승률 {theoretical_win_rate:.1f}% (괴리 {divergence:.1f}%). "
+        f"DNA 파라미터 재최적화 및 시장 Regime 변화 확인 권장."
+    )
+    try:
+        sb.table("system_settings").update(
+            {
+                "edge_alert_active": alert_triggered,
+                "edge_alert_message": alert_message if alert_triggered else None,
+            }
+        ).eq("id", 1).execute()
+        if alert_triggered:
+            print(f"🚨 [EdgeMonitor] 경보 기록됨: {alert_message}")
+        else:
+            print("✅ [EdgeMonitor] 정상 범위 (경보 없음).")
+    except Exception as e:
+        print(f"⚠️ [EdgeMonitor] system_settings 업데이트 실패: {e}")
+
+    return {
+        "actual_win_rate": round(actual_win_rate, 2),
+        "theoretical_win_rate": round(theoretical_win_rate, 2),
+        "divergence": round(divergence, 2),
+        "alert_triggered": alert_triggered,
+        "n_actual_trades": n_actual,
+    }
+
+
 if __name__ == "__main__":
     # 상장 유지 및 거래가 활발한 페니 스탁/소형주 유니버스
     penny_universe = [

@@ -92,7 +92,10 @@ export const UnifiedDashboard = () => {
   const [pennyAccount, setPennyAccount] = useState<any>(null);
   const [alpacaAccount, setAlpacaAccount] = useState<any>(null);
 
-  // 4. Discovery watchlist-add in-flight guard (ref = synchronous, avoids double-click race)
+  // 4. Edge Monitor alert state
+  const [edgeAlert, setEdgeAlert] = useState<{ active: boolean; message: string | null }>({ active: false, message: null });
+
+  // 5. Discovery watchlist-add in-flight guard (ref = synchronous, avoids double-click race)
   const addingTickersRef = useRef<Set<string>>(new Set());
   const [addingTickers, setAddingTickers] = useState<Set<string>>(new Set());
 
@@ -185,6 +188,19 @@ export const UnifiedDashboard = () => {
       setPennyAccount(pa);
       if (alpaca && !alpaca.error) setAlpacaAccount(alpaca);
       setLastFetchedTime(new Date().toISOString().substring(11, 19));
+
+      // Edge Monitor 경보 상태 조회
+      const { data: settingsRow } = await supabaseClient
+        .from('system_settings')
+        .select('edge_alert_active, edge_alert_message')
+        .eq('id', 1)
+        .single();
+      if (settingsRow) {
+        setEdgeAlert({
+          active: Boolean(settingsRow.edge_alert_active),
+          message: settingsRow.edge_alert_message ?? null,
+        });
+      }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     } finally {
@@ -532,6 +548,24 @@ export const UnifiedDashboard = () => {
             * 페니 주식(진입가 $1.0 이하) 매수 시 -15% 손절선 및 익절 분할매도 상태머신이 자동 작동합니다.
           </div>
         </div>
+
+        {/* ════════ EDGE MONITOR ALERT ════════ */}
+        {edgeAlert.active && edgeAlert.message && (
+          <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/40 rounded-xl px-5 py-4 shadow-lg">
+            <Activity className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-black text-amber-300 uppercase tracking-widest mb-1">알고리즘 Edge 이상 감지</p>
+              <p className="text-sm text-amber-200/90 leading-relaxed">{edgeAlert.message}</p>
+            </div>
+            <button
+              onClick={() => setEdgeAlert({ active: false, message: null })}
+              className="text-amber-500/60 hover:text-amber-300 transition-colors shrink-0 mt-0.5"
+              title="경보 닫기"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* ════════ METRICS GRID ════════ */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
