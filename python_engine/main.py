@@ -2029,13 +2029,16 @@ async def get_strategy_stats():
         running_max = np.maximum.accumulate(cumulative)
         mdd = round(float(np.min(cumulative - running_max)), 2)
 
-        # 드리프트 기반 배지
+        # 드리프트 기반 배지 및 Edge Monitor 강력 경고
+        message = "거래 내역 기반 통계입니다."
         if drift is not None and drift <= -10:
-            badge = f"⚠️ 전략 드리프트 감지 (최근 승률 {recent_wr}% ↓{abs(drift):.1f}%p)"
+            badge = f"🚨 알고리즘 Edge 소멸 감지: 파라미터 재최적화 요망 (승률 ↓{abs(drift):.1f}%p)"
+            message = "최근 30일 승률이 이론 승률과 심각한 괴리가 발생했습니다. 동적 켈리 비중 축소를 확인하고 시장 Regime Change를 점검하세요."
         elif win_rate >= 55 and profit_factor >= 1.3:
             badge = f"🛡️ System Edge: 승률 {win_rate}% (실거래 검증)"
         elif total_trades < 5:
             badge = f"📊 데이터 축적 중 ({total_trades}건)"
+            message = "거래 데이터 축적 중입니다."
         else:
             badge = f"📉 전략 점검 필요 (승률 {win_rate}%)"
 
@@ -2213,7 +2216,7 @@ def calculate_dynamic_kelly(
     최근 N번의 매매 수익률 리스트 기반으로 동적 켈리 비중 산출
     """
     if len(recent_pnl_list) < min_trades:
-        return 0.05, 0.0, 0.0
+        return None, 0.0, 0.0
 
     pnl_array = np.array(recent_pnl_list)
     wins = pnl_array[pnl_array > 0]
@@ -2415,10 +2418,27 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
 
     # 동적 켈리 비중 주입
     dynamic_kelly_weight = None
+    recent_pnls = None
     if "recent_pnls" in stats_cache and len(stats_cache["recent_pnls"]) > 0:
-        d_weight, _, _ = calculate_dynamic_kelly(
-            stats_cache["recent_pnls"], min_trades=10
-        )
+        recent_pnls = stats_cache["recent_pnls"]
+    elif supabase:
+        try:
+            # 최근 50개 거래 내역의 pnl_pct 직접 DB 조회
+            res = (
+                supabase.table("paper_history")
+                .select("pnl_pct")
+                .order("created_at", desc=True)
+                .limit(50)
+                .execute()
+            )
+            if res.data:
+                recent_pnls = [float(row.get("pnl_pct") or 0.0) for row in reversed(res.data)]
+                stats_cache["recent_pnls"] = recent_pnls
+        except Exception as e:
+            print(f"⚠️ [Dynamic Kelly DB Fetch Error] {e}")
+
+    if recent_pnls and len(recent_pnls) >= 10:
+        d_weight, _, _ = calculate_dynamic_kelly(recent_pnls, min_trades=10)
         dynamic_kelly_weight = d_weight
 
     # 2. 포지션 사이징 (ATR 변동성 조절 + 동적 켈리)
@@ -3521,6 +3541,16 @@ async def system_heartbeat():
 async def startup_event():
     # ... (supabase initialization)
     print("🎬 [Startup] MuzeBIZ Realtime Platform initializing...")
+
+    # 독립 Watchdog 프로세스 자동 가동 (SPOF 방지)
+    try:
+        import subprocess
+        import sys
+        watchdog_path = os.path.join(os.path.dirname(__file__), "watchdog.py")
+        subprocess.Popen([sys.executable, watchdog_path])
+        print("🐕 [Startup] Watchdog daemon started successfully as a separate process.")
+    except Exception as e:
+        print(f"⚠️ [Startup] Failed to start Watchdog: {e}")
 
     # 백그라운드 태스크로 실행
     asyncio.create_task(run_startup_sequence())
