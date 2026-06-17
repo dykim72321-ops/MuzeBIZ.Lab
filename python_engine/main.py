@@ -164,7 +164,9 @@ class TickerDataState:
             "_raw_iex_volume": raw_vol,  # 원본 IEX 거래량 디버깅용 보존
         }
         # Alpaca bar.timestamp는 UTC tz-aware — utc=True로 명시해 concat 타임존 불일치 방지
-        df_new = pd.DataFrame([new_row], index=[pd.to_datetime(bar.timestamp, utc=True)])
+        df_new = pd.DataFrame(
+            [new_row], index=[pd.to_datetime(bar.timestamp, utc=True)]
+        )
 
         if ticker not in self.history:
             self.history[ticker] = df_new
@@ -1609,10 +1611,7 @@ async def test_webhook(_api_key: str = Security(get_api_key)):
     if not webhook.webhook_url and supabase:
         try:
             res = await asyncio.to_thread(
-                supabase.table("system_settings")
-                .select("webhook_url")
-                .limit(1)
-                .execute
+                supabase.table("system_settings").select("webhook_url").limit(1).execute
             )
             if res.data and res.data[0].get("webhook_url"):
                 webhook.webhook_url = res.data[0]["webhook_url"]
@@ -1974,12 +1973,8 @@ async def get_strategy_stats():
             )
 
         # 30일 기준 분할 (전략 드리프트 감지용)
-        cutoff_iso = (
-            datetime.now(timezone.utc) - timedelta(days=30)
-        ).isoformat()
-        recent_trades = [
-            t for t in trades if (t.get("created_at") or "") >= cutoff_iso
-        ]
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        recent_trades = [t for t in trades if (t.get("created_at") or "") >= cutoff_iso]
         baseline_trades = [
             t for t in trades if (t.get("created_at") or "") < cutoff_iso
         ]
@@ -2026,6 +2021,9 @@ async def get_strategy_stats():
             else (_MAX_PROFIT_FACTOR if gross_profit > 0 else 0.0)
         )
 
+        stats_cache["recent_pnls"] = list(pnl_arr)[
+            -50:
+        ]  # 동적 켈리를 위해 최근 50개 저장
         # MDD: numpy 벡터화 (cumsum + running maximum)
         cumulative = np.cumsum(pnl_arr)
         running_max = np.maximum.accumulate(cumulative)
@@ -2097,6 +2095,8 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
         high=df["High"], low=df["Low"], close=df["Close"], window=14
     )
     df["ADX"] = adx_indicator.adx()
+    df["+DI"] = adx_indicator.adx_pos()
+    df["-DI"] = adx_indicator.adx_neg()
 
     # 4. RVOL (Relative Volume) 계산
     # avg_daily_volume 주입 시: 분봉 거래량 / (30일 일평균 / 390분) → 역사적 기준 대비 비율
@@ -2160,8 +2160,18 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
         np.where(is_dead, -20, np.where(macd_diff > macd_diff_prev, 8, -8)),
     )
 
-    # ADX scoring
-    score += np.where(df["ADX"] > 25, 10, np.where(df["ADX"] > 20, 5, 0))
+    # ADX scoring (방향성 맹점 통제)
+    adx_is_bearish = df["-DI"] > df["+DI"]
+    adx_is_bullish = df["+DI"] > df["-DI"]
+    score += np.where(
+        adx_is_bearish & (df["ADX"] > 25),
+        -10,  # 하락장 가속 시 감점 (떨어지는 칼날 방어)
+        np.where(
+            adx_is_bullish & (df["ADX"] > 25),
+            10,
+            np.where(adx_is_bullish & (df["ADX"] > 20), 5, 0),
+        ),
+    )
 
     # RVOL scoring
     score += np.where(
@@ -2193,40 +2203,84 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     return df
 
 
+def calculate_dynamic_kelly(
+    recent_pnl_list: list,
+    max_weight: float = 0.20,
+    half_kelly: bool = True,
+    min_trades: int = 10,
+):
+    """
+    최근 N번의 매매 수익률 리스트 기반으로 동적 켈리 비중 산출
+    """
+    if len(recent_pnl_list) < min_trades:
+        return 0.05, 0.0, 0.0
+
+    pnl_array = np.array(recent_pnl_list)
+    wins = pnl_array[pnl_array > 0]
+    losses = pnl_array[pnl_array <= 0]
+
+    p = len(wins) / len(pnl_array)
+    avg_win = np.mean(wins) if len(wins) > 0 else 0.0
+    avg_loss = abs(np.mean(losses)) if len(losses) > 0 else 0.0
+
+    if avg_loss == 0:
+        b = float("inf")
+        kelly_fraction = p
+    elif avg_win == 0:
+        b = 0.0
+        kelly_fraction = 0.0
+    else:
+        b = avg_win / avg_loss
+        kelly_fraction = p - ((1 - p) / b)
+
+    kelly_fraction = max(0.0, float(kelly_fraction))
+    if half_kelly:
+        kelly_fraction *= 0.5
+
+    final_weight = min(kelly_fraction, max_weight)
+    return final_weight, p, b
+
+
 def calculate_position_sizing(
     df: pd.DataFrame,
     win_rate: float = 0.55,
     profit_ratio: float = 2.0,
     target_vol: float = 0.15,
-    kelly_fraction: float = 0.5,
+    kelly_fraction: float = 0.25,  # Phase 2 보수적 하프의 하프 켈리
+    dynamic_kelly_weight: float = None,  # 동적 켈리 비중 주입용
 ):
     """
-    1단계(변동성 조절)와 3단계(켈리 공식)를 결합한 포지션 사이징 엔진
+    1단계(ATR 기반 변동성 조절)와 3단계(동적 켈리 공식)를 결합한 포지션 사이징 엔진
     """
-    # --- [Step 1] 변동성 조절 (Volatility Targeting) ---
-    # 일간 로그 수익률 계산
-    df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
+    # --- [Step 1] 변동성 조절 (ATR 기반 타겟팅) ---
+    atr_indicator = ta.volatility.AverageTrueRange(
+        high=df["High"], low=df["Low"], close=df["Close"], window=14
+    )
+    atr = atr_indicator.average_true_range().iloc[-1]
+    current_price = df["Close"].iloc[-1]
 
-    # 최근 20일 표준편차 계산 및 연율화
-    daily_vol = df["log_return"].rolling(window=20).std().iloc[-1]
-    ann_vol = daily_vol * np.sqrt(252)
+    # ATR 비율(변동성) 계산
+    atr_pct = atr / current_price if current_price > 0 else 1e-9
 
-    # 변동성 기반 비중 (시장이 과열되면 비중 축소)
+    # ATR 변동성을 연율화 근사 (sqrt(252))
+    ann_vol = atr_pct * np.sqrt(252)
+
+    # 변동성 기반 비중
     vol_weight = target_vol / (ann_vol + 1e-9)
 
     # --- [Step 2 & 3] 켈리 공식 (Kelly Criterion) ---
-    p = win_rate
-    q = 1 - p
-    b = profit_ratio
-
-    kelly_f = (b * p - q) / b if b > 0 else 0
-
-    # 보수적 운용을 위해 kelly_fraction 적용
-    optimal_kelly = max(0, kelly_f) * kelly_fraction
+    if dynamic_kelly_weight is not None:
+        optimal_kelly = dynamic_kelly_weight
+        kelly_f = dynamic_kelly_weight  # 로그용
+    else:
+        p = win_rate
+        q = 1 - p
+        b = profit_ratio
+        kelly_f = (b * p - q) / b if b > 0 else 0
+        optimal_kelly = max(0, kelly_f) * kelly_fraction
 
     # --- [Step 4] 최종 결합 및 제한 ---
-    # vol_weight * kelly 곱셈은 변동성 높은 마이크로캡에서 2~5%로 수렴해 MIN_BUY_BUDGET 미달.
-    # min(vol_weight, kelly) 방식으로 더 보수적인 값을 택해 실제 사용 가능한 비중 확보.
+    # ATR 변동성 비중과 동적 켈리 중 가장 보수적인 값을 선택 (Anti-Martingale)
     final_weight = min(vol_weight, optimal_kelly)
     final_weight = min(final_weight, 1.0)
 
@@ -2248,6 +2302,8 @@ def calculate_dna_score(
     macd_diff: float,
     macd_diff_prev: float,
     adx: float,
+    di_plus: float,
+    di_minus: float,
     rvol: float,
     is_extended: bool,
 ) -> float:
@@ -2283,11 +2339,14 @@ def calculate_dna_score(
     else:  # 기울기(하락 모멘텀)
         score -= 8
 
-    # ADX (+10): 추세 강도
-    if adx > 25:
-        score += 10
-    elif adx > 20:
-        score += 5
+    # ADX (+10 / -10): 추세 강도 및 방향성(맹점 통제)
+    if di_minus > di_plus and adx > 25:
+        score -= 10
+    elif di_plus > di_minus:
+        if adx > 25:
+            score += 10
+        elif adx > 20:
+            score += 5
 
     # RVOL (+15 / -5): 거래량 폭증 가산, 침체 감산
     if rvol > 5.0:
@@ -2354,8 +2413,18 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     df = calculate_advanced_signals(df_raw, avg_daily_volume=avg_daily_vol)
     latest = df.iloc[-1]
 
-    # 2. 포지션 사이징 (변동성 조절 + 켈리)
-    sizing = calculate_position_sizing(df_raw)
+    # 동적 켈리 비중 주입
+    dynamic_kelly_weight = None
+    if "recent_pnls" in stats_cache and len(stats_cache["recent_pnls"]) > 0:
+        d_weight, _, _ = calculate_dynamic_kelly(
+            stats_cache["recent_pnls"], min_trades=10
+        )
+        dynamic_kelly_weight = d_weight
+
+    # 2. 포지션 사이징 (ATR 변동성 조절 + 동적 켈리)
+    sizing = calculate_position_sizing(
+        df_raw, dynamic_kelly_weight=dynamic_kelly_weight
+    )
 
     signal_type = "HOLD"
     if latest["Strong_Buy"]:
@@ -2417,6 +2486,16 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         adx=(
             float(latest["ADX"])
             if "ADX" in latest and not pd.isna(latest["ADX"])
+            else 0.0
+        ),
+        di_plus=(
+            float(latest["+DI"])
+            if "+DI" in latest and not pd.isna(latest["+DI"])
+            else 0.0
+        ),
+        di_minus=(
+            float(latest["-DI"])
+            if "-DI" in latest and not pd.isna(latest["-DI"])
             else 0.0
         ),
         rvol=(
@@ -2568,20 +2647,41 @@ async def run_penny_scan_internal(
                     )
                     if tickers_data is not None and not tickers_data.empty:
                         close_col = tickers_data.get("Close")
-                        if close_col is not None and not close_col.empty:
+                        volume_col = tickers_data.get("Volume")
+                        if (
+                            close_col is not None
+                            and not close_col.empty
+                            and volume_col is not None
+                        ):
                             if isinstance(close_col, pd.Series):
                                 # single ticker
                                 if len(batch) == 1:
                                     last_price = float(close_col.iloc[-1])
-                                    if 0.01 < last_price <= max_price:
+                                    last_vol = float(volume_col.iloc[-1])
+                                    # Phase 2 유동성 하드 필터 (Notional Value > $500k) 방어막
+                                    if (
+                                        0.01 < last_price <= max_price
+                                        and (last_price * last_vol) > 500000
+                                    ):
                                         penny_tickers.append(batch[0])
                             else:
                                 last_row = close_col.iloc[-1]
+                                last_vol_row = volume_col.iloc[-1]
                                 for sym in batch:
-                                    if sym in last_row.index:
+                                    if (
+                                        sym in last_row.index
+                                        and sym in last_vol_row.index
+                                    ):
                                         p = last_row[sym]
-                                        if pd.notna(p) and 0.01 < float(p) <= max_price:
-                                            penny_tickers.append(sym)
+                                        v = last_vol_row[sym]
+                                        if pd.notna(p) and pd.notna(v):
+                                            p_val, v_val = float(p), float(v)
+                                            # Phase 2 유동성 하드 필터
+                                            if (
+                                                0.01 < p_val <= max_price
+                                                and (p_val * v_val) > 500000
+                                            ):
+                                                penny_tickers.append(sym)
                 except Exception as e:
                     print(f"⚠️ [Penny] Batch price fetch error: {e}")
                     continue
@@ -3215,9 +3315,7 @@ async def start_rest_polling(tickers: Optional[List[str]] = None):
 async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     """Alpaca WebSocket 스트림 데몬 시작"""
     if os.getenv("DISABLE_ALPACA_STREAM", "false").lower() == "true":
-        print(
-            "🔌 [Pulse Engine] WebSocket 비활성화 — REST Polling 모드로 전환합니다."
-        )
+        print("🔌 [Pulse Engine] WebSocket 비활성화 — REST Polling 모드로 전환합니다.")
         await start_rest_polling(tickers)
         return
     print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
