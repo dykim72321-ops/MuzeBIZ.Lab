@@ -28,7 +28,8 @@ import {
   Unlock,
   Plus,
   Loader2,
-  PieChart
+  PieChart,
+  Trash2
 } from 'lucide-react';
 
 // Hooks & Services
@@ -46,6 +47,7 @@ import {
   fetchPaperPositions,
   fetchPaperHistory,
   sellPaperPosition,
+  deletePaperHistory,
   fetchPennyScanStatus,
   type PennyScanStatus
 } from '../services/pythonApiService';
@@ -166,12 +168,18 @@ export const UnifiedDashboard = () => {
       setDiscoveryStocks((discoveryResult.data || []).filter(s => s.dna_score != null && s.price != null));
       
       setPennyPositions(
-        pp.map((pos: any) => ({
-          ...pos,
-          unrealized_pl: (pos.current_price - pos.entry_price) * pos.units,
-          unrealized_plpc: ((pos.current_price / pos.entry_price) - 1) * 100,
-          isPenny: pos.entry_price <= 1.0
-        }))
+        pp.map((pos: any) => {
+          const cp = pos.current_price != null ? Number(pos.current_price) : null;
+          const ep = Number(pos.entry_price);
+          const units = Number(pos.units);
+          return {
+            ...pos,
+            current_price: cp,
+            unrealized_pl: cp != null ? (cp - ep) * units : null,
+            unrealized_plpc: cp != null ? (cp / ep - 1) * 100 : null,
+            isPenny: ep <= 1.0,
+          };
+        })
       );
       setPennyHistory(ph || []);
       setPennyAccount(pa);
@@ -308,6 +316,17 @@ export const UnifiedDashboard = () => {
         }
       }
     });
+  };
+
+  const handleDeleteHistory = async (historyId: string, ticker: string) => {
+    const toastId = toast.loading(`${ticker} 이력 삭제 중...`);
+    try {
+      await deletePaperHistory(historyId);
+      toast.success(`${ticker} 청산 이력 삭제 완료`, { id: toastId });
+      loadDashboardData();
+    } catch {
+      toast.error('삭제 실패', { id: toastId });
+    }
   };
 
   // EXITED 종목은 재등록 가능하도록 제외
@@ -810,7 +829,9 @@ export const UnifiedDashboard = () => {
                     pennyPositions.map((pos) => {
                       const pnlPct = pos.unrealized_plpc;
                       const pnlAmt = pos.unrealized_pl;
-                      const isProfit = pnlAmt >= 0;
+                      const hasPnl = pnlAmt != null && !Number.isNaN(pnlAmt);
+                      const isProfit = hasPnl ? pnlAmt >= 0 : true;
+                      const decimals = pos.isPenny ? 4 : 2;
                       return (
                         <tr key={pos.ticker} className="hover:bg-white/5 transition-colors text-xs font-bold">
                           <td className="py-4">
@@ -825,16 +846,20 @@ export const UnifiedDashboard = () => {
                             </span>
                           </td>
                           <td className="py-4 text-right font-mono text-slate-300 text-sm font-semibold tabular-nums">{Number(pos.units).toFixed(2)}</td>
-                          <td className="py-4 text-right font-mono text-slate-300 text-sm font-semibold tabular-nums">${Number(pos.entry_price).toFixed(pos.isPenny ? 4 : 2)}</td>
-                          <td className="py-4 text-right font-mono text-white text-sm font-bold tabular-nums">${Number(pos.current_price).toFixed(pos.isPenny ? 4 : 2)}</td>
-                          <td className="py-4 text-right font-mono text-rose-400 text-sm font-semibold tabular-nums">
-                            {pos.ts_threshold ? `$${Number(pos.ts_threshold).toFixed(pos.isPenny ? 4 : 2)}` : 'N/A'}
+                          <td className="py-4 text-right font-mono text-slate-300 text-sm font-semibold tabular-nums">${Number(pos.entry_price).toFixed(decimals)}</td>
+                          <td className="py-4 text-right font-mono text-white text-sm font-bold tabular-nums">
+                            {pos.current_price != null ? `$${Number(pos.current_price).toFixed(decimals)}` : <span className="text-slate-500">—</span>}
                           </td>
-                          <td className={clsx("py-4 text-right font-mono tabular-nums text-base font-black", isProfit ? "text-emerald-400" : "text-rose-400")}>
+                          <td className="py-4 text-right font-mono text-rose-400 text-sm font-semibold tabular-nums">
+                            {pos.ts_threshold ? `$${Number(pos.ts_threshold).toFixed(decimals)}` : 'N/A'}
+                          </td>
+                          <td className={clsx("py-4 text-right font-mono tabular-nums text-base font-black", hasPnl ? (isProfit ? "text-emerald-400" : "text-rose-400") : "text-slate-500")}>
+                            {hasPnl ? (
                             <div className="flex items-center justify-end gap-1.5">
                               {isProfit ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                              <span>{isProfit ? '+' : ''}{pnlAmt.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
+                              <span>{isProfit ? '+' : ''}{(pnlAmt as number).toFixed(2)} ({isProfit ? '+' : ''}{(pnlPct as number).toFixed(2)}%)</span>
                             </div>
+                            ) : <span className="text-slate-500 text-sm">조회 불가</span>}
                           </td>
                           <td className="py-4 text-right">
                             <button
@@ -877,7 +902,7 @@ export const UnifiedDashboard = () => {
                   const isProfit = (trade.pnl_pct ?? 0) >= 0;
                   const isPenny = Number(trade.entry_price || 0) <= 1.0;
                   return (
-                    <div key={trade.id || idx} className="p-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between">
+                    <div key={trade.id || idx} className="group p-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className={clsx(
                           "w-8 h-8 rounded-lg flex items-center justify-center border",
@@ -900,13 +925,22 @@ export const UnifiedDashboard = () => {
                           </span>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className={clsx("text-base font-black tabular-nums block", isProfit ? "text-emerald-400" : "text-rose-400")}>
-                          {isProfit ? '+' : ''}${Number(trade.profit_amt ?? 0).toFixed(2)}
-                        </span>
-                        <span className="text-xs text-slate-400 font-medium block mt-0.5">
-                          {trade.exit_reason || 'Exit'}
-                        </span>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className={clsx("text-base font-black tabular-nums block", isProfit ? "text-emerald-400" : "text-rose-400")}>
+                            {isProfit ? '+' : ''}${Number(trade.profit_amt ?? 0).toFixed(2)}
+                          </span>
+                          <span className="text-xs text-slate-400 font-medium block mt-0.5">
+                            {trade.exit_reason || 'Exit'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteHistory(trade.id, trade.ticker)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/30 text-slate-500 hover:text-rose-400 transition-all"
+                          title="이력 삭제"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   );

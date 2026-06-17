@@ -238,6 +238,13 @@ export async function sellPaperPosition(ticker: string): Promise<any> {
 }
 
 /**
+ * 청산 이력 단건 삭제
+ */
+export async function deletePaperHistory(historyId: string): Promise<any> {
+  return brokerApiFetch(`/api/broker/paper/history/${historyId}`, 'DELETE');
+}
+
+/**
  * Discord Webhook URL 저장 및 백엔드 메모리 즉시 반영
  */
 export async function updateWebhookUrl(webhookUrl: string): Promise<any> {

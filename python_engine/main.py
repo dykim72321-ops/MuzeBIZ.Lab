@@ -1447,9 +1447,12 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
                     "ticker": item.get("ticker"),
                     "side": "sell",
                     "type": item.get("exit_reason") or "trailing_stop",
-                    "quantity": "--",
-                    "filled_qty": "--",
+                    "quantity": item.get("units", "--"),
+                    "filled_qty": item.get("units", "--"),
                     "filled_avg_price": item.get("exit_price"),
+                    "entry_price": item.get("entry_price"),
+                    "exit_price": item.get("exit_price"),
+                    "exit_reason": item.get("exit_reason") or "trailing_stop",
                     "pnl_pct": round(float(pnl_pct or 0), 2),
                     "profit_amt": round(float(item.get("profit_amt") or 0), 2),
                     "status": "filled",
@@ -1459,6 +1462,22 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
         return history
     except Exception:
         return []
+
+
+@app.delete("/api/broker/paper/history/{history_id}")
+async def delete_paper_history(
+    history_id: str, _api_key: str = Security(get_api_key)
+):
+    """청산 이력 단건 삭제"""
+    try:
+        res = await asyncio.to_thread(
+            supabase.table("paper_history").delete().eq("id", history_id).execute
+        )
+        if res.data:
+            return {"ok": True, "deleted_id": history_id}
+        return {"ok": False, "detail": "Record not found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/broker/paper/sell")
