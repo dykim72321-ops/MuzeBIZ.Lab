@@ -38,11 +38,10 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
     );
   }, [watchlistItems, searchTerm]);
 
-  const { activeItems, exitedItems } = useMemo(() => {
-    return {
-      activeItems: filteredItems.filter(item => item.status !== 'EXITED'),
-      exitedItems: filteredItems.filter(item => item.status === 'EXITED'),
-    };
+  const activeItems = useMemo(() => {
+    return filteredItems.filter(item => 
+      item.status === 'HOLDING' || item.status === 'SCALE_OUT'
+    );
   }, [filteredItems]);
 
   return (
@@ -82,7 +81,7 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
 
       {/* Items Scroll Area */}
       <div className="space-y-4 flex-1 relative z-10 custom-scrollbar overflow-y-auto pr-1">
-        {activeItems.length > 0 || exitedItems.length > 0 ? (
+        {activeItems.length > 0 ? (
           <>
             {/* Active Items */}
             {activeItems.map((item, idx) => {
@@ -190,68 +189,7 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
               );
             })}
 
-            {/* Exited Items Accordion */}
-            {exitedItems.length > 0 && (
-              <div className="pt-2">
-                <button
-                  onClick={() => setShowExited(v => !v)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-355 hover:bg-white/5 transition-colors border border-dashed border-white/10 cursor-pointer"
-                >
-                  <span>청산 완료 {exitedItems.length}개</span>
-                  <div className="flex items-center gap-1 font-mono">
-                    {showExited ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    <span>{showExited ? '접기' : '펼치기'}</span>
-                  </div>
-                </button>
 
-                <AnimatePresence>
-                  {showExited && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="space-y-2.5 mt-2.5 overflow-hidden"
-                    >
-                      {exitedItems.map((item) => (
-                        <div
-                          key={item.ticker}
-                          className="p-3.5 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between opacity-60 group/exited relative pr-12"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs border bg-slate-900 border-white/10 text-slate-400 font-mono">
-                              {item.ticker.charAt(0)}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-extrabold text-slate-300 text-sm leading-none line-through uppercase font-mono">{item.ticker}</span>
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none bg-slate-900 border-white/10 text-slate-400 font-mono">
-                                  EXITED
-                                </span>
-                              </div>
-                              <span className="text-xs text-slate-400 font-semibold block mt-1.5 font-mono">
-                                {item.buyPrice ? `진입: $${item.buyPrice.toFixed(item.isPenny ? 4 : 2)}` : '-'}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Hover Trash Button for Exited */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemoveWatchlist(item.ticker);
-                            }}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-slate-950/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-450 border border-white/10 hover:border-rose-550/30 rounded-xl transition-all opacity-0 group-hover/exited:opacity-100 shadow-md cursor-pointer"
-                            title="제거"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            )}
           </>
         ) : (
           <div className="py-20 text-center opacity-40 bg-white/5 border border-dashed border-white/10 rounded-2xl">

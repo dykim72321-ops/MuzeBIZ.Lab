@@ -42,7 +42,7 @@ except ImportError:
     SearchAggregator = None
 from db_manager import DBManager
 import asyncio
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from supabase import create_client, Client
 import pandas as pd
@@ -163,17 +163,16 @@ class TickerDataState:
             "Volume": calibrated_vol,  # 교정된 거래량 사용
             "_raw_iex_volume": raw_vol,  # 원본 IEX 거래량 디버깅용 보존
         }
-        # Alpaca bar.timestamp는 timezone-aware (UTC)
-        df_new = pd.DataFrame([new_row], index=[pd.to_datetime(bar.timestamp)])
+        # Alpaca bar.timestamp는 UTC tz-aware — utc=True로 명시해 concat 타임존 불일치 방지
+        df_new = pd.DataFrame([new_row], index=[pd.to_datetime(bar.timestamp, utc=True)])
 
         if ticker not in self.history:
             self.history[ticker] = df_new
         else:
-            # 중복 체크 (동일 타임스탬프면 업데이트)
+            # 중복 타임스탬프면 해당 행을 드롭 후 재concat (loc 할당은 dtype 불일치 경고 유발)
             if df_new.index[0] in self.history[ticker].index:
-                self.history[ticker].loc[df_new.index[0]] = new_row
-            else:
-                self.history[ticker] = pd.concat([self.history[ticker], df_new])
+                self.history[ticker] = self.history[ticker].drop(index=df_new.index[0])
+            self.history[ticker] = pd.concat([self.history[ticker], df_new])
 
             # 최신 N개만 유지
             if len(self.history[ticker]) > self.max_bars:
@@ -244,6 +243,12 @@ class TickerDataState:
                             self.volume_multiplier[ticker] = 1.0
                             print(f"⚠️ [VolMul] {ticker}: calibration error: {e}")
 
+                        # UTC로 정규화 (타임존 불일치 방지)
+                        if isinstance(df.index, pd.DatetimeIndex):
+                            if df.index.tz is not None:
+                                df.index = df.index.tz_convert("UTC")
+                            else:
+                                df.index = df.index.tz_localize("UTC")
                         self.history[ticker] = df
                         print(
                             f"✅ [Alpaca/IEX] {ticker} warmed up ({len(df)} bars, data_source=alpaca_iex)."
@@ -264,6 +269,12 @@ class TickerDataState:
                 df = await asyncio.to_thread(tk.history, period="5d", interval="1m")
                 if not df.empty:
                     df = df.tail(self.max_bars)
+                    # Alpaca 봉(UTC)과 concat 시 타임존 불일치 방지 — 항상 UTC로 정규화
+                    if isinstance(df.index, pd.DatetimeIndex):
+                        if df.index.tz is not None:
+                            df.index = df.index.tz_convert("UTC")
+                        else:
+                            df.index = df.index.tz_localize("UTC")
                     self.history[ticker] = df
                     # [Opt-1] yfinance 폴백 시 배수 1.0 (이미 전체 시장 데이터)
                     self.volume_multiplier[ticker] = 1.0
@@ -326,6 +337,10 @@ class PanicSellRequest(BaseModel):
 
 class ArmRequest(BaseModel):
     arm: bool
+
+
+class WebhookUpdateRequest(BaseModel):
+    webhook_url: str
 
 
 class OrderRequest(BaseModel):
@@ -1554,6 +1569,71 @@ async def toggle_arm_system(req: ArmRequest, api_key: str = Security(get_api_key
     }
 
 
+@app.post("/api/settings/webhook")
+async def update_webhook_url(
+    req: WebhookUpdateRequest, _api_key: str = Security(get_api_key)
+):
+    """Discord Webhook URL을 DB에 저장하고 메모리에 즉시 반영."""
+    url = req.webhook_url.strip()
+    if url and not url.startswith("https://discord.com/api/webhooks/"):
+        raise HTTPException(
+            status_code=422, detail="유효하지 않은 Discord Webhook URL 형식입니다."
+        )
+
+    if supabase:
+        try:
+            await asyncio.to_thread(
+                supabase.table("system_settings")
+                .update({"webhook_url": url or None, "updated_at": "now()"})
+                .eq("id", 1)
+                .execute
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"DB 저장 실패: {e}")
+
+    # 메모리 즉시 반영 (재시작 불필요)
+    webhook.webhook_url = url
+    webhook.has_warned = False
+    if paper_engine and paper_engine.webhook:
+        paper_engine.webhook.webhook_url = url
+        paper_engine.webhook.has_warned = False
+
+    print(f"🔗 [Settings] Discord Webhook URL {'설정 완료' if url else '제거됨'}.")
+    return {"status": "success", "configured": bool(url)}
+
+
+@app.post("/api/settings/webhook/test")
+async def test_webhook(_api_key: str = Security(get_api_key)):
+    """저장된 Discord Webhook URL로 테스트 메시지를 전송."""
+    # 메모리에 없으면 DB에서 즉시 로드
+    if not webhook.webhook_url and supabase:
+        try:
+            res = await asyncio.to_thread(
+                supabase.table("system_settings")
+                .select("webhook_url")
+                .limit(1)
+                .execute
+            )
+            if res.data and res.data[0].get("webhook_url"):
+                webhook.webhook_url = res.data[0]["webhook_url"]
+                webhook.has_warned = False
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"DB 조회 실패: {e}")
+
+    if not webhook.webhook_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Discord Webhook URL이 설정되지 않았습니다. 먼저 URL을 저장하세요.",
+        )
+
+    await webhook.send_alert(
+        title="🧪 MuzeStock.Lab — Webhook 테스트",
+        description="Discord 알림 연결이 정상적으로 작동하고 있습니다! ✅\n\nQuant Engine이 매수/청산 신호를 이 채널로 전송합니다.",
+        color=0x00B347,
+    )
+    return {"status": "success", "message": "테스트 알림 전송 완료"}
+
+
 @app.post("/api/broker/order")
 async def execute_manual_order(req: OrderRequest, api_key: str = Security(get_api_key)):
     """Executes a manual market or limit order via Alpaca"""
@@ -1858,6 +1938,10 @@ def _base_stats(is_simulated: bool, message: str, badge: str) -> dict:
         "recovery_days": 0,
         "avg_pnl": 0,
         "total_trades": 0,
+        "recent_win_rate": None,
+        "baseline_win_rate": None,
+        "drift": None,
+        "recent_trades_count": 0,
         "is_simulated": is_simulated,
         "message": message,
         "badge": badge,
@@ -1876,7 +1960,7 @@ async def get_strategy_stats():
     try:
         res = await asyncio.to_thread(
             supabase.table("paper_history")
-            .select("pnl_pct,profit_amt")
+            .select("pnl_pct,profit_amt,created_at")
             .order("created_at", desc=False)
             .execute
         )
@@ -1888,6 +1972,31 @@ async def get_strategy_stats():
                 "거래 내역 없음 — 첫 매매 후 통계가 집계됩니다",
                 "📊 거래 대기 중",
             )
+
+        # 30일 기준 분할 (전략 드리프트 감지용)
+        cutoff_iso = (
+            datetime.now(timezone.utc) - timedelta(days=30)
+        ).isoformat()
+        recent_trades = [
+            t for t in trades if (t.get("created_at") or "") >= cutoff_iso
+        ]
+        baseline_trades = [
+            t for t in trades if (t.get("created_at") or "") < cutoff_iso
+        ]
+
+        def _win_rate_of(bucket: list) -> float | None:
+            if not bucket:
+                return None
+            wins = sum(1 for t in bucket if float(t.get("pnl_pct") or 0) > 0)
+            return round(wins / len(bucket) * 100, 1)
+
+        recent_wr = _win_rate_of(recent_trades)
+        baseline_wr = _win_rate_of(baseline_trades)
+        drift = (
+            round(recent_wr - baseline_wr, 1)
+            if recent_wr is not None and baseline_wr is not None
+            else None
+        )
 
         # 단일 패스로 모든 누적값 계산
         total_trades = len(trades)
@@ -1922,7 +2031,10 @@ async def get_strategy_stats():
         running_max = np.maximum.accumulate(cumulative)
         mdd = round(float(np.min(cumulative - running_max)), 2)
 
-        if win_rate >= 55 and profit_factor >= 1.3:
+        # 드리프트 기반 배지
+        if drift is not None and drift <= -10:
+            badge = f"⚠️ 전략 드리프트 감지 (최근 승률 {recent_wr}% ↓{abs(drift):.1f}%p)"
+        elif win_rate >= 55 and profit_factor >= 1.3:
             badge = f"🛡️ System Edge: 승률 {win_rate}% (실거래 검증)"
         elif total_trades < 5:
             badge = f"📊 데이터 축적 중 ({total_trades}건)"
@@ -1936,6 +2048,10 @@ async def get_strategy_stats():
             "recovery_days": 0,
             "avg_pnl": avg_pnl,
             "total_trades": total_trades,
+            "recent_win_rate": recent_wr,
+            "baseline_win_rate": baseline_wr,
+            "drift": drift,
+            "recent_trades_count": len(recent_trades),
             "is_simulated": False,
             "message": f"실거래 {total_trades}건 기준 통계",
             "badge": badge,
@@ -1996,10 +2112,12 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     # 5. 추격 매수(FOMO) 방지 필터 (25% 및 20분 이평선 이격도)
     # 분봉 df의 경우 df["Open"]은 그 분의 시가이므로, 당일 첫 바의 Open으로 교정.
     # tz-aware 인덱스(Alpaca UTC)를 ET로 변환 후 날짜별 그룹핑.
-    if df.index.tz is not None:
+    if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
         _dates = df.index.tz_convert("America/New_York").date
-    else:
+    elif isinstance(df.index, pd.DatetimeIndex):
         _dates = df.index.date
+    else:
+        _dates = pd.to_datetime(df.index).date
     day_open = df.groupby(_dates)["Open"].transform("first")
 
     ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
@@ -2915,6 +3033,8 @@ async def on_minute_bar_closed(bar):
                 try:
                     allowed_keys = {
                         "ticker",
+                        "indicator",
+                        "value",
                         "rsi",
                         "macd_line",
                         "macd_signal",
@@ -2970,7 +3090,7 @@ async def on_minute_bar_closed(bar):
                         .upsert(
                             {
                                 "ticker": ticker_symbol,
-                                "dna_score": round(dna_val, 1),
+                                "dna_score": int(round(dna_val)),
                                 "price": price_val,
                                 "change": str(round(change_pct, 2)),
                                 "volume": str(volume_val),
@@ -3021,12 +3141,84 @@ async def on_minute_bar_closed(bar):
         gc.collect()
 
 
+async def start_rest_polling(tickers: Optional[List[str]] = None):
+    """REST API 폴링 모드 — WebSocket 비활성화 또는 connection limit 시 60초 주기로 최신 1분봉 조회"""
+    from alpaca.data.requests import StockBarsRequest
+    from datetime import timedelta
+
+    api_key = os.getenv("APCA_API_KEY_ID")
+    api_secret = os.getenv("APCA_API_SECRET_KEY")
+    if not api_key or not api_secret:
+        print("❌ [REST Polling] Alpaca API Key missing.")
+        return
+
+    active_tickers = tickers
+    if not active_tickers:
+        active_tickers = await asyncio.to_thread(db.get_active_tickers, limit=15)
+
+    if not active_tickers:
+        print("⚠️ [REST Polling] No active tickers. Standby.")
+        return
+
+    await candle_state.warm_up(active_tickers)
+
+    client = StockHistoricalDataClient(api_key, api_secret)
+    last_processed: Dict[str, object] = {}
+
+    print(f"📡 [REST Polling] 60s 폴링 시작 — {active_tickers}")
+
+    while True:
+        if not is_market_hours():
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            open_min = 9 * 60 + 30
+            cur_min = now_et.hour * 60 + now_et.minute
+            if cur_min < open_min:
+                wait_sec = (open_min - cur_min) * 60
+                print(f"⏰ [REST Polling] 개장까지 {wait_sec // 60}분 대기...")
+                await asyncio.sleep(min(wait_sec, 300))
+            else:
+                print("🌙 [REST Polling] 폐장. 내일 재시작 대기...")
+                await asyncio.sleep(3600)
+            continue
+
+        try:
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            start_time = now_et - timedelta(minutes=3)
+
+            request = StockBarsRequest(
+                symbol_or_symbols=active_tickers,
+                timeframe=TimeFrame.Minute,
+                start=start_time,
+                feed=DataFeed.IEX,
+            )
+            bars_response = await asyncio.to_thread(client.get_stock_bars, request)
+
+            processed_count = 0
+            for symbol, bar_list in bars_response.data.items():
+                for bar in bar_list:
+                    bar_ts = bar.timestamp
+                    last_ts = last_processed.get(symbol)
+                    if last_ts is None or bar_ts > last_ts:
+                        last_processed[symbol] = bar_ts
+                        await on_minute_bar_closed(bar)
+                        processed_count += 1
+
+            if processed_count:
+                print(f"⚡ [REST Polling] {processed_count}개 봉 처리 완료")
+
+        except Exception as e:
+            print(f"⚠️ [REST Polling] Error: {e}")
+
+        await asyncio.sleep(60)
+
+
 async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     """Alpaca WebSocket 스트림 데몬 시작"""
     if os.getenv("DISABLE_ALPACA_STREAM", "false").lower() == "true":
         print(
-            "🔌 [Pulse Engine] Alpaca Stream is disabled (DISABLE_ALPACA_STREAM=true). Running in API-only mode."
+            "🔌 [Pulse Engine] WebSocket 비활성화 — REST Polling 모드로 전환합니다."
         )
+        await start_rest_polling(tickers)
         return
     print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
 
@@ -3119,18 +3311,23 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
             description=f"스트림 엔진에 치명적 오류가 발생했습니다.\nError: {e}",
             color=0xFF0000,
         )
-        # connection limit exceeded 는 더 긴 백오프 (API 연결 누적 방지)
+        # connection limit exceeded: REST 폴링으로 즉시 폴백하여 매매 공백 최소화
         if "connection limit" in str(e).lower():
-            wait_sec = 300
-            print(f"⏳ Connection limit hit — {wait_sec}초 후 재연결 시도...")
+            print("⏳ Connection limit — REST Polling 폴백으로 즉시 전환...")
+            if is_market_hours():
+                asyncio.create_task(start_rest_polling(active_tickers))
+            # 300초 후 WebSocket 재연결도 병행 시도
+            await asyncio.sleep(300)
+            if is_market_hours():
+                asyncio.create_task(start_alpaca_stream(active_tickers))
         else:
             wait_sec = 60
             print(f"⏳ {wait_sec}초 후 재연결 시도...")
-        await asyncio.sleep(wait_sec)
-        if is_market_hours():
-            asyncio.create_task(start_alpaca_stream(active_tickers))
-        else:
-            print("🌙 [Pulse] 시장 폐장 — 스트림 재시작 스킵 (스냅샷 모드 유지)")
+            await asyncio.sleep(wait_sec)
+            if is_market_hours():
+                asyncio.create_task(start_alpaca_stream(active_tickers))
+            else:
+                print("🌙 [Pulse] 시장 폐장 — 스트림 재시작 스킵 (스냅샷 모드 유지)")
 
 
 async def auto_penny_scan_scheduler():

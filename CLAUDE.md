@@ -139,8 +139,9 @@ Strong_Buy = (
 ### 포지션 사이징 상수
 
 ```python
-KELLY_FRACTION = 0.15   # 가용 현금의 15%
-MIN_BUY_BUDGET = 500.0  # 최소 주문 금액
+KELLY_FRACTION = 0.15    # 가용 현금의 15%
+MIN_BUY_BUDGET = 10.0   # 최소 주문 금액
+MAX_BUY_BUDGET = 1000.0 # 종목당 최대 매수 금액 — 리스크 상한
 TS_INIT_PCT    = 0.90   # 일반: 초기 TS -10%
 TS_TRAIL_PCT   = 0.90   # 일반: 최고가 추종 TS
 ```

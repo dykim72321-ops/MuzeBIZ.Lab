@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Bell, Database, Save, RefreshCw, Shield, ShieldOff, ShieldCheck } from 'lucide-react';
+import { Settings, Bell, Database, Save, RefreshCw, Shield, ShieldOff, ShieldCheck, Send } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
-import { toggleSystemArm } from '../../services/pythonApiService';
+import { toggleSystemArm, updateWebhookUrl, testWebhook } from '../../services/pythonApiService';
 
 export const CommandSettings: React.FC = () => {
   const [dnaThreshold, setDnaThreshold] = useState<number>(85);
   const [webhookUrl, setWebhookUrl] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
 
   const [isArmed, setIsArmed] = useState<boolean>(false);
@@ -60,12 +61,19 @@ export const CommandSettings: React.FC = () => {
         .from('system_settings')
         .update({
           alert_threshold: dnaThreshold,
-          webhook_url: webhookUrl,
+          webhook_url: webhookUrl || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', 1);
 
       if (error) throw error;
+
+      // 백엔드 메모리 즉시 반영 (재시작 불필요)
+      try {
+        await updateWebhookUrl(webhookUrl);
+      } catch {
+        // 백엔드 미응답 시 DB 저장은 성공으로 처리
+      }
 
       toast.success('Matrix Config Saved', {
         description: 'System thresholds globally updated.',
@@ -77,6 +85,22 @@ export const CommandSettings: React.FC = () => {
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    setIsTesting(true);
+    try {
+      await testWebhook();
+      toast.success('📨 테스트 메시지 전송 완료', {
+        description: 'Discord 채널에서 테스트 알림을 확인하세요.',
+      });
+    } catch (error: any) {
+      toast.error('Webhook 테스트 실패', {
+        description: error?.message || 'Webhook URL을 먼저 저장한 후 테스트하세요.',
+      });
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -219,6 +243,14 @@ export const CommandSettings: React.FC = () => {
                 placeholder="https://discord.com/api/webhooks/..."
                 className="w-full text-sm px-3 py-2 bg-slate-950/50 border border-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/60 transition-all text-slate-200 font-mono"
               />
+              <button
+                onClick={handleTestWebhook}
+                disabled={isTesting || !webhookUrl}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 rounded-lg text-[11px] font-bold hover:bg-slate-800 hover:border-indigo-500/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono"
+              >
+                {isTesting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                {isTesting ? 'Sending...' : 'Test Webhook'}
+              </button>
             </div>
           </div>
         </div>

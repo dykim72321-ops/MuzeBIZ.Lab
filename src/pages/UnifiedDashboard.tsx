@@ -27,7 +27,8 @@ import {
   Lock,
   Unlock,
   Plus,
-  Loader2
+  Loader2,
+  PieChart
 } from 'lucide-react';
 
 // Hooks & Services
@@ -39,6 +40,7 @@ import { processSignal } from '../utils/signalProcessor';
 import { supabase as supabaseClient } from '../lib/supabase';
 import {
   fetchBrokerStatus,
+  fetchBrokerAccount,
   toggleSystemArm,
   fetchPaperAccount,
   fetchPaperPositions,
@@ -86,6 +88,7 @@ export const UnifiedDashboard = () => {
   const [pennyPositions, setPennyPositions] = useState<any[]>([]);
   const [pennyHistory, setPennyHistory] = useState<any[]>([]);
   const [pennyAccount, setPennyAccount] = useState<any>(null);
+  const [alpacaAccount, setAlpacaAccount] = useState<any>(null);
 
   // 4. Discovery watchlist-add in-flight guard (ref = synchronous, avoids double-click race)
   const addingTickersRef = useRef<Set<string>>(new Set());
@@ -126,17 +129,18 @@ export const UnifiedDashboard = () => {
   // ── Load All Data ─────────────────────────────────────────────────────
   const loadDashboardData = useCallback(async () => {
     try {
-      const [wl, pp, ph, pa, discoveryResult, scanStatus] = await Promise.all([
+      const [wl, pp, ph, pa, alpaca, discoveryResult, scanStatus] = await Promise.all([
         getWatchlist(),
         fetchPaperPositions(),
         fetchPaperHistory(),
         fetchPaperAccount(),
+        fetchBrokerAccount().catch(() => null),
         supabaseClient
           .from('daily_discovery')
           .select('*')
           .gte('updated_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
           .not('dna_score', 'is', null)
-          .gt('dna_score', 0)
+          .gte('dna_score', 80)
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
@@ -171,6 +175,7 @@ export const UnifiedDashboard = () => {
       );
       setPennyHistory(ph || []);
       setPennyAccount(pa);
+      if (alpaca && !alpaca.error) setAlpacaAccount(alpaca);
       setLastFetchedTime(new Date().toISOString().substring(11, 19));
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
@@ -368,6 +373,18 @@ export const UnifiedDashboard = () => {
     return pennyPositions.reduce((sum, p) => sum + ((p.current_price - p.entry_price) * p.units || 0), 0);
   }, [pennyPositions]);
 
+  // Portfolio Concentration
+  const investedCapital = useMemo(() => {
+    return pennyPositions.reduce((sum, p) => sum + ((p.current_price ?? 0) * (p.units ?? 0)), 0);
+  }, [pennyPositions]);
+
+  const concentrationPct = useMemo(() => {
+    const cash = pennyAccount?.cash_available ?? 100000;
+    const equity = cash + investedCapital;
+    if (equity === 0) return 0;
+    return (investedCapital / equity) * 100;
+  }, [investedCapital, pennyAccount]);
+
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -498,21 +515,29 @@ export const UnifiedDashboard = () => {
         </div>
 
         {/* ════════ METRICS GRID ════════ */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
           {[
             {
               label: '총 자산 가치 (Total Assets)',
-              value: pennyAccount ? `$${(pennyAccount.total_assets ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$100,000.00',
-              sub: '현금 + 포지션 평가액',
-              info: '가상 예수금과 보유 주식 평가 가치를 합산한 실시간 포트폴리오 평가 총액입니다.',
+              value: alpacaAccount
+                ? `$${(alpacaAccount.equity ?? 100000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : pennyAccount
+                ? `$${(pennyAccount.total_assets ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : '$100,000.00',
+              sub: alpacaAccount ? 'Alpaca 실계좌 Equity' : '현금 + 포지션 평가액',
+              info: 'Alpaca 페이퍼 트레이딩 실계좌의 Equity(자본) 기준 포트폴리오 총 평가액입니다.',
               icon: BarChart3,
               color: 'text-indigo-400 bg-indigo-550/10 border-indigo-500/20'
             },
             {
               label: '가용 주문 잔고 (Available Cash)',
-              value: pennyAccount ? `$${(pennyAccount.cash_available ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$100,000.00',
-              sub: '가상 매수 가능 예치금',
-              info: '새로운 퀀트 종목 시그널 매치 시 즉시 투입할 수 있는 미결제 현금 잔고입니다.',
+              value: alpacaAccount
+                ? `$${(alpacaAccount.buying_power ?? 100000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : pennyAccount
+                ? `$${(pennyAccount.cash_available ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : '$100,000.00',
+              sub: alpacaAccount ? 'Alpaca Buying Power' : '가상 매수 가능 예치금',
+              info: 'Alpaca 페이퍼 트레이딩 실계좌의 매수 가능 잔고(Buying Power)입니다.',
               icon: Coins,
               color: 'text-cyan-400 bg-cyan-550/10 border-cyan-500/20'
             },
@@ -525,9 +550,11 @@ export const UnifiedDashboard = () => {
               color: totalPnl >= 0 ? 'text-emerald-400 bg-emerald-550/10 border-emerald-500/20' : 'text-rose-400 bg-rose-550/10 border-rose-500/20'
             },
             {
-              label: '백테스트 엔진 승률 (Win Rate)',
+              label: '전략 승률 (Win Rate)',
               value: statsLoading ? 'Loading...' : strategyStats ? `${strategyStats.win_rate.toFixed(1)}%` : '68.7%',
-              sub: statsLoading ? '연산 중...' : `Profit Factor: ${strategyStats ? strategyStats.profit_factor.toFixed(2) : '1.14'}x`,
+              sub: statsLoading ? '연산 중...' : strategyStats?.drift != null
+                ? `최근 30일 ${strategyStats.recent_win_rate?.toFixed(1)}% vs 이전 ${strategyStats.baseline_win_rate?.toFixed(1)}% (${strategyStats.drift >= 0 ? '+' : ''}${strategyStats.drift.toFixed(1)}%p)`
+                : `Profit Factor: ${strategyStats ? strategyStats.profit_factor.toFixed(2) : '1.14'}x`,
               info: '과거 거래 데이터 기반 시뮬레이션 및 백테스트의 종합 승률 및 이익 지수입니다.',
               icon: Star,
               color: 'text-amber-400 bg-amber-550/10 border-amber-500/20'
@@ -547,6 +574,46 @@ export const UnifiedDashboard = () => {
               <p className="text-xs text-slate-400 font-medium leading-normal border-t border-white/5 pt-2 mt-4">{metric.info}</p>
             </div>
           ))}
+
+          {/* 5th Card: Portfolio Concentration */}
+          {(() => {
+            const pct = concentrationPct;
+            const isWarn = pct >= 70;
+            const isCaution = pct >= 50 && pct < 70;
+            const cardColor = isWarn
+              ? 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+              : isCaution
+              ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+              : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+            const barColor = isWarn ? 'bg-rose-500' : isCaution ? 'bg-amber-400' : 'bg-emerald-400';
+            const label = isWarn ? '위험 구간 (≥70%)' : isCaution ? '주의 구간 (≥50%)' : '안전 구간';
+            return (
+              <div className="dark-glass-panel border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col justify-between min-h-[140px]">
+                <div className="flex justify-between items-start">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest leading-none block">포트폴리오 집중도 (Concentration)</span>
+                    <span className="text-3xl font-black text-white leading-none tabular-nums block pt-1.5">{pct.toFixed(1)}%</span>
+                    <span className="text-xs text-slate-300 font-bold leading-none block pt-2">{label} · 상한 80%</span>
+                  </div>
+                  <div className={clsx("p-2.5 rounded-xl border shrink-0", cardColor)}>
+                    <PieChart className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="mt-4 border-t border-white/5 pt-3 space-y-1.5">
+                  <div className="flex justify-between text-xs text-slate-400 font-bold">
+                    <span>${investedCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })} 투입</span>
+                    <span>{pct.toFixed(1)}% / 80%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className={clsx("h-full rounded-full transition-all duration-500", barColor)}
+                      style={{ width: `${Math.min(pct / 80 * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* ════════ MAIN SECTION ════════ */}

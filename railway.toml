@@ -1,0 +1,4 @@
+# Railway monorepo root config
+# The Python engine service is in python_engine/.
+# In Railway dashboard: set "Root Directory" to "python_engine" for this service.
+# The python_engine/railway.toml and python_engine/Dockerfile handle the rest.

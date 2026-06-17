@@ -46,6 +46,10 @@ export interface StrategyStats {
   recovery_days: number;
   avg_pnl: number;
   total_trades: number;
+  recent_win_rate: number | null;
+  baseline_win_rate: number | null;
+  drift: number | null;
+  recent_trades_count: number;
 }
 
 /**
@@ -231,6 +235,20 @@ export async function closePosition(ticker: string): Promise<any> {
  */
 export async function sellPaperPosition(ticker: string): Promise<any> {
   return brokerApiFetch('/api/broker/paper/sell', 'POST', { ticker });
+}
+
+/**
+ * Discord Webhook URL 저장 및 백엔드 메모리 즉시 반영
+ */
+export async function updateWebhookUrl(webhookUrl: string): Promise<any> {
+  return brokerApiFetch('/api/settings/webhook', 'POST', { webhook_url: webhookUrl });
+}
+
+/**
+ * 저장된 Discord Webhook URL로 테스트 메시지 전송
+ */
+export async function testWebhook(): Promise<any> {
+  return brokerApiFetch('/api/settings/webhook/test', 'POST');
 }
 
 /**

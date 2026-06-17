@@ -23,7 +23,7 @@ export const TopNav = () => {
         
         {/* Left: Logo & Nav */}
         <div className="flex items-center h-full gap-12">
-          <NavLink to="/stock/dashboard" className="flex items-center gap-3 group">
+          <NavLink to="/" className="flex items-center gap-3 group">
             <div className="w-10 h-10 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-center shadow-[inset_0_0_15px_rgba(99,102,241,0.05)] group-hover:border-indigo-500/30 transition-all">
               <Dna className="w-6 h-6 text-indigo-400 group-hover:scale-110 transition-transform" />
             </div>

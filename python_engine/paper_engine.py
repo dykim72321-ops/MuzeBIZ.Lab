@@ -8,8 +8,9 @@ INITIAL_CAPITAL = 100000.0
 # ── 포지션 사이징 / 리스크 상수 ──────────────────────────────────────────────
 KELLY_FRACTION = 0.15  # 가용 현금 대비 진입 비중 (3/4 Kelly ≈ 15%)
 MIN_BUY_BUDGET = 10.0  # 최소 주문 금액 (달러)
-MAX_BUY_BUDGET = 100.0  # 종목당 최대 매수 금액 (달러) — 리스크 상한
+MAX_BUY_BUDGET = 1000.0  # 종목당 최대 매수 금액 (달러) — 리스크 상한
 MAX_CONCURRENT_POSITIONS = 10  # 동시 보유 최대 종목 수
+MAX_CONCENTRATION_PCT = 0.80   # 총 자산 대비 투입 비중 상한 (80% 초과 시 신규 진입 차단)
 TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%)
 TS_TRAIL_PCT = 0.90  # 최고가 갱신 시 TS 추적 비율: highest × 90%
 SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
@@ -253,6 +254,15 @@ class PaperTradingManager:
             if await self._is_in_cooldown(ticker):
                 print(
                     f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
+                )
+                return
+            # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 80% 초과 시 신규 진입 차단
+            invested = await self.calculate_invested_capital()
+            total_equity = acc["cash_available"] + invested
+            if total_equity > 0 and (invested / total_equity) >= MAX_CONCENTRATION_PCT:
+                conc_pct = invested / total_equity * 100
+                print(
+                    f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
                 )
                 return
             # Kelly 엔진이 계산한 비중이 유효하면 사용, 없으면 기본값(KELLY_FRACTION)
