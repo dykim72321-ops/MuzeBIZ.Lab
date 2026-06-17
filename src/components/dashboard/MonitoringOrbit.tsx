@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Target, ShieldCheck, Fingerprint, Search, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Target, ShieldCheck, Fingerprint, Search, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import { OrbitChartPanel } from './OrbitChartPanel';
 
@@ -21,7 +21,6 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
 }) => {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showExited, setShowExited] = useState(false);
 
   const handleItemClick = (item: any, stock: any) => {
     if (selectedTicker === item.ticker) {

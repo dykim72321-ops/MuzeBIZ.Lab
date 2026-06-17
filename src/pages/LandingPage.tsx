@@ -3,31 +3,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useMockAuth } from '../hooks/useMockAuth';
 import { useMarketEngine } from '../hooks/useMarketEngine';
-import { 
-  Activity, 
-  Globe, 
-  Lock, 
-  ArrowRight, 
-  Loader2, 
-  Search, 
-  Bell, 
-  Star, 
-  Flame, 
-  Play, 
-  Laptop, 
-  ChevronDown, 
-  Check, 
-  X, 
-  Plus, 
-  TrendingUp, 
-  TrendingDown, 
-  Cpu,
-  Apple,
-  Target
+import {
+  Activity,
+  Loader2,
+  Search,
+  Bell,
+  Laptop,
+  X,
+  Apple
 } from 'lucide-react';
 
 export default function LandingPage() {
-  const { isLoading, isAuthenticated, signIn, signOut } = useMockAuth();
+  const { isLoading, isAuthenticated, signIn } = useMockAuth();
   const navigate = useNavigate();
   
   const { pulseMap, isConnected } = useMarketEngine();
