@@ -557,7 +557,9 @@ def run_edge_monitor(supabase_url: str, supabase_key: str, n_trades: int = 30) -
     n_actual = len(rows)
 
     if n_actual < 10:
-        print(f"⚠️ [EdgeMonitor] 실거래 데이터 부족 ({n_actual}건 < 10건). 모니터링 생략.")
+        print(
+            f"⚠️ [EdgeMonitor] 실거래 데이터 부족 ({n_actual}건 < 10건). 모니터링 생략."
+        )
         return {
             "actual_win_rate": None,
             "theoretical_win_rate": None,
