@@ -2608,7 +2608,8 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
 
     if recent_pnls and len(recent_pnls) >= 10:
         d_weight, _, _ = calculate_dynamic_kelly(recent_pnls, min_trades=10)
-        dynamic_kelly_weight = d_weight
+        # 0이면 static Kelly 폴백 — 연속 손실로 동적 켈리=0 반환 시 매수 완전 차단 방지
+        dynamic_kelly_weight = d_weight if d_weight > 0 else None
 
     # 2. 포지션 사이징 (ATR 변동성 조절 + 동적 켈리)
     sizing = calculate_position_sizing(
@@ -3106,6 +3107,8 @@ async def run_penny_scan_internal(
                     }
                     if current_status not in ("HOLDING", "EXITED"):
                         update_data["status"] = "WATCHING"
+                        # WATCHING으로 갱신된 경우만 스트림 재시작 대상에 포함
+                        auto_registered.append(item["ticker"])
 
                     await asyncio.to_thread(
                         supabase.table("watchlist")
@@ -3118,7 +3121,8 @@ async def run_penny_scan_internal(
                     await asyncio.to_thread(
                         supabase.table("watchlist").insert(payload).execute
                     )
-                auto_registered.append(item["ticker"])
+                    # 신규 등록은 항상 스트림 재시작 대상
+                    auto_registered.append(item["ticker"])
                 item["is_watchlisted"] = True
                 print(
                     f"⭐ [Penny] {item['ticker']} auto-registered to watchlist (DNA: {item['dna_score']})"
