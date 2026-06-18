@@ -1,10 +1,10 @@
 /* src/index.css */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;700;800&family=Noto+Sans+KR:wght@500;700;800;900&display=swap");
 
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", sans-serif;
+  --font-sans: "Inter", "Noto Sans KR", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
   /* MuzeBIZ.Lab Deep Dark & Neon Theme Tokens */
@@ -17,10 +17,19 @@
   --color-signal-buy: #10b981; /* Emerald 500 */
   --color-signal-sell: #f43f5e; /* Rose 500 */
 
+  /* Cockpit Theme Tokens */
+  --color-cockpit-cyan: #00f2fe;
+  --color-cockpit-blue: #3b82f6;
+  --color-cockpit-emerald: #05ff9b;
+  --color-cockpit-rose: #ff2a5f;
+  --color-cockpit-gold: #ffd700;
+
   --animate-fade-in-up: fadeInUp 0.4s ease-out forwards;
   --animate-pulse-glow: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-scan-line: scanLine 3s linear infinite;
   --animate-particle-float: particleFloat 10s ease-in-out infinite alternate;
+  --animate-radar-sweep: radarSweep 6s linear infinite;
+  --animate-cockpit-glow: cockpitGlow 3s ease-in-out infinite;
 }
 
 @keyframes pulseGlow {
@@ -40,10 +49,20 @@
   100% { transform: translate(10px, -15px); }
 }
 
+@keyframes radarSweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes cockpitGlow {
+  0%, 100% { opacity: 0.15; filter: drop-shadow(0 0 5px rgba(0, 242, 254, 0.2)); }
+  50% { opacity: 0.45; filter: drop-shadow(0 0 15px rgba(0, 242, 254, 0.6)); }
+}
+
 @layer base {
   body {
     /* Light Slate Theme Base */
-    @apply bg-slate-50 text-slate-800 antialiased font-sans overflow-x-hidden
+    @apply bg-white text-slate-800 antialiased font-sans overflow-x-hidden
       w-full m-0 selection:bg-indigo-100 selection:text-indigo-900;
   }
 
@@ -139,34 +158,23 @@
     @apply shadow-xl;
   }
 
-  /* Neo-Glassmorphism Panels (Dark Theme - Premium Financial Look) */
+  /* Neo-Glassmorphism Panels (Bright Theme - Google Inspired Clean White Panels) */
   .dark-glass-panel {
-    background: rgba(15, 23, 42, 0.85); /* Slightly lighter Slate-900 base for better contrast */
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-top: 1px solid rgba(255, 255, 255, 0.15); /* Crisper, brighter borders */
-    border-left: 1px solid rgba(255, 255, 255, 0.15);
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
   }
 
   .dark-glass-panel-hover {
-    background: rgba(15, 23, 42, 0.8);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-top: 1px solid rgba(255, 255, 255, 0.15);
-    border-left: 1px solid rgba(255, 255, 255, 0.15);
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .dark-glass-panel-hover:hover {
-    background: rgba(30, 41, 59, 0.95); /* Slate-800 base on hover */
-    border-top-color: rgba(255, 255, 255, 0.25);
-    border-left-color: rgba(255, 255, 255, 0.25);
-    box-shadow: 0 15px 45px -10px rgba(0, 0, 0, 0.7);
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
     @apply scale-[1.005];
   }
 
@@ -219,6 +227,44 @@
   }
   .signal-sell {
     @apply shadow-[0_0_15px_rgba(244,63,94,0.15)] border-rose-500/30;
+  }
+
+  /* Cockpit Styling Classes (Bright/Light Theme Optimized) */
+  .cockpit-glow-text-cyan {
+    text-shadow: 0 0 8px rgba(14, 165, 233, 0.4), 0 0 15px rgba(14, 165, 233, 0.15);
+  }
+  .cockpit-glow-text-emerald {
+    text-shadow: 0 0 8px rgba(16, 185, 129, 0.4), 0 0 15px rgba(16, 185, 129, 0.15);
+  }
+  .cockpit-glow-text-rose {
+    text-shadow: 0 0 8px rgba(244, 63, 94, 0.4), 0 0 15px rgba(244, 63, 94, 0.15);
+  }
+
+  .cockpit-border-cyan {
+    border: 1px solid rgba(14, 165, 233, 0.25);
+    box-shadow: 0 8px 30px rgba(14, 165, 233, 0.05), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+  }
+  
+  .cockpit-border-blue {
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    box-shadow: 0 8px 30px rgba(59, 130, 246, 0.05), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+  }
+
+  .cockpit-carbon {
+    background-image: 
+      radial-gradient(rgba(15, 23, 42, 0.02) 1px, transparent 0),
+      radial-gradient(rgba(15, 23, 42, 0.02) 1px, transparent 0);
+    background-size: 12px 12px;
+    background-position: 0 0, 6px 6px;
+    background-color: #f8fafc;
+  }
+
+  .cockpit-glass {
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 10px 40px -10px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
   }
 }
 

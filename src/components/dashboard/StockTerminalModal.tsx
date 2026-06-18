@@ -58,7 +58,7 @@ const PriceTrajectoryChart = ({
     if (chartData.length < 2) {
         return (
             <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-slate-800/80 flex items-center justify-center">
-                <span className="text-xs text-slate-500 font-mono">장 개장 후 가격 데이터가 수집됩니다</span>
+                <span className="text-xs font-semibold text-slate-400 font-sans">장 개장 후 가격 데이터가 수집됩니다</span>
             </div>
         );
     }
@@ -386,9 +386,9 @@ export const StockTerminalModal = ({
                                 </div>
                                 <div>
                                     <div className="flex items-center gap-2 mb-1.5 font-mono">
-                                        <span className="px-2 py-0.5 rounded text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-black tracking-[0.2em] uppercase">Quant Analysis</span>
+                                        <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-black tracking-[0.2em] uppercase">Quant Analysis</span>
                                         {displayData.rsi !== undefined && displayData.rsi > 0 && (
-                                            <span className="px-2 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-black tracking-[0.2em] uppercase">실시간 지표 연동</span>
+                                            <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-extrabold tracking-wider uppercase font-sans">실시간 지표 연동</span>
                                         )}
                                     </div>
                                     <h1 className="text-4xl font-black text-white tracking-tighter flex items-center gap-4">
@@ -407,7 +407,7 @@ export const StockTerminalModal = ({
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
                                 {/* LEFT: 가격 추이 차트 + 시장 데이터 */}
                                 <div className="space-y-3">
-                                    <h3 className="text-[11px] font-black text-indigo-400 uppercase tracking-[0.25em] flex items-center gap-2 mb-3 font-mono">
+                                    <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-3 font-sans">
                                         <Activity className="w-4 h-4 text-indigo-400" /> 가격 추이 & 목표선
                                     </h3>
                                     <PriceTrajectoryChart
@@ -419,7 +419,7 @@ export const StockTerminalModal = ({
                                     />
                                     <div className="grid grid-cols-3 gap-3 mt-4">
                                         <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800/60 font-mono">
-                                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-1">현재가</span>
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1 font-sans">현재가</span>
                                             <span className="text-lg font-black text-white">{formatPrice(displayData.price || 0)}</span>
                                             {displayData.changePercent !== undefined && (
                                                 <span className={clsx(
@@ -431,7 +431,7 @@ export const StockTerminalModal = ({
                                             )}
                                         </div>
                                         <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800/60 font-mono">
-                                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-1">고가 (Day)</span>
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1 font-sans">고가 (Day)</span>
                                             <span className="text-lg font-black text-white">
                                                 {displayData.dayHigh && displayData.dayHigh > 0
                                                     ? formatPrice(displayData.dayHigh)
@@ -457,8 +457,8 @@ export const StockTerminalModal = ({
                                     <div className="relative z-10">
                                         <div className="flex justify-between items-end mb-6">
                                             <div>
-                                                <h3 className="text-[11px] font-black text-cyan-400 uppercase tracking-[0.25em] mb-1 font-mono">퀀트 분석 매트릭스</h3>
-                                                <p className="text-[10px] text-slate-500 font-medium tracking-tight">RSI · MACD · ADX · RVOL 실측 기반</p>
+                                                <h3 className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-1 font-sans">퀀트 분석 매트릭스</h3>
+                                                <p className="text-[11px] text-slate-400 font-bold tracking-tight font-sans font-sans">RSI · MACD · ADX · RVOL 실측 기반</p>
                                             </div>
                                             <span className="text-5xl font-black text-white font-mono tracking-tighter drop-shadow-[0_0_15px_rgba(34,211,238,0.4)]">
                                                 {displayData.dnaScore}
@@ -501,7 +501,7 @@ export const StockTerminalModal = ({
 
                             {/* ─── 투자 판단 근거 ───────────────────────────────────── */}
                             <div className="bg-[#0d1527]/40 rounded-2xl border border-white/5 p-7 space-y-5">
-                                <h3 className="text-[11px] font-black text-indigo-400 uppercase tracking-[0.25em] flex items-center gap-2 mb-3 font-mono">
+                                <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-3 font-sans">
                                     <Zap className="w-4 h-4 text-indigo-400 fill-indigo-400/10" /> 투자 판단 근거
                                 </h3>
                                 <p className="text-sm text-slate-300 font-medium leading-relaxed mb-5">
@@ -509,7 +509,7 @@ export const StockTerminalModal = ({
                                 </p>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5 border-t border-slate-800/50">
                                     <div className="space-y-3">
-                                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest block mb-2 font-mono">
+                                        <span className="text-[11px] font-black text-emerald-400 uppercase tracking-wider block mb-2 font-sans">
                                             강세 요인 (Bull Case)
                                         </span>
                                         <ul className="space-y-2.5">
@@ -521,7 +521,7 @@ export const StockTerminalModal = ({
                                         </ul>
                                     </div>
                                     <div className="space-y-3">
-                                        <span className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-2 font-mono">
+                                        <span className="text-[11px] font-black text-rose-400 uppercase tracking-wider block mb-2 font-sans">
                                             리스크 요인 (Bear Case)
                                         </span>
                                         <ul className="space-y-2.5">
@@ -562,7 +562,7 @@ export const StockTerminalModal = ({
 
                             <div className="flex items-center gap-4">
                                 <div className="hidden md:flex flex-col items-end mr-2 text-right">
-                                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Kelly 적정 비중</span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-sans">Kelly 적정 비중</span>
                                     <span className="text-xs font-black text-indigo-400">{displayData.kellyWeight?.toFixed(1) ?? '—'}%</span>
                                 </div>
                                 <button

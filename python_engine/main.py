@@ -16,6 +16,9 @@ import yfinance as yf
 import ta
 import os
 import gc
+import subprocess
+import sys
+import threading
 from dotenv import load_dotenv
 
 # --- Alpaca Trade API Imports ---
@@ -552,7 +555,22 @@ async def get_indicator_snapshot():
             )
 
             dna_score = calculate_dna_score(
-                rsi, macd_diff, macd_diff_prev, adx, rvol, is_extended
+                rsi=rsi,
+                macd_diff=macd_diff,
+                macd_diff_prev=macd_diff_prev,
+                adx=adx,
+                di_plus=(
+                    float(latest["+DI"])
+                    if "+DI" in latest and not pd.isna(latest["+DI"])
+                    else 0.0
+                ),
+                di_minus=(
+                    float(latest["-DI"])
+                    if "-DI" in latest and not pd.isna(latest["-DI"])
+                    else 0.0
+                ),
+                rvol=rvol,
+                is_extended=is_extended,
             )
             strong_buy_active = (
                 bool(latest["Strong_Buy"]) if "Strong_Buy" in latest else False
@@ -1555,6 +1573,100 @@ async def manual_paper_sell(
     }
 
 
+@app.post("/api/broker/paper/emergency-liquidate")
+async def emergency_liquidate(api_key: str = Security(get_api_key)):
+    """Watchdog 트리거: SYSTEM_ARMED 해제 + 모든 paper 포지션을 DB에서 정리.
+    Alpaca 실제 청산은 watchdog.py가 직접 호출하며, 이 엔드포인트는
+    Supabase 상태 동기화와 자동매매 중단만 담당한다."""
+    global SYSTEM_ARMED
+    SYSTEM_ARMED = False
+
+    if not paper_engine:
+        return {"status": "error", "detail": "Paper engine not initialized"}
+
+    # SYSTEM_ARMED = False 영속화
+    if supabase:
+        try:
+            await asyncio.to_thread(
+                supabase.table("system_settings")
+                .update({"is_armed": False})
+                .eq("id", 1)
+                .execute
+            )
+        except Exception as e:
+            print(f"⚠️ [Emergency] ARM DB persist failed: {e}")
+
+    # 모든 열린 포지션 조회
+    positions = await paper_engine.get_all_positions()
+    if not positions:
+        return {"status": "success", "closed": 0, "message": "포지션 없음"}
+
+    acc = await paper_engine.get_account()
+    total_proceeds = 0.0
+    closed_tickers = []
+
+    for pos in positions:
+        ticker = pos["ticker"]
+        entry_price = float(pos["entry_price"])
+        units = float(pos["units"])
+        exit_price = float(pos.get("current_price") or entry_price)
+        pnl_pct = (exit_price / entry_price - 1) * 100 if entry_price > 0 else 0.0
+        profit_amt = (exit_price - entry_price) * units
+        proceeds = exit_price * units
+
+        try:
+            history_data = {
+                "ticker": ticker,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "pnl_pct": round(pnl_pct, 2),
+                "profit_amt": round(profit_amt, 2),
+                "exit_reason": "Watchdog Emergency Liquidation",
+            }
+            await asyncio.to_thread(
+                supabase.table("paper_history").insert(history_data).execute
+            )
+            await asyncio.to_thread(
+                supabase.table("paper_positions").delete().eq("ticker", ticker).execute
+            )
+            await paper_engine._sync_watchlist_exit(ticker)
+            closed_tickers.append(ticker)
+            total_proceeds += proceeds  # DB 청산 성공 시에만 현금 반환 집계
+        except Exception as e:
+            print(f"⚠️ [Emergency] Failed to close {ticker}: {e}")
+
+    # 계좌 잔고 복원
+    if acc and total_proceeds > 0:
+        try:
+            new_cash = float(acc["cash_available"]) + total_proceeds
+            await asyncio.to_thread(
+                supabase.table("paper_account")
+                .update({"cash_available": new_cash})
+                .eq("id", acc["id"])
+                .execute
+            )
+        except Exception as e:
+            print(f"⚠️ [Emergency] Cash update failed: {e}")
+
+    # _held_tickers에서 즉시 제거 — 다음 bar까지 기다리지 않고 경량 모니터 경로 차단
+    for t in closed_tickers:
+        _held_tickers.discard(t)
+
+    await webhook.send_alert(
+        title="🚨 [WATCHDOG] 긴급 청산 완료 — 자동매매 해제",
+        description=f"청산 종목: {', '.join(closed_tickers) or '없음'}\nSYSTEM_ARMED → False\n24시간 셧다운 모드 진입.",
+        color=0xFF0000,
+    )
+    print(f"🚨 [Emergency] Liquidated {len(closed_tickers)} positions. SYSTEM_ARMED=False.")
+
+    return {
+        "status": "success",
+        "closed": len(closed_tickers),
+        "tickers": closed_tickers,
+        "is_armed": False,
+    }
+
+
 @app.post("/api/broker/arm")
 async def toggle_arm_system(req: ArmRequest, api_key: str = Security(get_api_key)):
     """Toggles the global SYSTEM_ARMED state and persists to DB."""
@@ -1941,7 +2053,8 @@ class BacktestRequest(BaseModel):
 
 
 backtest_cache = TTLCache(maxsize=100, ttl=900)
-stats_cache: TTLCache = TTLCache(maxsize=1, ttl=300)  # 5분 캐시 (폴링 비용 절감)
+stats_cache: TTLCache = TTLCache(maxsize=2, ttl=300)  # "stats" + "recent_pnls" 두 키 공존
+_stats_cache_lock = threading.Lock()  # asyncio.to_thread 동시 쓰기 방지
 
 # 손실 없이 수익만 있을 때 profit_factor 상한 (무한대 회피)
 _MAX_PROFIT_FACTOR = 99.0
@@ -2039,9 +2152,8 @@ async def get_strategy_stats():
             else (_MAX_PROFIT_FACTOR if gross_profit > 0 else 0.0)
         )
 
-        stats_cache["recent_pnls"] = list(pnl_arr)[
-            -50:
-        ]  # 동적 켈리를 위해 최근 50개 저장
+        with _stats_cache_lock:
+            stats_cache["recent_pnls"] = list(pnl_arr)[-50:]  # 동적 켈리를 위해 최근 50개 저장
         # MDD: numpy 벡터화 (cumsum + running maximum)
         cumulative = np.cumsum(pnl_arr)
         running_max = np.maximum.accumulate(cumulative)
@@ -2075,7 +2187,8 @@ async def get_strategy_stats():
             "message": f"실거래 {total_trades}건 기준 통계",
             "badge": badge,
         }
-        stats_cache["stats"] = result
+        with _stats_cache_lock:
+            stats_cache["stats"] = result
         return result
 
     except Exception as e:
@@ -2319,9 +2432,9 @@ def calculate_position_sizing(
         optimal_kelly = max(0, kelly_f) * kelly_fraction
 
     # --- [Step 4] 최종 결합 및 제한 ---
-    # ATR 변동성 비중과 동적 켈리 중 가장 보수적인 값을 선택 (Anti-Martingale)
-    final_weight = min(vol_weight, optimal_kelly)
-    final_weight = min(final_weight, 1.0)
+    # ATR 변동성 비중과 동적 켈리 중 보수적인 값 선택 (Anti-Martingale)
+    # vol_weight: 고변동성 자산일수록 작아짐 → Kelly 단독 적용 시 과다 비중 방지
+    final_weight = min(vol_weight, optimal_kelly, 1.0)
 
     # RVOL 정보 추가 (포지션 사이징 참고용)
     rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns else 1.0
@@ -2352,18 +2465,27 @@ def calculate_dna_score(
     """
     score = 50.0
 
-    # RSI (±20): 과매도 = 강세, 과매수 = 약세
-    # 돌파 매매 고려: RVOL >= 3.0일 때는 과매수 패널티 면제(0점) 적용
+    # RSI (±20): 과매도 = 강세, 과매수 = 약세 — 구간 선형 보간으로 경계 불연속 제거
+    # RVOL >= 3.0 돌파 매매: 55~75 구간 과매수 패널티 면제 (RSI >= 75는 면제 미적용)
     if rsi < 30:
         score += 20
     elif rsi < 45:
-        score += 15
+        # 30→45: +20 → +15 선형 감쇠 (경계 연속)
+        score += 20 - (rsi - 30) / 15 * 5
     elif rsi < 55:
-        score += 0
+        # 45→55: +15 → 0 선형 감쇠
+        score += 15 * (55 - rsi) / 10
     elif rsi < 65:
-        score -= 0 if rvol >= 3.0 else 10
+        # 55→65: 0 → -10 선형 (RVOL >= 3.0 & RSI < 75 이면 면제)
+        penalty = (rsi - 55) / 10 * 10
+        score -= 0 if rvol >= 3.0 else penalty
+    elif rsi < 75:
+        # 65→75: -10 → -20 선형 (RVOL >= 3.0 이면 면제)
+        penalty = 10 + (rsi - 65) / 10 * 10
+        score -= 0 if rvol >= 3.0 else penalty
     else:
-        score -= 0 if rvol >= 3.0 else 20
+        # RSI >= 75: 극과매수 — RVOL 면제 없이 -20 고정
+        score -= 20
 
     # MACD (±20): 골든/데드크로스 최우선, 방향성 차순 (기울기 판정)
     # CLAUDE.md 명세: "직전 봉은 MACD ≤ Signal" → prev <= 0 (등호 포함)
@@ -2455,8 +2577,10 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     # 동적 켈리 비중 주입
     dynamic_kelly_weight = None
     recent_pnls = None
-    if "recent_pnls" in stats_cache and len(stats_cache["recent_pnls"]) > 0:
-        recent_pnls = stats_cache["recent_pnls"]
+    # TTLCache는 thread-safe하지 않으므로 in + [] 두 번 접근(TOCTOU) 대신 .get() 단일 호출
+    _cached_pnls = stats_cache.get("recent_pnls")
+    if _cached_pnls:
+        recent_pnls = _cached_pnls
     elif supabase:
         try:
             # 최근 50개 거래 내역의 pnl_pct 직접 DB 조회
@@ -2471,7 +2595,8 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
                 recent_pnls = [
                     float(row.get("pnl_pct") or 0.0) for row in reversed(res.data)
                 ]
-                stats_cache["recent_pnls"] = recent_pnls
+                with _stats_cache_lock:
+                    stats_cache["recent_pnls"] = recent_pnls
         except Exception as e:
             print(f"⚠️ [Dynamic Kelly DB Fetch Error] {e}")
 
@@ -2831,6 +2956,8 @@ async def run_penny_scan_internal(
                 high=df["High"], low=df["Low"], close=df["Close"], window=14
             )
             df["ADX"] = adx_ind.adx()
+            df["+DI"] = adx_ind.adx_pos()
+            df["-DI"] = adx_ind.adx_neg()
 
             # RVOL (30일 median 대비 현재, self-dilution 방지를 위해 shift(1))
             df["Avg_Vol"] = (
@@ -2880,7 +3007,22 @@ async def run_penny_scan_internal(
 
             # DNA Score
             dna_score = calculate_dna_score(
-                rsi, macd_diff, macd_diff_prev, adx, rvol, is_extended
+                rsi=rsi,
+                macd_diff=macd_diff,
+                macd_diff_prev=macd_diff_prev,
+                adx=adx,
+                di_plus=(
+                    float(latest["+DI"])
+                    if "+DI" in latest.index and not pd.isna(latest["+DI"])
+                    else 0.0
+                ),
+                di_minus=(
+                    float(latest["-DI"])
+                    if "-DI" in latest.index and not pd.isna(latest["-DI"])
+                    else 0.0
+                ),
+                rvol=rvol,
+                is_extended=is_extended,
             )
 
             # Signal / Strength (DNA 점수 기준으로 일원화)
@@ -3162,7 +3304,7 @@ async def on_minute_bar_closed(bar):
                 ai_report="[EOD] 장 마감 강제 청산" if is_eod else "",
                 is_armed=SYSTEM_ARMED,
                 dna_score=0.0,
-                kelly_weight=0.0,
+                recommended_weight=0.0,
             )
             # 포지션 청산 후 셋에서 제거 (process_signal 내부가 DB에서 삭제)
             if supabase:
@@ -3276,8 +3418,7 @@ async def on_minute_bar_closed(bar):
                         ai_report=payload.get("ai_report", ""),
                         is_armed=SYSTEM_ARMED,
                         dna_score=dna_val,
-                        kelly_weight=float(payload.get("recommended_weight", 0.0)),
-                        vol_weight=float(payload.get("vol_weight", 0.0)) * 100,
+                        recommended_weight=float(payload.get("recommended_weight", 0.0)),
                     )
                     # [Guide-2] 매수 성공 시 _held_tickers에 등록 (다음 틱부터 경량 경로)
                     if (
@@ -3608,23 +3749,58 @@ async def system_heartbeat():
             print(f"⚠️ Heartbeat error: {e}")
 
 
+_WATCHDOG_PID_FILE = os.path.join(os.path.dirname(__file__), ".watchdog.pid")
+
+
+def _spawn_watchdog_if_not_running() -> None:
+    """PID 파일로 중복 spawn을 방지하며 watchdog 프로세스를 기동한다.
+    --reload 환경에서 파일 저장마다 watchdog이 누적되는 문제를 방지한다."""
+    watchdog_path = os.path.join(os.path.dirname(__file__), "watchdog.py")
+
+    # 기존 PID 파일이 있으면 프로세스 생존 여부 확인
+    if os.path.exists(_WATCHDOG_PID_FILE):
+        try:
+            with open(_WATCHDOG_PID_FILE) as f:
+                existing_pid = int(f.read().strip())
+            # os.kill(pid, 0) → 프로세스 존재하면 통과, 없으면 ProcessLookupError
+            os.kill(existing_pid, 0)
+            # PID 재사용 방지: 명령줄에 watchdog.py가 포함되는지 확인
+            # os.kill(pid, 0)만으로는 OS가 PID를 다른 프로세스에 재사용한 경우를 구분 못함
+            check = subprocess.run(
+                ["ps", "-p", str(existing_pid), "-o", "args="],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            if check.returncode != 0 or "watchdog.py" not in check.stdout:
+                raise OSError(f"PID {existing_pid} recycled to unrelated process — respawning watchdog")
+            print(f"🐕 [Startup] Watchdog already running (PID {existing_pid}). Skipping spawn.")
+            return
+        except (ValueError, OSError):
+            pass  # 스테일 PID 또는 재사용 PID → 재기동
+        except subprocess.TimeoutExpired:
+            pass  # ps 타임아웃 → 보수적으로 재기동
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, watchdog_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        with open(_WATCHDOG_PID_FILE, "w") as f:
+            f.write(str(proc.pid))
+        print(f"🐕 [Startup] Watchdog daemon started (PID {proc.pid}).")
+    except Exception as e:
+        print(f"⚠️ [Startup] Failed to start Watchdog: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     # ... (supabase initialization)
     print("🎬 [Startup] MuzeBIZ Realtime Platform initializing...")
 
-    # 독립 Watchdog 프로세스 자동 가동 (SPOF 방지)
-    try:
-        import subprocess
-        import sys
-
-        watchdog_path = os.path.join(os.path.dirname(__file__), "watchdog.py")
-        subprocess.Popen([sys.executable, watchdog_path])
-        print(
-            "🐕 [Startup] Watchdog daemon started successfully as a separate process."
-        )
-    except Exception as e:
-        print(f"⚠️ [Startup] Failed to start Watchdog: {e}")
+    # 독립 Watchdog 프로세스 자동 가동 (SPOF 방지, 중복 spawn 방지)
+    _spawn_watchdog_if_not_running()
 
     # 백그라운드 태스크로 실행
     asyncio.create_task(run_startup_sequence())

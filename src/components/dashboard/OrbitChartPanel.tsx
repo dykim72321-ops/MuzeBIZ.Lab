@@ -42,12 +42,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   const price = payload.find((p: any) => p.dataKey === 'price')?.value;
   const stop = payload.find((p: any) => p.dataKey === 'trailingStop')?.value;
   return (
-    <div className="bg-[#0d1527]/90 border border-white/10 backdrop-blur-xl rounded-xl p-3 text-xs font-bold shadow-2xl text-white font-mono">
-      <div className="text-slate-400 mb-1.5 tracking-widest">{label}</div>
-      {price && <div className="text-slate-300">Price: <span className="text-indigo-400 font-semibold">${price.toFixed(2)}</span></div>}
-      {stop && <div className="text-rose-400 mt-0.5 font-semibold">Stop: ${stop.toFixed(2)}</div>}
+    <div className="bg-white/95 border border-slate-200/80 backdrop-blur-xl rounded-xl p-3 text-xs font-bold shadow-2xl text-slate-800 font-mono">
+      <div className="text-slate-500 mb-1.5 tracking-widest">{label}</div>
+      {price && <div className="text-slate-700">Price: <span className="text-indigo-655 font-semibold">${price.toFixed(2)}</span></div>}
+      {stop && <div className="text-rose-600 mt-0.5 font-semibold">Stop: ${stop.toFixed(2)}</div>}
       {price && stop && (
-        <div className={clsx('mt-1 uppercase tracking-widest font-black', price > stop ? 'text-emerald-450' : 'text-rose-450')}>
+        <div className={clsx('mt-1 uppercase tracking-widest font-black', price > stop ? 'text-emerald-600' : 'text-rose-600')}>
           {price > stop ? '▲ Above Stop' : '▼ SELL SIGNAL'}
         </div>
       )}
@@ -141,71 +141,71 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 16 }}
-      className="dark-glass-panel border border-white/10 rounded-[2rem] overflow-hidden shadow-2xl mt-3"
+      className="dark-glass-panel border border-slate-200/60 rounded-[2rem] overflow-hidden shadow-2xl mt-3"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-white/10">
+      <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
         <div className="flex items-center gap-3">
-          <Fingerprint className="w-5 h-5 text-indigo-400 animate-pulse" />
+          <Fingerprint className="w-5 h-5 text-indigo-600 animate-pulse" />
           <div>
-            <span className="text-base font-black text-white uppercase tracking-widest font-mono">{item.ticker}</span>
-            <span className="block text-xs font-bold text-slate-400 uppercase tracking-[0.3em] mt-0.5 font-mono">
+            <span className="text-base font-bold text-slate-900 uppercase tracking-widest font-mono">{item.ticker}</span>
+            <span className="block text-xs text-slate-500 uppercase tracking-[0.3em] mt-0.5 font-mono">
               추적 시작: {new Date(item.addedAt).toLocaleDateString('ko-KR')}
             </span>
           </div>
         </div>
         <button
           onClick={onClose}
-          className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 transition-all cursor-pointer"
+          className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-800 border border-slate-200/60 transition-all cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
       {/* Stat Strip */}
-      <div className="grid grid-cols-3 gap-0 border-b border-white/10 divide-x divide-white/10">
+      <div className="grid grid-cols-3 gap-0 border-b border-slate-100 divide-x divide-slate-100 bg-slate-50/50">
         {/* P&L */}
         <div className="px-5 py-4">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1 font-mono">수익률 (진입 대비)</span>
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block mb-1 font-mono">수익률 (진입 대비)</span>
           {pnlPct !== null ? (
-            <div className={clsx('text-2xl font-black font-mono', parseFloat(pnlPct) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+            <div className={clsx('text-2xl font-bold font-mono', parseFloat(pnlPct) >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
               {parseFloat(pnlPct) >= 0 ? '+' : ''}{pnlPct}%
             </div>
           ) : (
-            <div className="text-slate-400 text-sm font-bold font-mono">--</div>
+            <div className="text-slate-500 text-sm font-semibold font-mono">--</div>
           )}
         </div>
         {/* 매도 시그널 */}
         <div className="px-5 py-4">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1 font-mono">Chandelier Exit</span>
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block mb-1 font-mono">Chandelier Exit</span>
           {loading ? (
-            <div className="text-slate-400 text-sm font-bold font-mono">--</div>
+            <div className="text-slate-500 text-sm font-semibold font-mono">--</div>
           ) : isSellSignal ? (
-            <div className="flex items-center gap-1.5 text-rose-400">
+            <div className="flex items-center gap-1.5 text-rose-600">
               <AlertTriangle className="w-4 h-4" />
-              <span className="text-base font-black uppercase tracking-widest font-mono">SELL</span>
+              <span className="text-base font-bold uppercase tracking-widest font-mono">SELL</span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-emerald-400">
+            <div className="flex items-center gap-1.5 text-emerald-600">
               <ShieldAlert className="w-4 h-4" />
-              <span className="text-base font-black uppercase tracking-widest font-mono">HOLD</span>
+              <span className="text-base font-bold uppercase tracking-widest font-mono">HOLD</span>
             </div>
           )}
         </div>
         {/* DNA 일치률 */}
         <div className="px-5 py-4 font-mono">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block mb-1">DNA 일치률</span>
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest block mb-1">DNA 일치률</span>
           <div className={clsx(
-            'text-2xl font-black',
-            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-400' :
-            dnaStatus === 'WEAKENING'  ? 'text-amber-400' : 'text-rose-450'
+            'text-2xl font-bold',
+            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-650' :
+            dnaStatus === 'WEAKENING'  ? 'text-amber-600' : 'text-rose-600'
           )}>
             {dnaMatchRate}%
           </div>
           <span className={clsx(
-            'text-xs font-bold uppercase tracking-widest block mt-0.5',
-            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-400/80' :
-            dnaStatus === 'WEAKENING'  ? 'text-amber-400/80' : 'text-rose-450/80'
+            'text-[10px] font-semibold uppercase tracking-widest block mt-0.5',
+            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-600' :
+            dnaStatus === 'WEAKENING'  ? 'text-amber-600' : 'text-rose-600'
           )}>
             {dnaStatus === 'ALPHA_HELD' ? 'Alpha Maintained' :
              dnaStatus === 'WEAKENING'  ? 'Signal Weakening' : 'Signal Lost'}
@@ -229,35 +229,35 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-4 mb-4 text-xs font-bold uppercase tracking-widest font-mono">
+            <div className="flex items-center gap-4 mb-4 text-[10px] font-semibold uppercase tracking-widest font-mono">
               <div className="flex items-center gap-1.5">
-                <div className="w-3 h-0.5 bg-indigo-500 rounded" />
-                <span className="text-slate-400">Price</span>
+                <div className="w-3 h-0.5 bg-indigo-600 rounded" />
+                <span className="text-slate-500">Price</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="w-3 h-0.5 bg-rose-500 rounded border-dashed" style={{ borderTop: '2px dashed' }} />
-                <span className="text-slate-400">Chandelier Stop</span>
+                <span className="text-slate-500">Chandelier Stop</span>
               </div>
               {entryPrice && (
                 <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-0.5 bg-slate-700 rounded" />
-                  <span className="text-slate-450">Entry ${Number(entryPrice).toFixed(2)}</span>
+                  <div className="w-3 h-0.5 bg-slate-400 rounded" />
+                  <span className="text-slate-500">Entry ${Number(entryPrice).toFixed(2)}</span>
                 </div>
               )}
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 11, fill: '#94a3b8', fontWeight: 700 }}
+                  tick={{ fontSize: 10, fill: '#475569', fontWeight: 600 }}
                   axisLine={false}
                   tickLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
                   domain={yDomain}
-                  tick={{ fontSize: 11, fill: '#94a3b8', fontWeight: 700 }}
+                  tick={{ fontSize: 10, fill: '#475569', fontWeight: 600 }}
                   axisLine={false}
                   tickLine={false}
                   width={52}
@@ -267,7 +267,7 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
                 {entryPrice && (
                   <ReferenceLine
                     y={entryPrice}
-                    stroke="#475569"
+                    stroke="#94a3b8"
                     strokeDasharray="4 4"
                     strokeWidth={1}
                   />
@@ -275,24 +275,24 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
                 <Area
                   type="monotone"
                   dataKey="price"
-                  stroke="#6366f1"
+                  stroke="#4f46e5"
                   strokeWidth={2}
                   fill={`url(#priceGrad-${item.ticker})`}
                   dot={false}
-                  activeDot={{ r: 4, fill: '#6366f1' }}
+                  activeDot={{ r: 4, fill: '#4f46e5' }}
                 />
                 <Line
                   type="monotone"
                   dataKey="trailingStop"
-                  stroke="#ef4444"
+                  stroke="#e11d48"
                   strokeWidth={1.5}
                   strokeDasharray="5 3"
                   dot={false}
                 />
                 <defs>
                   <linearGradient id={`priceGrad-${item.ticker}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
                   </linearGradient>
                 </defs>
               </ComposedChart>
@@ -304,27 +304,27 @@ export const OrbitChartPanel = ({ item, currentDna, onClose }: OrbitChartPanelPr
       {/* DNA 일치률 바 */}
       <div className="px-6 pb-6 font-mono">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
             DNA 일치률 ({initialDna} → {currentDna})
           </span>
           <span className={clsx(
             'text-xs font-bold',
-            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-400' :
-            dnaStatus === 'WEAKENING'  ? 'text-amber-400' : 'text-rose-450'
+            dnaStatus === 'ALPHA_HELD' ? 'text-indigo-650' :
+            dnaStatus === 'WEAKENING'  ? 'text-amber-600' : 'text-rose-600'
           )}>
             {dnaMatchRate}%
           </span>
         </div>
-        <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
+        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${Math.min(dnaMatchRate, 100)}%` }}
             transition={{ duration: 1, ease: 'easeOut' }}
             className={clsx(
               'h-full rounded-full',
-              dnaStatus === 'ALPHA_HELD' ? 'bg-indigo-500' :
-              dnaStatus === 'WEAKENING'  ? 'bg-amber-450' :
-              'bg-rose-450'
+              dnaStatus === 'ALPHA_HELD' ? 'bg-indigo-600' :
+              dnaStatus === 'WEAKENING'  ? 'bg-amber-500' :
+              'bg-rose-600'
             )}
           />
         </div>

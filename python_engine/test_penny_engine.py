@@ -70,12 +70,13 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
             rsi=30,
             is_armed=True,
             dna_score=85.0,
+            recommended_weight=15.0,
         )
 
-        # Verify initial TS is -15% (0.5075 * 0.85 = 0.431375)
+        # Verify initial TS is -15% (0.515 * 0.85 = 0.43775)
         insert_args = self.mock_table_positions.insert.call_args[0][0]
         self.assertEqual(insert_args["ticker"], "SNDL")
-        self.assertAlmostEqual(insert_args["ts_threshold"], 0.431375)
+        self.assertAlmostEqual(insert_args["ts_threshold"], 0.43775)
         self.assertFalse(insert_args["is_scaled_out"])
 
         # 2. Regular stock buy (price = $2.00)
@@ -88,6 +89,7 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
             rsi=30,
             is_armed=True,
             dna_score=85.0,
+            recommended_weight=15.0,
         )
 
         # Verify initial TS is -10% (2.01 * 0.90 = 1.809)
