@@ -1657,7 +1657,9 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
         description=f"청산 종목: {', '.join(closed_tickers) or '없음'}\nSYSTEM_ARMED → False\n24시간 셧다운 모드 진입.",
         color=0xFF0000,
     )
-    print(f"🚨 [Emergency] Liquidated {len(closed_tickers)} positions. SYSTEM_ARMED=False.")
+    print(
+        f"🚨 [Emergency] Liquidated {len(closed_tickers)} positions. SYSTEM_ARMED=False."
+    )
 
     return {
         "status": "success",
@@ -2053,7 +2055,9 @@ class BacktestRequest(BaseModel):
 
 
 backtest_cache = TTLCache(maxsize=100, ttl=900)
-stats_cache: TTLCache = TTLCache(maxsize=2, ttl=300)  # "stats" + "recent_pnls" 두 키 공존
+stats_cache: TTLCache = TTLCache(
+    maxsize=2, ttl=300
+)  # "stats" + "recent_pnls" 두 키 공존
 _stats_cache_lock = threading.Lock()  # asyncio.to_thread 동시 쓰기 방지
 
 # 손실 없이 수익만 있을 때 profit_factor 상한 (무한대 회피)
@@ -2153,7 +2157,9 @@ async def get_strategy_stats():
         )
 
         with _stats_cache_lock:
-            stats_cache["recent_pnls"] = list(pnl_arr)[-50:]  # 동적 켈리를 위해 최근 50개 저장
+            stats_cache["recent_pnls"] = list(pnl_arr)[
+                -50:
+            ]  # 동적 켈리를 위해 최근 50개 저장
         # MDD: numpy 벡터화 (cumsum + running maximum)
         cumulative = np.cumsum(pnl_arr)
         running_max = np.maximum.accumulate(cumulative)
@@ -3418,7 +3424,9 @@ async def on_minute_bar_closed(bar):
                         ai_report=payload.get("ai_report", ""),
                         is_armed=SYSTEM_ARMED,
                         dna_score=dna_val,
-                        recommended_weight=float(payload.get("recommended_weight", 0.0)),
+                        recommended_weight=float(
+                            payload.get("recommended_weight", 0.0)
+                        ),
                     )
                     # [Guide-2] 매수 성공 시 _held_tickers에 등록 (다음 틱부터 경량 경로)
                     if (
@@ -3773,8 +3781,12 @@ def _spawn_watchdog_if_not_running() -> None:
                 timeout=3,
             )
             if check.returncode != 0 or "watchdog.py" not in check.stdout:
-                raise OSError(f"PID {existing_pid} recycled to unrelated process — respawning watchdog")
-            print(f"🐕 [Startup] Watchdog already running (PID {existing_pid}). Skipping spawn.")
+                raise OSError(
+                    f"PID {existing_pid} recycled to unrelated process — respawning watchdog"
+                )
+            print(
+                f"🐕 [Startup] Watchdog already running (PID {existing_pid}). Skipping spawn."
+            )
             return
         except (ValueError, OSError):
             pass  # 스테일 PID 또는 재사용 PID → 재기동

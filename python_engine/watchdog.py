@@ -53,9 +53,7 @@ def cancel_all_orders():
         "APCA-API-KEY-ID": ALPACA_API_KEY,
         "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
     }
-    resp = requests.delete(
-        f"{ALPACA_BASE_URL}/v2/orders", headers=headers, timeout=15
-    )
+    resp = requests.delete(f"{ALPACA_BASE_URL}/v2/orders", headers=headers, timeout=15)
     resp.raise_for_status()
     return resp.json()
 
@@ -63,7 +61,10 @@ def cancel_all_orders():
 def sync_paper_engine_state():
     """Alpaca 청산 후 FastAPI 엔진의 DB 상태(paper_positions, SYSTEM_ARMED)를 동기화."""
     if not ADMIN_SECRET_KEY:
-        print("⚠️ [Watchdog] ADMIN_SECRET_KEY 미설정 — paper 포지션 DB 동기화 건너뜀", flush=True)
+        print(
+            "⚠️ [Watchdog] ADMIN_SECRET_KEY 미설정 — paper 포지션 DB 동기화 건너뜀",
+            flush=True,
+        )
         return
     try:
         resp = requests.post(
@@ -136,6 +137,9 @@ def run_watchdog():
 
 if __name__ == "__main__":
     if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
-        print("❌ Alpaca API 키가 설정되지 않아 Watchdog을 실행할 수 없습니다.", flush=True)
+        print(
+            "❌ Alpaca API 키가 설정되지 않아 Watchdog을 실행할 수 없습니다.",
+            flush=True,
+        )
     else:
         run_watchdog()

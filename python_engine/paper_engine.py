@@ -274,10 +274,14 @@ class PaperTradingManager:
             # recommended_weight: calculate_position_sizing()에서 min(vol, kelly)로
             # 이미 결합된 비중(%). 0이면 기본 KELLY_FRACTION(15%) 사용
             if recommended_weight <= 0:
-                print(f"⛔ [{ticker}] Kelly 회로차단기 작동 (recommended_weight=0) — 진입 차단")
+                print(
+                    f"⛔ [{ticker}] Kelly 회로차단기 작동 (recommended_weight=0) — 진입 차단"
+                )
                 return
             effective_fraction = recommended_weight / 100.0
-            effective_fraction = min(effective_fraction, 0.25)  # 단일 종목 최대 25% 제한
+            effective_fraction = min(
+                effective_fraction, 0.25
+            )  # 단일 종목 최대 25% 제한
             buy_budget = min(
                 acc["cash_available"] * effective_fraction,
                 MAX_BUY_BUDGET,
@@ -422,7 +426,9 @@ class PaperTradingManager:
                 ts_threshold = max(ts_threshold, new_ts)
             else:
                 # Scale-Out 후 일반 종목: 본절+1% 하한을 유지하며 최고가 추종 (-10% TS)
-                new_ts = max(entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT)
+                new_ts = max(
+                    entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
+                )
                 ts_threshold = max(ts_threshold, new_ts)
 
             # B. SCALE_OUT 체크
@@ -435,7 +441,12 @@ class PaperTradingManager:
             else:
                 scale_trigger = rsi > 60
             sell_slip = SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL
-            if scale_trigger and not is_scaled_out and is_armed and (price * (1.0 - sell_slip) > entry_price):
+            if (
+                scale_trigger
+                and not is_scaled_out
+                and is_armed
+                and (price * (1.0 - sell_slip) > entry_price)
+            ):
                 sell_units = units * SCALE_OUT_RATIO
                 # [Guide-3] 매도 슬리피지 적용
                 fill_sell_price = _apply_slippage(
@@ -457,7 +468,9 @@ class PaperTradingManager:
                 new_ts_val = (
                     max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
                     if is_penny
-                    else max(entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT)
+                    else max(
+                        entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
+                    )
                 )
                 # Scale-Out 봉 진입가가 낮을 때 SCALE_OUT_TS_PCT(+1%)가 현재가를 초과할 수 있음
                 # → TS가 현재가 위에 세팅되면 다음 틱 즉시 강제 청산되므로 클램프
