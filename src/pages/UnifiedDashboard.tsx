@@ -156,9 +156,51 @@ export const UnifiedDashboard = () => {
       if (scanStatus) setPennyScanStatus(scanStatus);
 
       // Fetch current prices of watchlist items to identify penny stocks accurately
-      const wlStocks = wl.length > 0 ? await fetchMultipleStocksOptimized(wl.map(i => i.ticker)) : [];
+      // 1. Create a unified map
+      const unifiedMap = new Map<string, DashboardWatchlistItem>();
 
-      const normalizedWatchlist = wl.map(item => {
+      wl.forEach(item => {
+        unifiedMap.set(item.ticker, { ...item } as DashboardWatchlistItem);
+      });
+
+      pp.forEach((pos: any) => {
+        if (unifiedMap.has(pos.ticker)) {
+          const existing = unifiedMap.get(pos.ticker)!;
+          existing.status = 'HOLDING';
+          existing.buyPrice = existing.buyPrice || Number(pos.entry_price);
+        } else {
+          unifiedMap.set(pos.ticker, {
+            ticker: pos.ticker,
+            status: 'HOLDING',
+            buyPrice: Number(pos.entry_price),
+            addedAt: pos.created_at || new Date().toISOString(),
+          } as DashboardWatchlistItem);
+        }
+      });
+
+      ph.forEach((hist: any) => {
+        if (!pp.some((p: any) => p.ticker === hist.ticker)) {
+          if (unifiedMap.has(hist.ticker)) {
+            const existing = unifiedMap.get(hist.ticker)!;
+            // If it's not holding anymore, but we have history, it's EXITED
+            if (existing.status !== 'WATCHING') {
+              existing.status = 'EXITED';
+            }
+          } else {
+            unifiedMap.set(hist.ticker, {
+              ticker: hist.ticker,
+              status: 'EXITED',
+              addedAt: hist.created_at || new Date().toISOString(),
+            } as DashboardWatchlistItem);
+          }
+        }
+      });
+
+      const unifiedWatchlist = Array.from(unifiedMap.values());
+
+      const wlStocks = unifiedWatchlist.length > 0 ? await fetchMultipleStocksOptimized(unifiedWatchlist.map(i => i.ticker)) : [];
+
+      const normalizedWatchlist = unifiedWatchlist.map(item => {
         const stockInfo = wlStocks.find(s => s.ticker === item.ticker);
         const price = stockInfo?.price ?? item.buyPrice ?? 0;
         return {

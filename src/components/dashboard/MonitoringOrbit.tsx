@@ -38,9 +38,18 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
   }, [watchlistItems, searchTerm]);
 
   const activeItems = useMemo(() => {
-    return filteredItems.filter(item =>
-      item.status === 'HOLDING' || item.status === 'SCALE_OUT'
-    );
+    const statusOrder: Record<string, number> = {
+      'HOLDING': 1,
+      'SCALE_OUT': 2,
+      'WATCHING': 3,
+      'EXITED': 4
+    };
+    
+    return [...filteredItems].sort((a, b) => {
+      const orderA = statusOrder[a.status] || 99;
+      const orderB = statusOrder[b.status] || 99;
+      return orderA - orderB;
+    });
   }, [filteredItems]);
 
   return (
