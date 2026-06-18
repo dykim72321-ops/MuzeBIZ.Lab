@@ -35,7 +35,7 @@ import {
 // Hooks & Services
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { useStrategyStats } from '../hooks/useStrategyStats';
-import { getWatchlist, addToWatchlist, removeFromWatchlist, type WatchlistItem } from '../services/watchlistService';
+import { getWatchlist, addToWatchlist, removeFromWatchlist, cleanupOldWatchlistItems, type WatchlistItem } from '../services/watchlistService';
 import { fetchMultipleStocksOptimized } from '../services/stockService';
 import { processSignal } from '../utils/signalProcessor';
 import { supabase as supabaseClient } from '../lib/supabase';
@@ -134,6 +134,9 @@ export const UnifiedDashboard = () => {
   // ── Load All Data ─────────────────────────────────────────────────────
   const loadDashboardData = useCallback(async () => {
     try {
+      // 1. Run cleanup for old WATCHING items (non-blocking)
+      cleanupOldWatchlistItems(7).catch(console.error);
+
       const [wl, pp, ph, pa, alpaca, discoveryResult, scanStatus] = await Promise.all([
         getWatchlist(),
         fetchPaperPositions(),
@@ -424,7 +427,7 @@ export const UnifiedDashboard = () => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-white p-4 border border-slate-200 leading-none text-slate-800">
-          <p className="text-xs font-bold text-violet-500 uppercase tracking-wider mb-2">{payload[0].payload.name}</p>
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{payload[0].payload.name}</p>
           <p className="text-lg font-black text-slate-900 tabular-nums">
             ${Number(payload[0].value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
@@ -441,8 +444,8 @@ export const UnifiedDashboard = () => {
            style={{ backgroundImage: 'linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
 
       {loading && (
-        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-white px-4 py-2.5 border-l-2 border-violet-600 animate-in fade-in slide-in-from-top-4">
-          <div className="w-2 h-2 bg-violet-600 rounded-full animate-pulse shadow-[0_0_8px_rgba(37,99,235,0.6)]" />
+        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-white px-4 py-2.5 border-l-2 border-slate-600 animate-in fade-in slide-in-from-top-4">
+          <div className="w-2 h-2 bg-slate-700 rounded-full animate-pulse shadow-[0_0_8px_rgba(71,85,105,0.6)]" />
           <span className="text-xs font-bold text-slate-700 uppercase tracking-[0.2em] font-mono">Synchronizing Command Data...</span>
         </div>
       )}
@@ -453,11 +456,11 @@ export const UnifiedDashboard = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200 pb-6">
           <div>
             <div className="flex items-center gap-3 mb-1.5">
-              <span className="w-1.5 h-4 bg-violet-600 rounded-full shadow-[0_0_8px_rgba(37,99,235,0.4)]" />
-              <span className="text-[10px] font-mono font-semibold text-violet-500 uppercase tracking-widest">Integrated Intelligence Dashboard</span>
+              <span className="w-1.5 h-4 bg-slate-700 rounded-full shadow-[0_0_8px_rgba(71,85,105,0.4)]" />
+              <span className="text-[10px] font-mono font-semibold text-slate-500 uppercase tracking-widest">Integrated Intelligence Dashboard</span>
             </div>
             <h1 className="text-[25px] font-extrabold text-slate-900 flex items-center gap-3 tracking-tight">
-              <Zap className="w-8 h-8 text-violet-600" />
+              <Zap className="w-8 h-8 text-indigo-600 drop-shadow-[0_0_12px_rgba(79,70,229,0.6)] stroke-[2.5]" />
               통합 자산 지휘소
             </h1>
             <div className="flex flex-wrap items-center gap-2 mt-1.5">
@@ -465,7 +468,7 @@ export const UnifiedDashboard = () => {
                 "w-2 h-2 rounded-full",
                 isMarketOpen ? "bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-slate-400"
               )} />
-              <span className="text-[10px] font-mono font-semibold text-violet-600 uppercase tracking-widest">
+              <span className="text-[10px] font-mono font-semibold text-slate-600 uppercase tracking-widest">
                 US Market {isMarketOpen ? 'Open' : 'Closed'}
               </span>
               <span className="text-slate-300">|</span>
@@ -518,7 +521,7 @@ export const UnifiedDashboard = () => {
               title="퀀트 전략 파라미터 설정"
               className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors text-xs font-extrabold uppercase tracking-wider cursor-pointer font-sans"
             >
-              <ShieldCheck className="w-4 h-4 text-violet-600" />
+              <ShieldCheck className="w-4 h-4 text-indigo-600 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)] stroke-[2.5]" />
               설정
             </button>
           </div>
@@ -527,7 +530,7 @@ export const UnifiedDashboard = () => {
         {/* 💡 SYSTEM STATUS INFO BAR */}
         <div className="bg-slate-50 py-5 px-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
           <div className="flex items-center gap-2.5 text-slate-900">
-            <span className="w-2.5 h-2.5 rounded-full bg-violet-600 animate-pulse shadow-[0_0_8px_rgba(37,99,235,0.5)] shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full bg-slate-700 animate-pulse shadow-[0_0_8px_rgba(71,85,105,0.5)] shrink-0" />
             <span className="text-xs font-bold uppercase tracking-widest text-slate-900 border-b border-slate-900 pb-0.5 font-sans">시스템 가이드</span>
             <span className="text-slate-700 text-[13px] font-semibold font-sans">
               {isArmed 
@@ -572,15 +575,15 @@ export const UnifiedDashboard = () => {
                     ? `$${(pennyAccount.total_assets ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : '$100,000.00'}
                 </span>
-                <span className="text-xs font-semibold text-violet-600 leading-none block pt-2 font-sans">
+                <span className="text-xs font-semibold text-slate-600 leading-none block pt-2 font-sans">
                   {alpacaAccount ? 'Alpaca 실계좌 Equity' : '현금 + 포지션 평가액'}
                 </span>
               </div>
-              <div className="text-violet-500 shrink-0">
-                <BarChart3 className="w-4 h-4" />
+              <div className="text-indigo-600 shrink-0 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)]">
+                <BarChart3 className="w-4 h-4 stroke-[2.5]" />
               </div>
             </div>
-            <div className="mt-4 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-violet-600 z-10">
+            <div className="mt-4 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-slate-600 z-10">
               <span>SYS_STATUS: ONLINE</span>
               <span>LVL: OPTIMAL</span>
             </div>
@@ -598,15 +601,15 @@ export const UnifiedDashboard = () => {
                     ? `$${(pennyAccount.cash_available ?? 100000.0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : '$100,000.00'}
                 </span>
-                <span className="text-xs font-semibold text-violet-600 leading-none block pt-2 font-sans">
+                <span className="text-xs font-semibold text-slate-600 leading-none block pt-2 font-sans">
                   {alpacaAccount ? 'Alpaca Buying Power' : '가상 매수 가능 예치금'}
                 </span>
               </div>
-              <div className="text-violet-500 shrink-0">
-                <Coins className="w-4 h-4" />
+              <div className="text-amber-500 shrink-0 drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]">
+                <Coins className="w-4 h-4 stroke-[2.5]" />
               </div>
             </div>
-            <div className="mt-4 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-violet-600 font-mono z-10">
+            <div className="mt-4 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-600 font-mono z-10">
               <span>BUYING_POWER: 4.0X</span>
               <span>AVAIL_CAP</span>
             </div>
@@ -626,7 +629,7 @@ export const UnifiedDashboard = () => {
                 )}>
                   {totalPnl >= 0 ? '+' : ''}${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
-                <span className="text-xs font-semibold text-violet-600 leading-none block pt-2 font-sans">
+                <span className="text-xs font-semibold text-slate-600 leading-none block pt-2 font-sans">
                   현재 보유 종목의 미실현 손익
                 </span>
               </div>
@@ -637,7 +640,7 @@ export const UnifiedDashboard = () => {
                 {totalPnl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
               </div>
             </div>
-            <div className="mt-4 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-violet-600 font-mono z-10">
+            <div className="mt-4 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-600 font-mono z-10">
               <span>ACTIVE_TRADES: {pennyPositions.length}</span>
               <span>LIMIT_GUARD: SAFE</span>
             </div>
@@ -674,11 +677,11 @@ export const UnifiedDashboard = () => {
                   </svg>
                   <div className="absolute bottom-1 text-center font-mono leading-none">
                     <span className="text-xl font-black text-slate-900">{winRateVal.toFixed(1)}%</span>
-                    <span className="text-[9px] font-mono text-violet-600 font-bold block mt-0.5">WIN RATIO</span>
+                    <span className="text-[9px] font-mono text-slate-600 font-bold block mt-0.5">WIN RATIO</span>
                   </div>
                 </div>
                 
-                <p className="text-xs font-semibold text-violet-600 text-center leading-normal border-t border-slate-100 pt-2 w-full z-10 font-sans">
+                <p className="text-xs font-semibold text-slate-600 text-center leading-normal border-t border-slate-100 pt-2 w-full z-10 font-sans">
                   {statsLoading ? '연산 중...' : `최근 30일 승률 변동성 보합`}
                 </p>
               </div>
@@ -720,7 +723,7 @@ export const UnifiedDashboard = () => {
                   </svg>
                   <div className="absolute bottom-1 text-center font-mono leading-none">
                     <span className="text-xl font-black text-slate-900">{pct.toFixed(1)}%</span>
-                    <span className="text-xs font-bold text-violet-600 block mt-0.5 font-sans">{label}</span>
+                    <span className="text-xs font-bold text-slate-600 block mt-0.5 font-sans">{label}</span>
                   </div>
                 </div>
                 
@@ -748,9 +751,9 @@ export const UnifiedDashboard = () => {
                   <h2 className="text-[15px] font-extrabold text-slate-900 font-sans">포트폴리오 자산 성장 및 누적 손익 곡선</h2>
                   <p className="text-[13px] font-semibold text-slate-650 mt-1 leading-relaxed font-sans">실시간 청산 완료된 거래 내역에 기반한 가상 자산의 누적 성장 흐름을 시각화합니다.</p>
                 </div>
-                <div className="flex items-center gap-4 text-xs font-semibold text-violet-600 font-sans">
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-violet-500" /> 가상 자산 평가액</span>
-                  <span className="text-violet-500">|</span>
+                <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 font-sans">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-500" /> 가상 자산 평가액</span>
+                  <span className="text-slate-500">|</span>
                   <span>최종 갱신: <span className="font-mono text-[11px]">{lastFetchedTime}</span></span>
                 </div>
               </div>
@@ -758,9 +761,9 @@ export const UnifiedDashboard = () => {
               <div className="h-72 w-full">
                 {chartData.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center gap-3 border border-dashed border-slate-200">
-                    <BarChart3 className="w-8 h-8 text-violet-500" />
+                    <BarChart3 className="w-8 h-8 text-indigo-500 drop-shadow-[0_0_12px_rgba(79,70,229,0.4)] stroke-[2.5]" />
                     <p className="text-sm font-extrabold text-slate-700 font-sans">청산 이력이 없습니다</p>
-                    <p className="text-xs font-semibold text-violet-600 font-sans">매매가 완료되면 누적 손익 곡선이 표시됩니다.</p>
+                    <p className="text-xs font-semibold text-slate-600 font-sans">매매가 완료되면 누적 손익 곡선이 표시됩니다.</p>
                   </div>
                 ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -803,10 +806,10 @@ export const UnifiedDashboard = () => {
               </div>
 
               {discoveryStocks.length === 0 ? (
-                <div className="text-center py-12 text-violet-500 border border-dashed border-slate-200">
-                  <Activity className="w-8 h-8 text-violet-500 mx-auto mb-3 animate-pulse" />
+                <div className="text-center py-12 text-slate-500 border border-dashed border-slate-200">
+                  <Activity className="w-8 h-8 text-indigo-500 mx-auto mb-3 animate-pulse drop-shadow-[0_0_12px_rgba(79,70,229,0.5)] stroke-[2.5]" />
                   <p className="text-sm font-extrabold text-slate-700 font-sans">발굴된 오늘의 추천 종목이 없습니다.</p>
-                  <p className="text-xs font-semibold text-violet-600 mt-1 font-sans">상단의 "라이브 헌팅" 또는 "페니 스캔"을 가동해 보세요.</p>
+                  <p className="text-xs font-semibold text-slate-600 mt-1 font-sans">상단의 "라이브 헌팅" 또는 "페니 스캔"을 가동해 보세요.</p>
                 </div>
               ) : (
                 <div className="flex flex-col">
@@ -821,21 +824,21 @@ export const UnifiedDashboard = () => {
                         <div className="flex items-center gap-3">
                           <div className={clsx(
                             "w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs border",
-                            isPenny ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" : "bg-violet-500/10 border-indigo-500/20 text-violet-400"
+                            isPenny ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" : "bg-slate-500/10 border-indigo-500/20 text-slate-400"
                           )}>
                             {stock.ticker}
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-extrabold text-slate-900 group-hover:text-violet-600 transition-colors">{stock.ticker}</span>
+                              <span className="font-extrabold text-slate-900 group-hover:text-slate-600 transition-colors">{stock.ticker}</span>
                               <span className={clsx(
                                 "text-[10px] font-black px-1.5 py-0.5 rounded tracking-widest border leading-none",
-                                isPenny ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" : "bg-violet-500/10 border-indigo-500/20 text-violet-400"
+                                isPenny ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-400" : "bg-slate-500/10 border-indigo-500/20 text-slate-400"
                               )}>
                                 <span className="font-extrabold">{isPenny ? '페니' : '일반'}</span>
                               </span>
                             </div>
-                            <span className="text-xs text-violet-500 font-bold block mt-0.5">{stock.sector || 'US Stock'}</span>
+                            <span className="text-xs text-slate-500 font-bold block mt-0.5">{stock.sector || 'US Stock'}</span>
                           </div>
                         </div>
 
@@ -854,13 +857,13 @@ export const UnifiedDashboard = () => {
                           </div>
                           {/* 관심종목 등록 버튼 */}
                           {watchlistedTickers.has(stock.ticker) ? (
-                            <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
+                            <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] stroke-[2.5]" />
                           ) : addingTickers.has(stock.ticker) ? (
-                            <Loader2 className="w-5 h-5 text-violet-500 animate-spin shrink-0" />
+                            <Loader2 className="w-5 h-5 text-indigo-600 animate-spin shrink-0 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)] stroke-[2.5]" />
                           ) : (
                             <button
                               onClick={(e) => handleAddDiscoveryToWatchlist(e, stock)}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-violet-50 hover:border-violet-200 text-violet-500 hover:text-violet-500 transition-all shrink-0"
+                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-200 text-slate-500 hover:text-slate-500 transition-all shrink-0"
                               title="관심종목 추가"
                             >
                               <Plus className="w-3.5 h-3.5" />
@@ -896,7 +899,7 @@ export const UnifiedDashboard = () => {
           <div className="lg:col-span-2 bg-white border-t border-slate-200 pt-8 pb-12 space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-2">
               <div>
-                <span className="text-[10px] font-mono font-semibold text-violet-600 uppercase tracking-widest block mb-0.5">Active Positions</span>
+                <span className="text-[10px] font-mono font-semibold text-slate-600 uppercase tracking-widest block mb-0.5">Active Positions</span>
                 <h2 className="text-[15px] font-extrabold text-slate-900 font-sans">현재 보유 중인 매수 포지션</h2>
                 <p className="text-[13px] font-semibold text-slate-650 mt-1 leading-relaxed font-sans">실시간 매수가 완료되어 운용 중인 가상 주식 자산입니다. 트레일링 스탑에 도달하거나 우측 청산 클릭 시 즉시 전량 매도됩니다.</p>
               </div>
@@ -908,7 +911,7 @@ export const UnifiedDashboard = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-100 text-[10px] font-mono font-semibold text-violet-600 uppercase tracking-widest">
+                  <tr className="border-b border-slate-100 text-[10px] font-mono font-semibold text-slate-600 uppercase tracking-widest">
                     <th className="pb-3">종목</th>
                     <th className="pb-3 text-right">구분</th>
                     <th className="pb-3 text-right font-mono text-[10px]">수량</th>
@@ -941,7 +944,7 @@ export const UnifiedDashboard = () => {
                           <td className="py-4 text-right">
                             <span className={clsx(
                               "text-[10px] font-black px-1.5 py-0.5 rounded border tracking-widest font-sans",
-                              pos.isPenny ? "bg-cyan-50 border-cyan-200 text-cyan-600" : "bg-violet-50 border-violet-200 text-violet-600"
+                              pos.isPenny ? "bg-cyan-50 border-cyan-200 text-cyan-600" : "bg-slate-50 border-slate-200 text-slate-600"
                             )}>
                               {pos.isPenny ? '페니' : '일반'}
                             </span>
@@ -949,18 +952,18 @@ export const UnifiedDashboard = () => {
                           <td className="py-4 text-right font-mono text-slate-600 text-sm font-semibold tabular-nums">{Number(pos.units).toFixed(2)}</td>
                           <td className="py-4 text-right font-mono text-slate-600 text-sm font-semibold tabular-nums">${Number(pos.entry_price).toFixed(decimals)}</td>
                           <td className="py-4 text-right font-mono text-slate-900 text-sm font-bold tabular-nums">
-                            {pos.current_price != null ? `$${Number(pos.current_price).toFixed(decimals)}` : <span className="text-violet-500">—</span>}
+                            {pos.current_price != null ? `$${Number(pos.current_price).toFixed(decimals)}` : <span className="text-slate-500">—</span>}
                           </td>
                           <td className="py-4 text-right font-mono text-rose-500 text-sm font-semibold tabular-nums">
                             {pos.ts_threshold ? `$${Number(pos.ts_threshold).toFixed(decimals)}` : 'N/A'}
                           </td>
-                          <td className={clsx("py-4 text-right font-mono tabular-nums text-base font-black", hasPnl ? (isProfit ? "text-emerald-500" : "text-rose-500") : "text-violet-500")}>
+                          <td className={clsx("py-4 text-right font-mono tabular-nums text-base font-black", hasPnl ? (isProfit ? "text-emerald-500" : "text-rose-500") : "text-slate-500")}>
                             {hasPnl ? (
                             <div className="flex items-center justify-end gap-1.5">
                               {isProfit ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
                               <span>{isProfit ? '+' : ''}{(pnlAmt as number).toFixed(2)} ({isProfit ? '+' : ''}{(pnlPct as number).toFixed(2)}%)</span>
                             </div>
-                            ) : <span className="text-violet-500 text-sm font-sans font-bold">조회 불가</span>}
+                            ) : <span className="text-slate-500 text-sm font-sans font-bold">조회 불가</span>}
                           </td>
                           <td className="py-4 text-right">
                             <button
@@ -984,18 +987,18 @@ export const UnifiedDashboard = () => {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-violet-600" />
+                  <Clock className="w-4 h-4 text-indigo-600 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)] stroke-[2.5]" />
                   <h2 className="text-[15px] font-extrabold text-slate-900 font-sans">최근 청산 이력</h2>
                 </div>
                 <p className="text-[13px] font-semibold text-slate-650 mt-1 leading-relaxed font-sans">매도가 완료되어 최종 손익금과 사유가 확정된 거래 내역입니다.</p>
               </div>
-              <span className="text-xs font-bold text-violet-600 font-sans">{pennyHistory.length}건 기록</span>
+              <span className="text-xs font-bold text-slate-600 font-sans">{pennyHistory.length}건 기록</span>
             </div>
 
             <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
               {pennyHistory.length === 0 ? (
-                <div className="text-center py-12 text-violet-500 border border-dashed border-slate-200 font-sans">
-                  <Clock className="w-8 h-8 text-violet-500 mx-auto mb-2 opacity-60" />
+                <div className="text-center py-12 text-slate-500 border border-dashed border-slate-200 font-sans">
+                  <Clock className="w-8 h-8 text-indigo-500 mx-auto mb-2 opacity-80 drop-shadow-[0_0_8px_rgba(79,70,229,0.4)] stroke-[2.5]" />
                   <p className="text-sm font-extrabold text-slate-650">최근 종료된 매매 기록이 없습니다.</p>
                 </div>
               ) : (
@@ -1018,7 +1021,7 @@ export const UnifiedDashboard = () => {
                               {(trade.pnl_pct ?? 0) >= 0 ? '+' : ''}{Number(trade.pnl_pct ?? 0).toFixed(1)}%
                             </span>
                           </div>
-                          <span className="text-xs text-violet-600 font-medium block mt-1.5">
+                          <span className="text-xs text-slate-600 font-medium block mt-1.5">
                             진입: ${Number(trade.entry_price || 0).toFixed(isPenny ? 4 : 2)} ➔ 청산: ${Number(trade.exit_price || 0).toFixed(isPenny ? 4 : 2)}
                           </span>
                         </div>
@@ -1028,13 +1031,13 @@ export const UnifiedDashboard = () => {
                           <span className={clsx("text-base font-black tabular-nums block", isProfit ? "text-emerald-500" : "text-rose-500")}>
                             {isProfit ? '+' : ''}${Number(trade.profit_amt ?? 0).toFixed(2)}
                           </span>
-                          <span className="text-xs text-violet-600 font-medium block mt-0.5">
+                          <span className="text-xs text-slate-600 font-medium block mt-0.5">
                             {trade.exit_reason || 'Exit'}
                           </span>
                         </div>
                         <button
                           onClick={() => handleDeleteHistory(trade.id, trade.ticker)}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-violet-500 hover:text-rose-500 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-500 transition-all"
                           title="이력 삭제"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1063,21 +1066,21 @@ export const UnifiedDashboard = () => {
       <div className={`fixed top-0 right-0 h-full w-full max-w-lg bg-white border-l border-slate-200 z-[210] overflow-y-auto transition-transform duration-300 ease-in-out ${isSettingsOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur-sm z-10">
           <div className="flex items-center gap-3">
-            <ShieldCheck className="w-5 h-5 text-violet-600" />
+            <ShieldCheck className="w-5 h-5 text-indigo-600 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)] stroke-[2.5]" />
             <span className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">NexGuard Control</span>
           </div>
           <button
             onClick={() => setIsSettingsOpen(false)}
-            className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-50 hover:bg-slate-100 text-violet-500 hover:text-slate-600 border border-slate-200 transition-colors cursor-pointer"
+            className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-slate-600 border border-slate-200 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
         <div className="p-6 space-y-6">
           {/* 라이브 헌팅 — 오퍼레이터 수동 트리거 */}
-          <div className="bg-violet-50/50 border border-indigo-100 rounded-2xl p-4 space-y-3">
+          <div className="bg-slate-50/50 border border-indigo-100 rounded-2xl p-4 space-y-3">
             <div>
-              <span className="text-xs font-bold text-violet-600 uppercase tracking-widest block mb-0.5">Manual Override</span>
+              <span className="text-xs font-bold text-slate-600 uppercase tracking-widest block mb-0.5">Manual Override</span>
               <h3 className="text-sm font-black text-indigo-900">라이브 헌팅 (Edge Function)</h3>
               <p className="text-xs text-indigo-700 mt-1 leading-relaxed">
                 Alpaca Universe 전체를 즉시 스캔합니다.<br/>

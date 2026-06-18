@@ -182,3 +182,22 @@ export async function clearWatchlist(): Promise<void> {
     console.error('Error clearing watchlist:', error);
   }
 }
+
+/**
+ * Auto-cleanup old WATCHING items to maintain performance
+ */
+export async function cleanupOldWatchlistItems(days: number = 7): Promise<void> {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+  
+  const { error } = await supabase
+    .from('watchlist')
+    .delete()
+    .eq('status', 'WATCHING')
+    .lt('created_at', cutoffDate.toISOString());
+
+  if (error) {
+    console.error('Error cleaning up old watchlist items:', error);
+  }
+}
+

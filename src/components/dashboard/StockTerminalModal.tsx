@@ -536,8 +536,9 @@ export const StockTerminalModal = ({
                             </div>
                         </div>
 
-                        {/* ─── 3. Footer ────────────────────────────────────────── */}
-                        <div className="p-8 border-t border-slate-800/80 bg-[#020617] flex justify-between items-center relative z-10 font-mono">
+
+
+                        <div className="p-8 pt-4 border-t border-slate-800/80 bg-[#020617] flex justify-between items-center relative z-10 font-mono">
                             <div className="flex items-center gap-4">
                                 <button onClick={onClose} className="text-[10px] font-black text-slate-400 hover:text-white uppercase tracking-[0.2em] transition-all bg-white/5 px-6 py-3 rounded-xl border border-white/5">
                                     Close
@@ -566,13 +567,17 @@ export const StockTerminalModal = ({
                                     <span className="text-xs font-black text-indigo-400">{displayData.kellyWeight?.toFixed(1) ?? '—'}%</span>
                                 </div>
                                 <button
-                                    onClick={() => onExecuteTrade && onExecuteTrade({
-                                        ticker: displayData.ticker,
-                                        price: displayData.price,
-                                        targetPrice: displayData.targetPrice,
-                                        stopPrice: displayData.stopPrice,
-                                        lotSize: displayData.kellyWeight
-                                    })}
+                                    onClick={() => {
+                                        if (onExecuteTrade) {
+                                            onExecuteTrade({
+                                                ticker: displayData.ticker,
+                                                price: displayData.price || 0,
+                                                targetPrice: displayData.targetPrice,
+                                                stopPrice: displayData.stopPrice,
+                                                lotSize: displayData.kellyWeight
+                                            });
+                                        }
+                                    }}
                                     className="group relative px-10 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-[0.2em] transition-all shadow-lg active:scale-95 flex items-center gap-3"
                                 >
                                     <ShieldCheck className="w-4 h-4 text-white" />

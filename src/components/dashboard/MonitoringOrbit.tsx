@@ -48,10 +48,10 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
       {/* Header */}
       <div className="flex items-end justify-between mb-8 relative z-10">
         <div>
-          <span className="text-[10px] font-mono font-semibold text-violet-500 uppercase tracking-widest block mb-1">Combined Tracking Orbit</span>
-          <h2 className="text-[15px] font-extrabold text-slate-900 font-sans">통합 관심종목 오빗</h2>
+          <span className="text-[10px] font-mono font-semibold text-slate-500 uppercase tracking-widest block mb-1">Combined Tracking Orbit</span>
+          <h2 className="text-[15px] font-bold text-slate-900 font-sans">통합 관심종목 오빗</h2>
         </div>
-        <div className="flex items-center gap-2 text-violet-500 shrink-0 font-mono">
+        <div className="flex items-center gap-2 text-slate-500 shrink-0 font-mono">
           <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
           <span className="text-[10px] font-mono font-semibold uppercase tracking-widest leading-none">ORBIT SCANNER</span>
         </div>
@@ -59,13 +59,13 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
 
       {/* Ticker Search */}
       <div className="relative mb-6 z-10">
-        <Search className="w-4 h-4 text-violet-400 absolute left-0 top-3" />
+        <Search className="w-4 h-4 text-indigo-500 absolute left-0 top-3 drop-shadow-[0_0_6px_rgba(79,70,229,0.4)] stroke-[2.5]" />
         <input
           type="text"
           placeholder="티커 검색..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full bg-transparent border-b border-slate-200 pl-8 pr-4 py-2.5 text-sm font-semibold placeholder-violet-400 outline-none focus:border-slate-900 transition-colors text-slate-900 font-sans"
+          className="w-full bg-transparent border-b border-slate-200 pl-8 pr-4 py-2.5 text-sm font-semibold placeholder-slate-400 outline-none focus:border-slate-900 transition-colors text-slate-900 font-sans"
         />
       </div>
 
@@ -98,31 +98,31 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
                     <div className="flex justify-between items-center">
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-3">
-                          <span className="text-base font-bold text-slate-900 tracking-tight leading-none group-hover:text-slate-600 transition-colors uppercase font-mono">{item.ticker}</span>
+                          <span className="text-base font-semibold text-slate-900 tracking-tight leading-none group-hover:text-slate-600 transition-colors uppercase font-mono">{item.ticker}</span>
                           <span className={clsx(
                             "text-[10px] font-mono font-semibold uppercase tracking-widest",
                             item.status === 'HOLDING' ? "text-emerald-500" :
-                            item.status === 'WATCHING' ? "text-violet-400" :
-                            "text-violet-500"
+                            item.status === 'WATCHING' ? "text-slate-400" :
+                            "text-slate-500"
                           )}>
                             {item.status}
                           </span>
                         </div>
-                        <span className="block text-xs text-violet-500 truncate max-w-[180px] leading-none mt-0.5">{name}</span>
+                        <span className="block text-xs text-slate-500 truncate max-w-[180px] leading-none mt-0.5">{name}</span>
                       </div>
                       
                       <div className="text-right flex items-center gap-8">
                         <div>
-                          <div className="text-[10px] font-mono font-semibold text-violet-500 uppercase tracking-widest mb-1">DNA</div>
-                          <div className="text-base font-bold font-mono leading-none text-slate-900">
+                          <div className="text-[10px] font-mono font-semibold text-slate-500 uppercase tracking-widest mb-1">DNA</div>
+                          <div className="text-base font-semibold font-mono leading-none text-slate-900">
                             {dnaScore.toFixed(0)}
                           </div>
                         </div>
                         {item.currentPrice > 0 && (
                           <div>
-                             <div className="text-[10px] font-mono font-semibold text-violet-500 uppercase tracking-widest mb-1">Current</div>
+                             <div className="text-[10px] font-mono font-semibold text-slate-500 uppercase tracking-widest mb-1">Current</div>
                              <div className="leading-none font-mono flex items-baseline gap-2">
-                              <span className="text-base font-bold font-mono text-slate-900">${item.currentPrice.toFixed(item.isPenny ? 4 : 2)}</span>
+                              <span className="text-base font-semibold font-mono text-slate-900">${item.currentPrice.toFixed(item.isPenny ? 4 : 2)}</span>
                               {item.changePercent !== 0 && (
                                 <span className={clsx(
                                   "text-[10px] font-normal",
@@ -144,7 +144,7 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
                       e.stopPropagation();
                       handleRemoveWatchlist(item.ticker);
                     }}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-violet-400 hover:text-rose-500 transition-colors opacity-0 group-hover/item:opacity-100 z-20 cursor-pointer"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-rose-500 transition-colors opacity-0 group-hover/item:opacity-100 z-20 cursor-pointer"
                     title="제거"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -166,15 +166,15 @@ export const MonitoringOrbit: React.FC<MonitoringOrbitProps> = ({
           </div>
         ) : (
           <div className="py-24 text-center">
-            <Target className="w-8 h-8 mx-auto mb-4 text-violet-300" />
-            <p className="text-xs font-bold text-violet-600 uppercase tracking-wider font-sans">추적 중인 종목이 없습니다.</p>
+            <Target className="w-8 h-8 mx-auto mb-4 text-indigo-500 drop-shadow-[0_0_12px_rgba(79,70,229,0.4)] stroke-[2.5]" />
+            <p className="text-xs font-bold text-slate-600 uppercase tracking-wider font-sans">추적 중인 종목이 없습니다.</p>
           </div>
         )}
       </div>
 
       {/* Minimal Protocols Footer */}
       <div className="mt-8 pt-4 border-t border-slate-100">
-          <div className="flex justify-between text-[10px] font-mono font-semibold text-violet-500 uppercase tracking-widest">
+          <div className="flex justify-between text-[10px] font-mono font-semibold text-slate-500 uppercase tracking-widest">
              <span>Engine: Kelly-v2+</span>
              <span>Guard: 2.5% LMT</span>
              <span>Mode: Q-Hybrid</span>
