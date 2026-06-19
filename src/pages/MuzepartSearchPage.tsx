@@ -146,9 +146,9 @@ export const MuzepartSearchPage: React.FC = () => {
           )}
 
           {phase === 'SCOUTING' && (
-            <div className="fade-in">
-              <div className="scout-container">
-                <div className="relative w-40 h-40 mb-6 mx-auto bg-slate-100 border border-slate-200/80 rounded-full overflow-hidden flex items-center justify-center">
+            <div className="fade-in space-y-6">
+              <div className="scout-container flex flex-col md:flex-row gap-6 items-center bg-white p-6 rounded-2xl border border-slate-200/85 shadow-sm">
+                <div className="relative w-24 h-24 flex-shrink-0 bg-slate-100 border border-slate-200/80 rounded-full overflow-hidden flex items-center justify-center">
                   {/* Rotating sweep */}
                   <div className="absolute w-full h-full animate-radar-sweep origin-center pointer-events-none z-10">
                     <div 
@@ -167,17 +167,60 @@ export const MuzepartSearchPage: React.FC = () => {
                     <line x1="50" y1="5" x2="50" y2="95" stroke="rgba(0,0,0,0.03)" strokeWidth="0.3" />
                     <line x1="5" y1="50" x2="95" y2="50" stroke="rgba(0,0,0,0.03)" strokeWidth="0.3" />
                   </svg>
-                  <div className="absolute w-3 h-3 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+                  <div className="absolute w-2 h-2 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
                 </div>
-                <h2 className="text-center text-xl font-bold mb-4 font-sans text-indigo-700">Scouting Global Supply Chain...</h2>
-                <div className="terminal-feed bg-slate-900 text-emerald-400 p-4 rounded-lg font-mono text-xs h-32 overflow-y-auto shadow-inner border border-slate-800">
-                    {logs.map((log: string, i: number) => (
-                        <div key={i} className="flex gap-4 mb-1">
-                            <span className="text-slate-500 text-[10px]">{new Date().toLocaleTimeString()}</span>
-                            <span className="event">{log}</span>
-                        </div>
+                <div className="flex-1 w-full">
+                  <h2 className="text-lg font-bold mb-3 font-sans text-indigo-700">Scouting Global Supply Chain...</h2>
+                  <div className="terminal-feed bg-slate-900 text-emerald-400 p-3 rounded-lg font-mono text-xs h-24 overflow-y-auto shadow-inner border border-slate-800">
+                      {logs.map((log: string, i: number) => (
+                          <div key={i} className="flex gap-4 mb-1">
+                              <span className="text-slate-500 text-[10px]">{new Date().toLocaleTimeString()}</span>
+                              <span className="event">{log}</span>
+                          </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Skeleton Table */}
+              <div className="dark-glass-panel rounded-xl border border-slate-200/85 shadow-sm overflow-hidden">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200/60">
+                    <tr>
+                      <th className="px-4 py-3"><div className="h-4 bg-slate-200 rounded w-24 animate-pulse"></div></th>
+                      <th className="px-4 py-3"><div className="h-4 bg-slate-200 rounded w-40 animate-pulse"></div></th>
+                      <th className="px-4 py-3"><div className="h-4 bg-slate-200 rounded w-16 animate-pulse"></div></th>
+                      <th className="px-4 py-3"><div className="h-4 bg-slate-200 rounded w-20 animate-pulse"></div></th>
+                      <th className="px-4 py-3"><div className="h-4 bg-slate-200 rounded w-24 animate-pulse"></div></th>
+                      <th className="px-4 py-3"><div className="h-4 bg-slate-200 rounded w-16 animate-pulse"></div></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[...Array(5)].map((_, idx) => (
+                      <tr key={idx}>
+                        <td className="px-4 py-4"><div className="h-6 bg-slate-100 rounded-md w-20 animate-pulse"></div></td>
+                        <td className="px-4 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded bg-slate-100 animate-pulse"></div>
+                            <div className="space-y-2">
+                              <div className="h-4 bg-slate-100 rounded w-32 animate-pulse"></div>
+                              <div className="h-3 bg-slate-100 rounded w-20 animate-pulse"></div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4"><div className="h-4 bg-slate-100 rounded w-16 animate-pulse"></div></td>
+                        <td className="px-4 py-4"><div className="h-5 bg-slate-100 rounded w-16 animate-pulse"></div></td>
+                        <td className="px-4 py-4">
+                          <div className="space-y-2">
+                            <div className="h-5 bg-slate-100 rounded w-24 animate-pulse"></div>
+                            <div className="h-4 bg-slate-100 rounded w-16 animate-pulse"></div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4"><div className="h-4 bg-slate-100 rounded w-24 animate-pulse"></div></td>
+                      </tr>
                     ))}
-                </div>
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

@@ -7,6 +7,7 @@ export interface ComponentPart {
   stock: number;
   price: number;
   price_history: number[];
+  priceBreaks?: { quantity: number; price: number }[];
   basePrice?: number;
   currency: string;
   delivery: string;

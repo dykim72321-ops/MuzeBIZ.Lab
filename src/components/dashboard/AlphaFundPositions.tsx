@@ -40,6 +40,23 @@ export const AlphaFundPositions = () => {
         };
 
         fetchPositions();
+
+        // Supabase Realtime Subscription
+        const subscription = supabase
+            .channel('alpha_fund_positions_channel')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'paper_portfolio' },
+                (payload) => {
+                    console.log('Realtime change received!', payload);
+                    fetchPositions();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(subscription);
+        };
     }, []);
 
     if (loading) {

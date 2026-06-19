@@ -70,15 +70,18 @@ export const useMuzepartSearch = () => {
       const data = await response.json();
       
       if (Array.isArray(data)) {
-        setResults(data.map((item: any) => ({ 
-          ...item, 
-          basePrice: item.price, 
-          is_qc_enabled: false,
-          price_history: item.price_history || [item.price],
-          is_locked: false,
-          is_processing: false,
-          relevance_score: item.relevance_score || 0
-        })));
+        setResults(data.map((item: any) => {
+          const baseP = item.price;
+          return {
+            ...item,
+            basePrice: baseP,
+            is_qc_enabled: false,
+            price_history: item.price_history || [baseP],
+            is_locked: false,
+            is_processing: false,
+            relevance_score: item.relevance_score || 0,
+          };
+        }));
       } else {
         console.error("Malformed search data:", data);
         setError(data.error || 'Unexpected data format from server');

@@ -27,6 +27,13 @@ PENNY_SCALE_OUT_PROFIT = 0.20  # 1차 매도 수익률 기준 (+20% OR RSI>70)
 PENNY_TIGHT_TS_PCT = 0.93  # Scale-Out 후 잔여 물량 TS: highest × 93% (-7%)
 SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 유예
 
+# ── Chandelier Exit 파라미터 ──────────────────────────────────────────────────
+# 고정 % TS 대신 ATR 기반으로 스탑 라인을 설정 → 변동성 높은 1분봉 스탑헌팅 내성 강화
+# 공식: TS = Highest - k × ATR(14)
+# ATR이 클수록 스탑이 내려가(더 여유롭게) 마켓메이커 노이즈를 필터링
+CHANDELIER_K_NORMAL = 3.0  # 일반 종목: 표준 Chandelier k
+CHANDELIER_K_PENNY = 5.0  # 페니 종목: 1분봉 스탑헌팅 진폭(15%) 흡수를 위해 확대
+
 # ── [Guide-3] 슬리피지 보정 (보수적 시뮬레이션) ─────────────────────────────
 # 페니 종목은 호가 스프레드가 커서 더 높은 슬리피지 적용
 SLIPPAGE_BUY_NORMAL = 0.005  # 일반 종목 매수 슬리피지 +0.5%
@@ -219,6 +226,7 @@ class PaperTradingManager:
         is_armed: bool = False,
         dna_score: float = 85.0,
         recommended_weight: float = 0.0,
+        atr: float = 0.0,
     ):
         """
         v4 State Machine:
@@ -274,10 +282,12 @@ class PaperTradingManager:
             # recommended_weight: calculate_position_sizing()에서 min(vol, kelly)로
             # 이미 결합된 비중(%). 0이면 기본 KELLY_FRACTION(15%) 사용
             if recommended_weight <= 0:
+                # ATR 극단값 또는 동적 켈리 계산 실패 시 기본 KELLY_FRACTION으로 폴백
+                # (완전 차단 대신 보수적 최소 비중으로 진입 유지)
                 print(
-                    f"⛔ [{ticker}] Kelly 회로차단기 작동 (recommended_weight=0) — 진입 차단"
+                    f"⚠️ [{ticker}] recommended_weight=0 → KELLY_FRACTION 폴백 ({KELLY_FRACTION*100:.0f}%)"
                 )
-                return
+                recommended_weight = KELLY_FRACTION * 100
             effective_fraction = recommended_weight / 100.0
             effective_fraction = min(
                 effective_fraction, 0.25
@@ -412,23 +422,41 @@ class PaperTradingManager:
                 await self._sync_watchlist_exit(ticker)
                 return
 
-            # A. 업데이트 (최고가 갱신 시 TS 상향)
+            # A. TS 업데이트 (최고가 갱신 시 Chandelier Exit 또는 % 방식으로 상향)
+            # ATR이 공급된 경우: Highest - k×ATR (변동성 적응형, 스탑헌팅 내성)
+            # ATR 미공급(atr=0): 기존 고정 % 방식 폴백
             if not is_scaled_out:
-                trail_pct = PENNY_TS_TRAIL_PCT if is_penny else TS_TRAIL_PCT
-                new_ts = highest_price * trail_pct
+                floor = entry_price * (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
+                if atr > 0:
+                    k = CHANDELIER_K_PENNY if is_penny else CHANDELIER_K_NORMAL
+                    new_ts = max(floor, highest_price - k * atr)
+                else:
+                    trail_pct = PENNY_TS_TRAIL_PCT if is_penny else TS_TRAIL_PCT
+                    new_ts = highest_price * trail_pct
                 # 페니: +10% 달성 시 TS 하한을 진입가(본전)로 락인
                 if is_penny and price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
                     new_ts = max(new_ts, entry_price)
                 ts_threshold = max(ts_threshold, new_ts)
             elif is_penny:
-                # Scale-Out 후 페니: -7% 타이트 TS로 잔여 랠리 추종 (진입가 이하로 내려가지 않음)
-                new_ts = max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
+                # Scale-Out 후 페니: -7% 타이트 TS (Chandelier 사용 시도, floor 보장)
+                if atr > 0:
+                    new_ts = max(
+                        entry_price, highest_price - CHANDELIER_K_PENNY * atr * 0.6
+                    )
+                else:
+                    new_ts = max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
                 ts_threshold = max(ts_threshold, new_ts)
             else:
-                # Scale-Out 후 일반 종목: 본절+1% 하한을 유지하며 최고가 추종 (-10% TS)
-                new_ts = max(
-                    entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
-                )
+                # Scale-Out 후 일반 종목: 본절+1% 하한을 유지하며 Chandelier 추종
+                if atr > 0:
+                    new_ts = max(
+                        entry_price * SCALE_OUT_TS_PCT,
+                        highest_price - CHANDELIER_K_NORMAL * atr,
+                    )
+                else:
+                    new_ts = max(
+                        entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
+                    )
                 ts_threshold = max(ts_threshold, new_ts)
 
             # B. SCALE_OUT 체크

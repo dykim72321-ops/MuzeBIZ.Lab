@@ -51,7 +51,7 @@ from supabase import create_client, Client
 import pandas as pd
 import numpy as np
 from webhook_manager import WebhookManager
-from paper_engine import PaperTradingManager, INITIAL_CAPITAL
+from paper_engine import PaperTradingManager, INITIAL_CAPITAL, _apply_slippage
 from utils import PartNormalizer
 
 # from backtester import run_backtest (Removed for modern TS engine)
@@ -1515,18 +1515,23 @@ async def manual_paper_sell(
     units = float(pos["units"])
 
     # 현재가: yfinance 우선, fallback → stored current_price
-    current_price = float(pos.get("current_price") or entry_price)
+    signal_price = float(pos.get("current_price") or entry_price)
     try:
         tick = yf.Ticker(ticker)
         hist = tick.history(period="1d", interval="1m")
         if not hist.empty:
-            current_price = float(hist["Close"].iloc[-1])
+            signal_price = float(hist["Close"].iloc[-1])
     except Exception:
         pass
 
-    pnl_pct = (current_price / entry_price - 1) * 100
-    profit_amt = (current_price - entry_price) * units
-    proceeds = current_price * units
+    # 자동 매도와 동일하게 슬리피지 보정 적용
+    is_penny = entry_price <= 1.0
+    fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
+    slippage_pct = (fill_price / signal_price - 1) * 100
+
+    pnl_pct = (fill_price / entry_price - 1) * 100
+    profit_amt = (fill_price - entry_price) * units
+    proceeds = fill_price * units
 
     acc = await paper_engine.get_account()
     if acc:
@@ -1541,7 +1546,9 @@ async def manual_paper_sell(
     history_data = {
         "ticker": ticker,
         "entry_price": entry_price,
-        "exit_price": current_price,
+        "exit_price": fill_price,
+        "signal_price": signal_price,
+        "slippage_pct": round(slippage_pct, 4),
         "pnl_pct": round(pnl_pct, 2),
         "profit_amt": round(profit_amt, 2),
         "exit_reason": "Manual Sell",
@@ -1560,14 +1567,14 @@ async def manual_paper_sell(
     status_emoji = "✅" if pnl_pct > 0 else "🛑"
     await paper_engine.webhook.send_alert(
         title=f"{status_emoji} [PAPER MANUAL EXIT] {ticker}",
-        description=f"수동 청산가: ${current_price:.2f} | 수익률: {pnl_pct:.2f}%\n사유: 사령관 수동 매도",
+        description=f"시장가: ${signal_price:.4f} → 체결가: ${fill_price:.4f} (슬리피지 {slippage_pct:+.2f}%) | 수익률: {pnl_pct:.2f}%\n사유: 사령관 수동 매도",
         color=0x2ECC71 if pnl_pct > 0 else 0xE74C3C,
     )
 
     return {
         "status": "success",
         "ticker": ticker,
-        "exit_price": round(current_price, 2),
+        "exit_price": round(fill_price, 4),
         "pnl_pct": round(pnl_pct, 2),
         "profit_amt": round(profit_amt, 2),
     }
@@ -2347,7 +2354,7 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     # 6. DNA Score 벡터 연산 및 Strong_Buy / Strong_Sell 통합
     score = pd.Series(50.0, index=df.index)
 
-    # RSI scoring (RVOL 돌파 시 패널티 면제 포함)
+    # RSI scoring (RVOL 돌파 시 패널티 면제 / RSI≥75 RVOL≥5.0 절반 완화)
     score += np.where(
         df["RSI"] < 30,
         20,
@@ -2359,8 +2366,14 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
                 0,
                 np.where(
                     df["RSI"] < 65,
-                    np.where(df["RVOL"] >= 3.0, 0, -10),
-                    np.where(df["RVOL"] >= 3.0, 0, -20),
+                    np.where(df["RVOL"] >= 3.0, 0, -10),  # 55~65: RVOL≥3.0 면제
+                    np.where(
+                        df["RSI"] < 75,
+                        np.where(df["RVOL"] >= 3.0, 0, -20),  # 65~75: RVOL≥3.0 면제
+                        np.where(
+                            df["RVOL"] >= 5.0, -10, -20
+                        ),  # ≥75: RVOL≥5.0 이면 절반
+                    ),
                 ),
             ),
         ),
@@ -2401,8 +2414,12 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
         ),
     )
 
-    # Extended scoring
-    score -= np.where(df["Is_Extended"], 25, 0)
+    # Extended scoring: RVOL≥5.0 이면 Gap-and-Go 모멘텀 인정 → 페널티 절반(-12)
+    score -= np.where(
+        df["Is_Extended"],
+        np.where(df["RVOL"] >= 5.0, 12, 25),
+        0,
+    )
 
     df["DNA_Score"] = score.clip(0.0, 100.0).round(1)
 
@@ -2497,9 +2514,10 @@ def calculate_position_sizing(
         optimal_kelly = max(0, kelly_f) * kelly_fraction
 
     # --- [Step 4] 최종 결합 및 제한 ---
-    # ATR 변동성 비중과 동적 켈리 중 보수적인 값 선택 (Anti-Martingale)
-    # vol_weight: 고변동성 자산일수록 작아짐 → Kelly 단독 적용 시 과다 비중 방지
-    final_weight = min(vol_weight, optimal_kelly, 1.0)
+    # 50:50 가중 평균 (min 대비 Capital Efficiency 개선)
+    # min() 방식은 고변동성 자산에서 비중이 1~2%대로 급감하는 과소 할당 문제 발생
+    # 가중 평균은 두 관점(변동성 안전, 켈리 수익성)을 균형 있게 반영
+    final_weight = min((vol_weight + optimal_kelly) / 2.0, 1.0)
 
     # RVOL 정보 추가 (포지션 사이징 참고용)
     rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns else 1.0
@@ -2508,6 +2526,7 @@ def calculate_position_sizing(
         "annualized_volatility": round(float(ann_vol), 4),
         "vol_weight": round(float(vol_weight), 4),
         "kelly_f": round(float(kelly_f), 4),
+        "atr": round(float(atr), 6),
         "recommended_weight": round(float(final_weight) * 100, 2),
         "rvol": round(float(rvol), 2),
         "is_safe_to_trade": final_weight > 0,
@@ -2549,8 +2568,9 @@ def calculate_dna_score(
         penalty = 10 + (rsi - 65) / 10 * 10
         score -= 0 if rvol >= 3.0 else penalty
     else:
-        # RSI >= 75: 극과매수 — RVOL 면제 없이 -20 고정
-        score -= 20
+        # RSI >= 75: RVOL ≥ 5.0 (압도적 거래량 폭증) 이면 패널티 절반 (-10)
+        # 초강세 주도주 폭등 구간에서 Tier-1 진입이 원천 차단되는 역설 해소
+        score -= 10 if rvol >= 5.0 else 20
 
     # MACD (±20): 골든/데드크로스 최우선, 방향성 차순 (기울기 판정)
     # CLAUDE.md 명세: "직전 봉은 MACD ≤ Signal" → prev <= 0 (등호 포함)
@@ -2584,9 +2604,10 @@ def calculate_dna_score(
     elif rvol < 1.0:
         score -= 5
 
-    # 급등 추격 페널티 (-25)
+    # 급등 추격 페널티 (-25 / RVOL≥5.0이면 -12로 완화)
+    # RVOL이 압도적이면 Gap-and-Go 모멘텀 전략의 핵심 구간 — 전량 차단 대신 절반 감산
     if is_extended:
-        score -= 25
+        score -= 12 if rvol >= 5.0 else 25
 
     return round(max(0.0, min(100.0, score)), 1)
 
@@ -2780,6 +2801,9 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
 
     # DNA Score 최상위 노출 (ai_metadata 중첩 없이 바로 접근 가능)
     payload["dna_score"] = dna_score
+
+    # Chandelier Exit용 ATR 노출 (process_signal에서 동적 TS 계산에 사용)
+    payload["atr"] = sizing.get("atr", 0.0)
 
     # [Opt-3] 데이터 출처 명시적 태깅
     payload["data_source"] = "alpaca_iex"
@@ -3334,6 +3358,23 @@ def _rsi14_last(df: pd.DataFrame) -> float:
         return 50.0
 
 
+def _atr14_last(df: pd.DataFrame) -> float:
+    """ATR-14 마지막 값 경량 계산 — Chandelier Exit TS에 사용"""
+    try:
+        if len(df) < 2:
+            return 0.0
+        val = (
+            ta.volatility.AverageTrueRange(
+                high=df["High"], low=df["Low"], close=df["Close"], window=14
+            )
+            .average_true_range()
+            .iloc[-1]
+        )
+        return float(val) if not pd.isna(val) else 0.0
+    except Exception:
+        return 0.0
+
+
 async def on_minute_bar_closed(bar):
     """
     Alpaca 1분봉 완성 콜백.
@@ -3358,7 +3399,10 @@ async def on_minute_bar_closed(bar):
 
         # ── [Guide-2] 경량 모니터 경로 (HOLD 포지션 전용) ─────────────────
         if ticker_symbol in _held_tickers and paper_engine:
-            rsi_val = await asyncio.to_thread(_rsi14_last, df_hist)
+            rsi_val, atr_val = await asyncio.gather(
+                asyncio.to_thread(_rsi14_last, df_hist),
+                asyncio.to_thread(_atr14_last, df_hist),
+            )
 
             # EOD 강제 청산: 15:30 ET 이후 오버나이트 갭 리스크 방지
             now_et = datetime.now(ZoneInfo("America/New_York"))
@@ -3385,6 +3429,7 @@ async def on_minute_bar_closed(bar):
                 is_armed=SYSTEM_ARMED,
                 dna_score=0.0,
                 recommended_weight=0.0,
+                atr=atr_val,
             )
             # 포지션 청산 후 셋에서 제거 (process_signal 내부가 DB에서 삭제)
             if supabase:
@@ -3501,6 +3546,7 @@ async def on_minute_bar_closed(bar):
                         recommended_weight=float(
                             payload.get("recommended_weight", 0.0)
                         ),
+                        atr=float(payload.get("atr", 0.0)),
                     )
                     # [Guide-2] 매수 성공 시 _held_tickers에 등록 (다음 틱부터 경량 경로)
                     if (

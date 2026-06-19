@@ -10,7 +10,7 @@ import {
   getRelevanceBadgeClass,
   getRelevanceLabel
 } from './MuzepartUI';
-import { Globe, Info } from 'lucide-react';
+import { Globe, Info, FileText } from 'lucide-react';
 
 interface MuzepartResultRowProps {
   part: ComponentPart;
@@ -58,10 +58,27 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
         </span>
       </td>
       <td className="px-4 py-4 font-black text-slate-900">
-        <div className="flex flex-col">
-          <span className="text-base font-black font-mono">{part.price > 0 ? `${part.price.toLocaleString()} ${part.currency}` : 'Quote'}</span>
+        <div className="flex flex-col relative group">
+          <span className={`text-base font-black font-mono w-fit ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-slate-300' : ''}`}>
+            {part.price > 0 ? `${part.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${part.currency}` : 'Quote'}
+          </span>
+          {part.priceBreaks && part.priceBreaks.length > 0 && (
+            <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50">
+              <div className="bg-slate-900 text-slate-50 text-xs rounded-xl p-3 shadow-xl border border-slate-700 min-w-[160px]">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-700 pb-1">Tiered Pricing</p>
+                <div className="space-y-1">
+                  {part.priceBreaks.map((pb, idx) => (
+                    <div key={idx} className="flex justify-between items-center gap-4">
+                      <span className="text-slate-300">{pb.quantity.toLocaleString()}+</span>
+                      <span className="font-mono font-bold">{pb.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           {part.risk_score !== undefined && (
-            <div className={`mt-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-bold border ${getRiskScoreClass(part.risk_score)}`}>
+            <div className={`mt-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-bold border w-fit ${getRiskScoreClass(part.risk_score)}`}>
               {getRiskLabel(part.risk_score)} {part.risk_score}%
             </div>
           )}
@@ -79,6 +96,17 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
       </td>
       <td className="px-4 py-4">
         <div className="flex items-center gap-2">
+          {part.datasheet && (
+            <a
+              href={part.datasheet}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="p-2 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
+              title="데이터시트 (PDF)"
+            >
+              <FileText className="w-4 h-4" />
+            </a>
+          )}
           <a
             href={getDistributorUrl(part)}
             target="_blank"

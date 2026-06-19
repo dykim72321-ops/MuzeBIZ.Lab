@@ -25,6 +25,7 @@ const PersonaPerformance = lazy(() => import('./components/dashboard/PersonaPerf
 const SettingsView = lazy(() => import('./components/dashboard/SettingsView').then(m => ({ default: m.SettingsView })));
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
+const DnaSimulatorPage = lazy(() => import('./pages/DnaSimulatorPage').then(m => ({ default: m.DnaSimulatorPage })));
 
 // 로딩 폴백 컴포넌트
 const PageLoadingFallback = () => (
@@ -69,6 +70,9 @@ function App() {
 
                 {/* 관심 종목 */}
                 <Route path="watchlist" element={<WatchlistPage />} />
+
+                {/* DNA 시뮬레이터 */}
+                <Route path="dna-simulator" element={<DnaSimulatorPage />} />
 
                 {/* 기타 도구 */}
                 <Route path="personas" element={<PersonaPerformance />} />

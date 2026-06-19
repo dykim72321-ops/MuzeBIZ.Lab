@@ -10,7 +10,7 @@ import {
   getRelevanceBadgeClass,
   getRelevanceLabel
 } from './MuzepartUI';
-import { Info } from 'lucide-react';
+import { Info, FileText } from 'lucide-react';
 
 interface MuzepartResultCardProps {
   part: ComponentPart;
@@ -51,11 +51,26 @@ export const MuzepartResultCard: React.FC<MuzepartResultCardProps> = ({
             {part.stock > 0 ? `${part.stock.toLocaleString()} 개` : '확인 필요'}
           </p>
         </div>
-        <div className="p-3 bg-slate-50 border border-slate-200/60 rounded-lg">
+        <div className="p-3 bg-slate-50 border border-slate-200/60 rounded-lg relative group">
           <p className="text-xs font-bold text-slate-700 uppercase mb-1">구매 단가</p>
-          <p className="text-base font-extrabold text-slate-900 font-mono">
-            {part.price > 0 ? `${part.price.toLocaleString()} ${part.currency}` : '견적 문의'}
+          <p className={`text-base font-extrabold text-slate-900 font-mono w-fit ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-slate-300' : ''}`}>
+            {part.price > 0 ? `${part.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${part.currency}` : '견적 문의'}
           </p>
+          {part.priceBreaks && part.priceBreaks.length > 0 && (
+            <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50">
+              <div className="bg-slate-900 text-slate-50 text-xs rounded-xl p-3 shadow-xl border border-slate-700 min-w-[160px]">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-700 pb-1">Tiered Pricing</p>
+                <div className="space-y-1">
+                  {part.priceBreaks.map((pb, idx) => (
+                    <div key={idx} className="flex justify-between items-center gap-4">
+                      <span className="text-slate-300">{pb.quantity.toLocaleString()}+</span>
+                      <span className="font-mono font-bold">{pb.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
       
@@ -79,6 +94,17 @@ export const MuzepartResultCard: React.FC<MuzepartResultCardProps> = ({
         </div>
       )}
       <div className="flex gap-2">
+        {part.datasheet && (
+          <a
+            href={part.datasheet}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="flex items-center justify-center p-2 border border-slate-200 text-slate-500 rounded-lg hover:bg-slate-50 hover:text-rose-600 transition-all cursor-pointer"
+            title="데이터시트 (PDF)"
+          >
+            <FileText className="w-4 h-4" />
+          </a>
+        )}
         <a
           href={getDistributorUrl(part)}
           target="_blank"

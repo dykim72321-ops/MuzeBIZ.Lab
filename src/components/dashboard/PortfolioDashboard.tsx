@@ -56,6 +56,22 @@ export const PortfolioDashboard = () => {
         };
 
         fetchPortfolio();
+
+        // Supabase Realtime Subscription
+        const subscription = supabase
+            .channel('portfolio_dashboard_channel')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'paper_portfolio' },
+                () => {
+                    fetchPortfolio();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(subscription);
+        };
     }, []);
 
     if (loading) return <div className="h-48 w-full animate-pulse bg-white/5 rounded-xl" />;
