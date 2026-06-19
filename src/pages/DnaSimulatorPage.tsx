@@ -1,7 +1,13 @@
-import { useState, useMemo } from 'react';
-import { FlaskConical, AlertTriangle, ChevronRight } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { FlaskConical, AlertTriangle, ChevronRight, ArrowLeft, Sparkles, TrendingDown, Scale } from 'lucide-react';
+import { fetchPaperAccount } from '../services/pythonApiService';
 
 // ── 수식 (백엔드 paper_engine / main.py와 동일, Fix A+B+C+D 적용) ─────────────
+// ⚠️  DRIFT RISK: 이 파일의 세 함수(calcDna, calcSizing, calcChandelier)는
+//     백엔드 Python 수식을 TypeScript로 수동 복제한 것입니다.
+//     백엔드 상수·로직 변경 시 이 파일도 반드시 동시에 수정하세요.
+//     참조 상수: CHANDELIER_K_NORMAL=3.0, CHANDELIER_K_PENNY=5.0 (paper_engine.py)
 
 type MacdStatus = 'golden' | 'dead' | 'rising' | 'falling';
 
@@ -98,16 +104,17 @@ function calcDna(p: DnaParams): DnaResult {
 }
 
 function calcSizing(p: SizingParams): SizingResult {
-  // Fix D: weighted average (vol_weight + kelly) / 2
+  // Fix D: weighted average (vol_weight + kelly) / 2, vol_weight×2 상한 캡 (백엔드 동기화)
   const annVol = p.atrPct * Math.sqrt(252);
-  const volWeight = annVol > 0 ? 0.15 / annVol : 0;
+  const volWeight = annVol > 1e-9 ? 0.15 / annVol : 0; // atrPct=0 시 Infinity 방지
 
   const q = 1 - p.winRate;
   const b = p.profitRatio;
   const kellyF = b > 0 ? (b * p.winRate - q) / b : 0;
   const optimalKelly = Math.max(0, kellyF) * 0.25;
 
-  const finalWeight = Math.min((volWeight + optimalKelly) / 2, 1.0);
+  const avgWeight = (volWeight + optimalKelly) / 2;
+  const finalWeight = Math.min(avgWeight, volWeight * 2.0, 1.0); // vol_weight 2배 캡
   const buyBudgetPct = Math.min(finalWeight, 0.25) * 100;
 
   return { annVol, volWeight: volWeight * 100, kellyF, optimalKelly: optimalKelly * 100, finalWeight: finalWeight * 100, buyBudgetPct };
@@ -115,7 +122,8 @@ function calcSizing(p: SizingParams): SizingResult {
 
 function calcChandelier(highest: number, atrPct: number, isPenny: boolean, entryPrice: number): ChandelierResult {
   const k = isPenny ? 5.0 : 3.0;
-  const atrAbs = highest * atrPct;
+  // 백엔드 ATR(14)은 현재가(≈진입가) 기준 절댓값. highest 기준으로 계산하면 상승 후 과대 추정됨.
+  const atrAbs = entryPrice * atrPct;
   const floorPct = isPenny ? 0.85 : 0.90;
   const floor = entryPrice * floorPct;
   const tsFixed = highest * floorPct;
@@ -152,16 +160,30 @@ function Slider({ label, value, min, max, step = 1, onChange, unit = '', color =
 }
 
 function DeltaBar({ label, value, maxAbs = 25 }: { label: string; value: number; maxAbs?: number }) {
-  const pct = Math.abs(value) / maxAbs * 100;
+  const pct = Math.min(Math.abs(value) / maxAbs * 100, 100);
   const isPos = value >= 0;
   return (
     <div className="flex items-center gap-3 text-[11px]">
       <span className="w-20 text-right text-slate-400 font-mono shrink-0">{label}</span>
-      <div className="flex-1 h-5 bg-slate-900 rounded flex items-center overflow-hidden relative">
-        <div
-          className={`h-full rounded transition-all duration-300 ${isPos ? 'bg-emerald-500/70' : 'bg-rose-500/70'}`}
-          style={{ width: `${pct}%`, marginLeft: isPos ? '0' : 'auto' }}
-        />
+      {/* 중앙 기준선: 왼쪽 절반(음수), 오른쪽 절반(양수) */}
+      <div className="flex-1 h-5 flex rounded overflow-hidden relative bg-slate-900">
+        <div className="w-1/2 flex justify-end items-center">
+          {!isPos && (
+            <div
+              className="h-full bg-rose-500/70 transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          )}
+        </div>
+        <div className="w-px bg-slate-600 shrink-0" />
+        <div className="w-1/2 flex items-center">
+          {isPos && (
+            <div
+              className="h-full bg-emerald-500/70 transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          )}
+        </div>
         <span className={`absolute right-2 font-black font-mono ${isPos ? 'text-emerald-300' : 'text-rose-300'}`}>
           {isPos ? '+' : ''}{value.toFixed(1)}
         </span>
@@ -187,31 +209,103 @@ function ScoreArc({ score }: { score: number }) {
   );
 }
 
+// ── 프리셋 정의 ───────────────────────────────────────────────────────────────
+
+interface Preset {
+  label: string;
+  desc: string;
+  color: string;
+  values: { rsi: number; rvol: number; macdStatus: MacdStatus; adx: number; diPositive: boolean; isExtended: boolean; isPenny: boolean; entryPrice: number; };
+}
+
+const PRESETS: Preset[] = [
+  {
+    label: 'Tier-1 경계',
+    desc: 'DNA ≈ 85',
+    color: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
+    values: { rsi: 68, rvol: 3.5, macdStatus: 'golden', adx: 20, diPositive: true, isExtended: false, isPenny: false, entryPrice: 10 },
+  },
+  {
+    label: 'Tier-2 경계',
+    desc: 'DNA ≈ 82, RVOL>2',
+    color: 'border-teal-500/40 bg-teal-500/10 text-teal-400 hover:bg-teal-500/20',
+    values: { rsi: 58, rvol: 2.5, macdStatus: 'golden', adx: 25, diPositive: true, isExtended: false, isPenny: false, entryPrice: 10 },
+  },
+  {
+    label: '페니 STRONG BUY',
+    desc: 'DNA ≈ 73, $1 이하',
+    color: 'border-cyan-500/40 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20',
+    values: { rsi: 48, rvol: 2.2, macdStatus: 'rising', adx: 18, diPositive: true, isExtended: false, isPenny: true, entryPrice: 0.5 },
+  },
+];
+
 // ── 메인 페이지 ───────────────────────────────────────────────────────────────
 
 export function DnaSimulatorPage() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  // URL 파라미터에서 초기값 추출 (발굴 카드에서 클릭 시 자동 채워짐)
+  const urlRsi    = searchParams.get('rsi')      ? Number(searchParams.get('rsi'))   : null;
+  const urlRvol   = searchParams.get('rvol')     ? Number(searchParams.get('rvol'))  : null;
+  const urlMacd   = searchParams.get('macd')     as MacdStatus | null;
+  const urlAdx    = searchParams.get('adx')      ? Number(searchParams.get('adx'))   : null;
+  const urlDiPos  = searchParams.get('diPos');
+  const urlExt    = searchParams.get('extended');
+  const urlPenny  = searchParams.get('penny');
+  const urlAtr    = searchParams.get('atr')      ? Number(searchParams.get('atr'))   : null;
+  const urlEntry  = searchParams.get('entry')    ? Number(searchParams.get('entry')) : null;
+  const urlTicker = searchParams.get('ticker')   ?? '';
+
   // 지표 파라미터
-  const [rsi, setRsi] = useState(35);
-  const [rvol, setRvol] = useState(3.5);
-  const [macdStatus, setMacdStatus] = useState<MacdStatus>('golden');
-  const [adx, setAdx] = useState(25);
-  const [diPositive, setDiPositive] = useState(true);
-  const [isExtended, setIsExtended] = useState(false);
-  const [isPenny, setIsPenny] = useState(false);
+  const [rsi, setRsi]               = useState(urlRsi   ?? 35);
+  const [rvol, setRvol]             = useState(urlRvol  ?? 3.5);
+  const [macdStatus, setMacdStatus] = useState<MacdStatus>(urlMacd ?? 'golden');
+  const [adx, setAdx]               = useState(urlAdx   ?? 25);
+  const [diPositive, setDiPositive] = useState(urlDiPos !== null ? urlDiPos === 'true' : true);
+  const [isExtended, setIsExtended] = useState(urlExt   === 'true');
+  const [isPenny, setIsPenny]       = useState(urlPenny === 'true');
 
   // 포지션 사이징 파라미터
-  const [winRate, setWinRate] = useState(0.55);
+  const [winRate, setWinRate]         = useState(0.55);
   const [profitRatio, setProfitRatio] = useState(2.0);
-  const [atrPct, setAtrPct] = useState(0.03);
+  const [atrPct, setAtrPct]           = useState(urlAtr != null ? urlAtr / 100 : 0.03);
 
   // Chandelier Exit 파라미터
-  const [entryPrice, setEntryPrice] = useState(isPenny ? 0.50 : 10.0);
-  const [highestPct, setHighestPct] = useState(5); // highest = entry × (1 + highestPct%)
+  const [entryPrice, setEntryPrice]   = useState(urlEntry ?? (urlPenny === 'true' ? 0.5 : 10.0));
+  const [highestPct, setHighestPct]   = useState(5);
 
-  const dna = useMemo(() => calcDna({ rsi, rvol, macdStatus, adx, diPositive, isExtended, isPenny }), [rsi, rvol, macdStatus, adx, diPositive, isExtended, isPenny]);
-  const sizing = useMemo(() => calcSizing({ winRate, profitRatio, atrPct }), [winRate, profitRatio, atrPct]);
-  const highest = entryPrice * (1 + highestPct / 100);
+  // 실제 계좌 잔고
+  const [buyingPower, setBuyingPower] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetchPaperAccount()
+      .then(acc => { if (acc?.buying_power != null) setBuyingPower(acc.buying_power); })
+      .catch(() => {});
+  }, []);
+
+  // isPenny 전환 시 entryPrice가 해당 모드의 유효 범위를 벗어나면 클램핑
+  useEffect(() => {
+    if (isPenny) setEntryPrice(p => Math.min(p, 1.0));
+    else setEntryPrice(p => Math.max(p, 1.0));
+  }, [isPenny]);
+
+  const dna       = useMemo(() => calcDna({ rsi, rvol, macdStatus, adx, diPositive, isExtended, isPenny }), [rsi, rvol, macdStatus, adx, diPositive, isExtended, isPenny]);
+  const sizing    = useMemo(() => calcSizing({ winRate, profitRatio, atrPct }), [winRate, profitRatio, atrPct]);
+  const highest   = entryPrice * (1 + highestPct / 100);
   const chandelier = useMemo(() => calcChandelier(highest, atrPct, isPenny, entryPrice), [highest, atrPct, isPenny, entryPrice]);
+
+  // Scale-Out 조건 계산 (paper_engine.py process_signal 로직)
+  const profitPct        = highestPct / 100; // 최고가 = 현재 포지션 최고 수익률로 근사
+  const scaleOutTrigger  = isPenny
+    ? rsi > 70 || profitPct >= 0.20
+    : rsi > 60;
+  const scaleOutProfitOk = profitPct > 0; // 손실 중 Scale-Out 방지 (paper_engine 가드)
+  const scaleOutFires    = scaleOutTrigger && scaleOutProfitOk;
+  const postScaleTsPct   = isPenny ? 0.93 : null; // 일반은 최고가+1% 본절 TS
+  const postScaleTs      = isPenny
+    ? highest * 0.93
+    : highest * 1.01; // 일반: 최고가 × 1.01 ≈ 본절+1%
 
   const macdOptions: { value: MacdStatus; label: string; score: number }[] = [
     { value: 'golden', label: '골든크로스', score: 20 },
@@ -220,25 +314,99 @@ export function DnaSimulatorPage() {
     { value: 'falling',label: '하락 모멘텀', score: -8 },
   ];
 
+  function applyPreset(p: Preset) {
+    const v = p.values;
+    setRsi(v.rsi); setRvol(v.rvol); setMacdStatus(v.macdStatus);
+    setAdx(v.adx); setDiPositive(v.diPositive);
+    setIsExtended(v.isExtended); setIsPenny(v.isPenny);
+    setEntryPrice(v.entryPrice);
+  }
+
+  const buyBudgetDollar = buyingPower != null
+    ? Math.min(buyingPower * (sizing.finalWeight / 100), 1000)
+    : null;
+
   return (
     <div className="min-h-screen bg-[#080d1a] text-white font-sans">
       {/* Header */}
       <div className="border-b border-slate-800 bg-[#0a0f1c]/80 backdrop-blur px-8 py-5">
-        <div className="max-w-[1400px] mx-auto flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-            <FlaskConical className="w-5 h-5 text-indigo-400" />
+        <div className="max-w-[1400px] mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate('/stock/dashboard')}
+              className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-[11px] font-black uppercase tracking-widest"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:block">대시보드</span>
+            </button>
+            <div className="w-px h-6 bg-slate-800" />
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+              <FlaskConical className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <h1 className="text-base font-black uppercase tracking-widest text-white flex items-center gap-2">
+                DNA Score Simulator
+                {urlTicker && <span className="text-indigo-400 text-sm">— {urlTicker}</span>}
+              </h1>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Fix A·B·C·D 반영 — 매수 전 리스크 사전 검증</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-base font-black uppercase tracking-widest text-white">DNA Score Simulator</h1>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest">Fix A·B·C·D 반영 — 실시간 수식 검증기</p>
-          </div>
+
+          {/* 계좌 잔고 표시 */}
+          {buyingPower != null && (
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 border border-slate-800 rounded-xl text-[10px]">
+              <span className="text-slate-500 uppercase tracking-widest font-black">가용잔고</span>
+              <span className="text-white font-black font-mono">${buyingPower.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* 워크플로 안내 카드 (URL ticker 없을 때만 표시) */}
+      {!urlTicker && (
+        <div className="max-w-[1400px] mx-auto px-8 pt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[
+              { icon: Sparkles,     title: '발굴 종목 이해', desc: '대시보드 발굴 카드의 🔬 버튼 → 해당 종목의 지표가 자동으로 채워집니다', color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' },
+              { icon: Scale,        title: '매수 전 리스크 계산', desc: '포지션 사이징 슬라이더로 "얼마나 살지"를 계좌 잔고 기준으로 확인하세요', color: 'text-teal-400 bg-teal-500/10 border-teal-500/20' },
+              { icon: TrendingDown, title: '스탑 라인 미리 확인', desc: 'Chandelier TS 섹션에서 진입가·ATR 기준 트레일링 스탑 위치를 예측하세요', color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+            ].map(item => (
+              <div key={item.title} className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${item.color}`}>
+                <item.icon className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-widest mb-0.5">{item.title}</div>
+                  <div className="text-[10px] text-slate-400 leading-relaxed">{item.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="max-w-[1400px] mx-auto px-8 py-8 grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-8">
 
         {/* ─── 좌측: 파라미터 입력 ────────────────────────────────────────── */}
         <div className="space-y-5">
+
+          {/* 프리셋 버튼 */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-3 h-3 text-slate-500" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">빠른 시나리오</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {PRESETS.map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => applyPreset(p)}
+                  className={`px-3 py-2.5 rounded-xl border text-left transition-all ${p.color}`}
+                >
+                  <div className="text-[9px] font-black uppercase tracking-widest leading-none">{p.label}</div>
+                  <div className="text-[9px] text-slate-400 mt-1">{p.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* 기본 지표 */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 space-y-5">
@@ -365,21 +533,19 @@ export function DnaSimulatorPage() {
               </div>
             </div>
 
-            {/* Tier 게이트 표시 */}
+            {/* Tier 게이트 표시 — 동적 Tailwind 클래스 불가, 정적 lookup map 사용 */}
             <div className="mt-5 grid grid-cols-3 gap-3">
-              {[
-                { label: 'Tier-1', gate: 85, color: 'emerald', cond: !isPenny },
-                { label: 'Tier-2', gate: 82, color: 'teal', cond: !isPenny && rvol > 2.0 },
-                { label: 'Tier-Penny', gate: 70, color: 'cyan', cond: isPenny },
-              ].map(t => {
+              {([
+                { label: 'Tier-1',     gate: 85, cond: !isPenny,             activeCard: 'border-emerald-500/30 bg-emerald-500/10', activeLbl: 'text-emerald-400', activeVal: 'text-emerald-300' },
+                { label: 'Tier-2',     gate: 82, cond: !isPenny && rvol > 2.0, activeCard: 'border-teal-500/30 bg-teal-500/10',     activeLbl: 'text-teal-400',    activeVal: 'text-teal-300' },
+                { label: 'Tier-Penny', gate: 70, cond: isPenny,               activeCard: 'border-cyan-500/30 bg-cyan-500/10',      activeLbl: 'text-cyan-400',    activeVal: 'text-cyan-300' },
+              ] as const).map(t => {
                 const gap = dna.score - t.gate;
                 const active = t.cond && dna.score >= t.gate;
                 return (
-                  <div key={t.label} className={`rounded-xl border p-3 text-center transition-all ${
-                    active ? `border-${t.color}-500/30 bg-${t.color}-500/10` : 'border-slate-800 bg-slate-900/40'
-                  }`}>
-                    <div className={`text-[9px] font-black uppercase tracking-widest ${active ? `text-${t.color}-400` : 'text-slate-600'}`}>{t.label}</div>
-                    <div className={`text-xs font-black mt-1 ${active ? `text-${t.color}-300` : 'text-slate-500'}`}>≥ {t.gate}</div>
+                  <div key={t.label} className={`rounded-xl border p-3 text-center transition-all ${active ? t.activeCard : 'border-slate-800 bg-slate-900/40'}`}>
+                    <div className={`text-[9px] font-black uppercase tracking-widest ${active ? t.activeLbl : 'text-slate-600'}`}>{t.label}</div>
+                    <div className={`text-xs font-black mt-1 ${active ? t.activeVal : 'text-slate-500'}`}>≥ {t.gate}</div>
                     <div className={`text-[9px] mt-1 ${gap >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                       {gap >= 0 ? '✓ 진입' : `${gap.toFixed(1)}pt 부족`}
                     </div>
@@ -424,9 +590,103 @@ export function DnaSimulatorPage() {
                   </div>
                 ))}
               </div>
-              <p className="text-[9px] text-slate-600 mt-3">
-                * buy_budget = min(자금 × {sizing.finalWeight.toFixed(1)}%, $1,000)
-              </p>
+
+              {/* 실제 잔고 기반 달러 예산 */}
+              <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between">
+                <p className="text-[9px] text-slate-600">
+                  buy_budget = min(잔고 × {sizing.finalWeight.toFixed(1)}%, $1,000)
+                </p>
+                <p className="text-[10px] font-black font-mono">
+                  {buyBudgetDollar != null
+                    ? <span className="text-indigo-300">${buyBudgetDollar.toFixed(0)} <span className="text-slate-500 font-normal text-[9px]">예상 매수액</span></span>
+                    : <span className="text-slate-600">잔고 불러오는 중…</span>
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Scale-Out 시나리오 */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Scale-Out 시나리오</h2>
+              <span className="text-[9px] text-slate-500 bg-slate-800 px-2 py-1 rounded-lg">
+                {isPenny ? 'RSI>70 또는 수익≥20%' : 'RSI>60'}
+              </span>
+            </div>
+
+            {/* 트리거 조건 카드 */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className={`rounded-xl border p-3 text-center transition-all ${
+                (isPenny ? rsi > 70 : rsi > 60) ? 'border-amber-500/30 bg-amber-500/10' : 'border-slate-800 bg-slate-950/40'
+              }`}>
+                <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">RSI 트리거</div>
+                <div className={`text-sm font-black mt-1 ${(isPenny ? rsi > 70 : rsi > 60) ? 'text-amber-300' : 'text-slate-600'}`}>
+                  RSI {isPenny ? '> 70' : '> 60'}
+                </div>
+                <div className={`text-[9px] mt-1 ${(isPenny ? rsi > 70 : rsi > 60) ? 'text-amber-400' : 'text-slate-600'}`}>
+                  {(isPenny ? rsi > 70 : rsi > 60) ? '✓ 발동' : `현재 RSI=${rsi}`}
+                </div>
+              </div>
+              {isPenny && (
+                <div className={`rounded-xl border p-3 text-center transition-all ${
+                  profitPct >= 0.20 ? 'border-amber-500/30 bg-amber-500/10' : 'border-slate-800 bg-slate-950/40'
+                }`}>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">수익률 트리거</div>
+                  <div className={`text-sm font-black mt-1 ${profitPct >= 0.20 ? 'text-amber-300' : 'text-slate-600'}`}>
+                    수익 ≥ 20%
+                  </div>
+                  <div className={`text-[9px] mt-1 ${profitPct >= 0.20 ? 'text-amber-400' : 'text-slate-600'}`}>
+                    {profitPct >= 0.20 ? '✓ 발동' : `현재 +${(profitPct * 100).toFixed(0)}%`}
+                  </div>
+                </div>
+              )}
+              {!isPenny && (
+                <div className={`rounded-xl border p-3 text-center ${scaleOutFires ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-slate-800 bg-slate-950/40'}`}>
+                  <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">수익 가드</div>
+                  <div className={`text-sm font-black mt-1 ${scaleOutProfitOk ? 'text-emerald-300' : 'text-rose-400'}`}>
+                    {scaleOutProfitOk ? '수익 중' : '손실 — 차단'}
+                  </div>
+                  <div className="text-[9px] mt-1 text-slate-500">손실 구간 Scale-Out 방지</div>
+                </div>
+              )}
+            </div>
+
+            {/* Scale-Out 결과 */}
+            <div className={`rounded-xl border p-4 transition-all ${scaleOutFires ? 'border-amber-500/20 bg-amber-500/5' : 'border-slate-800 bg-slate-950/40'}`}>
+              <div className="flex items-center gap-2 mb-3">
+                <div className={`w-2 h-2 rounded-full ${scaleOutFires ? 'bg-amber-400 animate-pulse' : 'bg-slate-700'}`} />
+                <span className={`text-[10px] font-black uppercase tracking-widest ${scaleOutFires ? 'text-amber-400' : 'text-slate-600'}`}>
+                  {scaleOutFires ? 'Scale-Out 발동 — 50% 부분 청산' : 'Scale-Out 미발동'}
+                </span>
+              </div>
+              {scaleOutFires ? (
+                <div className="space-y-2 text-[10px]">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">청산 수량</span>
+                    <span className="font-black text-white">보유 주식의 50%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">잔여 물량 TS 이동</span>
+                    <span className="font-black text-amber-300">
+                      ${postScaleTs.toFixed(isPenny ? 3 : 2)}
+                      <span className="text-slate-500 font-normal ml-1">
+                        ({isPenny ? `최고가 × ${postScaleTsPct}` : '최고가 × 1.01 (본절+1%)'})
+                      </span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">현재 최고가</span>
+                    <span className="font-black text-white">${highest.toFixed(isPenny ? 3 : 2)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-600">
+                  {isPenny
+                    ? `RSI를 70 이상으로 올리거나 "최고가 상승%"를 20% 이상으로 올려보세요`
+                    : `RSI를 60 이상으로 올려보세요 (현재 ${rsi})`}
+                </p>
+              )}
             </div>
           </div>
 

@@ -115,9 +115,11 @@ supabase functions deploy
 ### DNA 점수 기준
 
 ```
-BUY 시그널  → DNA 85
-HOLD 시그널 → DNA 60
-SELL 시그널 → DNA 40
+Tier-1 (STRONG BUY) → DNA ≥ 85          일반 종목
+Tier-2 (BUY)        → DNA ≥ 82 + RVOL > 2.0  일반 종목
+Tier-Penny (STRONG BUY) → DNA ≥ 70      페니 종목 ($1 이하)
+HOLD 시그널  → DNA 60
+SELL 시그널  → DNA 40
 ```
 
 ### STRONG BUY 조건 (`python_engine/main.py`)

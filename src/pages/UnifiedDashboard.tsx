@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import {
@@ -30,7 +31,8 @@ import {
   Plus,
   Loader2,
   PieChart,
-  Trash2
+  Trash2,
+  FlaskConical
 } from 'lucide-react';
 
 // Hooks & Services
@@ -71,6 +73,7 @@ interface DashboardWatchlistItem extends WatchlistItem {
 const PENNY_DISPLAY_THRESHOLD = 1.5;
 
 export const UnifiedDashboard = () => {
+  const navigate = useNavigate();
   const { isHunting, triggerHunt } = useMarketEngine();
   const { data: strategyStats, isLoading: statsLoading } = useStrategyStats();
 
@@ -920,6 +923,25 @@ export const UnifiedDashboard = () => {
                           <div className="w-12">
                             <PennyQuantScoreBar score={stock.dna_score} size="sm" showLabel={false} />
                           </div>
+                          {/* 시뮬레이터 버튼 */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const params = new URLSearchParams({ ticker: stock.ticker });
+                              if (stock.rsi != null)  params.set('rsi',  String(Math.round(stock.rsi)));
+                              if (stock.rvol != null) params.set('rvol', String(stock.rvol.toFixed(1)));
+                              if (stock.adx != null)  params.set('adx',  String(Math.round(stock.adx)));
+                              // macdDiff > 0 → rising/golden 근사, < 0 → falling/dead
+                              if (stock.macdDiff != null) params.set('macd', stock.macdDiff > 0 ? 'rising' : 'falling');
+                              if (isPenny) params.set('penny', 'true');
+                              if (stock.price != null) params.set('entry', String(stock.price.toFixed(4)));
+                              navigate(`/dna-simulator?${params.toString()}`);
+                            }}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-300 text-slate-400 hover:text-indigo-500 transition-all shrink-0"
+                            title="DNA 시뮬레이터로 분석"
+                          >
+                            <FlaskConical className="w-3.5 h-3.5" />
+                          </button>
                           {/* 관심종목 등록 버튼 */}
                           {watchlistedTickers.has(stock.ticker) ? (
                             <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] stroke-[2.5]" />

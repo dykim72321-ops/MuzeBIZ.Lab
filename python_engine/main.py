@@ -63,11 +63,30 @@ webhook = WebhookManager()
 paper_engine = None
 
 
+import pandas_market_calendars as mcal
+
+_nyse_calendar = mcal.get_calendar("NYSE")
+_holiday_cache = {}
+
+
 def is_market_hours() -> bool:
-    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00). DST 자동 처리."""
+    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00 및 휴장일 체크). DST 자동 처리."""
     now_et = datetime.now(ZoneInfo("America/New_York"))
     if now_et.weekday() >= 5:
         return False
+
+    date_str = now_et.strftime("%Y-%m-%d")
+    if date_str not in _holiday_cache:
+        try:
+            schedule = _nyse_calendar.schedule(start_date=date_str, end_date=date_str)
+            _holiday_cache[date_str] = not schedule.empty
+        except Exception as e:
+            print(f"⚠️ [Calendar] Failed to fetch schedule for {date_str}: {e}")
+            _holiday_cache[date_str] = True  # fallback to assume it's open
+
+    if not _holiday_cache[date_str]:
+        return False
+
     open_min = 9 * 60 + 30
     close_min = 16 * 60
     cur_min = now_et.hour * 60 + now_et.minute
@@ -2504,6 +2523,8 @@ def calculate_position_sizing(
 
     # --- [Step 2 & 3] 켈리 공식 (Kelly Criterion) ---
     if dynamic_kelly_weight is not None:
+        # dynamic_kelly_weight는 이미 kelly_fraction(0.25) 감쇄가 적용된 순수 비중값.
+        # 정적 경로와 동일하게 kelly_fraction을 다시 적용하면 이중 감쇄 → 그대로 사용.
         optimal_kelly = dynamic_kelly_weight
         kelly_f = dynamic_kelly_weight  # 로그용
     else:
@@ -2514,10 +2535,11 @@ def calculate_position_sizing(
         optimal_kelly = max(0, kelly_f) * kelly_fraction
 
     # --- [Step 4] 최종 결합 및 제한 ---
-    # 50:50 가중 평균 (min 대비 Capital Efficiency 개선)
-    # min() 방식은 고변동성 자산에서 비중이 1~2%대로 급감하는 과소 할당 문제 발생
-    # 가중 평균은 두 관점(변동성 안전, 켈리 수익성)을 균형 있게 반영
-    final_weight = min((vol_weight + optimal_kelly) / 2.0, 1.0)
+    # 50:50 가중 평균으로 Capital Efficiency 개선 (min 대비 과소 할당 방지).
+    # 단, avg가 vol_weight의 2배를 초과할 수 없도록 추가 캡 적용:
+    # → dynamic_kelly가 극단적으로 높을 때 vol_weight 보호 기능을 우회하는 것을 방지
+    avg_weight = (vol_weight + optimal_kelly) / 2.0
+    final_weight = min(avg_weight, vol_weight * 2.0, 1.0)
 
     # RVOL 정보 추가 (포지션 사이징 참고용)
     rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns else 1.0
@@ -3781,6 +3803,53 @@ async def auto_penny_scan_scheduler():
         await asyncio.sleep(4 * 3600)  # 4시간 주기
 
 
+async def auto_cleanup_scheduler():
+    """모니터링 오빗(Watchlist) 데이터 누적 방지용 스케줄러.
+    - EXITED 상태 종목: 3일 경과 후 삭제
+    - WATCHING 상태 종목: 7일 경과 후 삭제
+    - HOLDING 등 다른 상태는 유지
+    하루에 한 번(24시간) 실행된다.
+    """
+    while True:
+        try:
+            now_utc = datetime.now(timezone.utc)
+            exited_threshold = (now_utc - timedelta(days=3)).isoformat()
+            watching_threshold = (now_utc - timedelta(days=7)).isoformat()
+
+            # EXITED 삭제
+            res_exited = await asyncio.to_thread(
+                supabase.table("watchlist")
+                .delete()
+                .eq("status", "EXITED")
+                .lt("created_at", exited_threshold)
+                .is_("user_id", "null")
+                .execute
+            )
+            exited_count = len(res_exited.data) if res_exited and res_exited.data else 0
+
+            # WATCHING 삭제
+            res_watching = await asyncio.to_thread(
+                supabase.table("watchlist")
+                .delete()
+                .eq("status", "WATCHING")
+                .lt("created_at", watching_threshold)
+                .is_("user_id", "null")
+                .execute
+            )
+            watching_count = (
+                len(res_watching.data) if res_watching and res_watching.data else 0
+            )
+
+            if exited_count > 0 or watching_count > 0:
+                print(
+                    f"🧹 [Auto-Cleanup] Watchlist 정리 완료: EXITED {exited_count}건, WATCHING {watching_count}건 삭제"
+                )
+        except Exception as e:
+            print(f"⚠️ [Auto-Cleanup] 정리 중 오류 발생: {e}")
+
+        await asyncio.sleep(24 * 3600)  # 24시간마다 실행
+
+
 async def _stop_current_stream():
     """현재 실행 중인 Alpaca 스트림 태스크를 취소하고, 종료(finally의 stream.close())까지
     기다린 뒤 반환한다. 취소만 하고 곧바로 재연결하면 Alpaca 서버가 이전 소켓을 아직
@@ -4043,6 +4112,7 @@ async def run_startup_sequence():
     asyncio.create_task(system_heartbeat())
     asyncio.create_task(stream_scheduler())
     asyncio.create_task(auto_penny_scan_scheduler())
+    asyncio.create_task(auto_cleanup_scheduler())
 
 
 # --- REALTIME PULSE ENGINE (End) ---

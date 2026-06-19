@@ -279,15 +279,13 @@ class PaperTradingManager:
                     f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
                 )
                 return
-            # recommended_weight: calculate_position_sizing()에서 min(vol, kelly)로
-            # 이미 결합된 비중(%). 0이면 기본 KELLY_FRACTION(15%) 사용
+            # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
+            # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 없음 → 진입 차단 (데이터 오류 보호)
             if recommended_weight <= 0:
-                # ATR 극단값 또는 동적 켈리 계산 실패 시 기본 KELLY_FRACTION으로 폴백
-                # (완전 차단 대신 보수적 최소 비중으로 진입 유지)
                 print(
-                    f"⚠️ [{ticker}] recommended_weight=0 → KELLY_FRACTION 폴백 ({KELLY_FRACTION*100:.0f}%)"
+                    f"⛔ [{ticker}] Kelly 회로차단기 작동 (recommended_weight=0) — 진입 차단"
                 )
-                recommended_weight = KELLY_FRACTION * 100
+                return
             effective_fraction = recommended_weight / 100.0
             effective_fraction = min(
                 effective_fraction, 0.25
