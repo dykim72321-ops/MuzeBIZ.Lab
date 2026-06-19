@@ -35,8 +35,7 @@ import {
 // Hooks & Services
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { useStrategyStats } from '../hooks/useStrategyStats';
-import { getWatchlist, addToWatchlist, removeFromWatchlist, cleanupOldWatchlistItems, type WatchlistItem } from '../services/watchlistService';
-import { fetchMultipleStocksOptimized } from '../services/stockService';
+import { getWatchlist, addToWatchlist, cleanupOldWatchlistItems, type WatchlistItem } from '../services/watchlistService';
 import { processSignal } from '../utils/signalProcessor';
 import { supabase as supabaseClient } from '../lib/supabase';
 import {
@@ -56,7 +55,6 @@ import {
 import { CommandSettings } from '../components/dashboard/CommandSettings';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { PennyQuantScoreBar } from '../components/penny/PennyQuantScoreBar';
-import { MonitoringOrbit } from '../components/dashboard/MonitoringOrbit';
 
 interface DashboardWatchlistItem extends WatchlistItem {
   currentPrice: number;
@@ -69,12 +67,11 @@ interface DashboardWatchlistItem extends WatchlistItem {
 const PENNY_DISPLAY_THRESHOLD = 1.5;
 
 export const UnifiedDashboard = () => {
-  const { isHunting, triggerHunt, pulseMap } = useMarketEngine();
+  const { isHunting, triggerHunt } = useMarketEngine();
   const { data: strategyStats, isLoading: statsLoading } = useStrategyStats();
 
   // 1. Data States
   const [watchlistItems, setWatchlistItems] = useState<DashboardWatchlistItem[]>([]);
-  const [watchlistStocks, setWatchlistStocks] = useState<any[]>([]);
   const [discoveryStocks, setDiscoveryStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [terminalData, setTerminalData] = useState<any | null>(null);
@@ -198,21 +195,7 @@ export const UnifiedDashboard = () => {
 
       const unifiedWatchlist = Array.from(unifiedMap.values());
 
-      const wlStocks = unifiedWatchlist.length > 0 ? await fetchMultipleStocksOptimized(unifiedWatchlist.map(i => i.ticker)) : [];
-
-      const normalizedWatchlist = unifiedWatchlist.map(item => {
-        const stockInfo = wlStocks.find(s => s.ticker === item.ticker);
-        const price = stockInfo?.price ?? item.buyPrice ?? 0;
-        return {
-          ...item,
-          currentPrice: price,
-          changePercent: stockInfo?.changePercent ?? 0,
-          isPenny: price <= PENNY_DISPLAY_THRESHOLD
-        };
-      });
-
-      setWatchlistItems(normalizedWatchlist);
-      setWatchlistStocks(wlStocks);
+      setWatchlistItems(unifiedWatchlist as DashboardWatchlistItem[]);
       setDiscoveryStocks((discoveryResult.data || []).filter(s => s.dna_score != null && s.price != null));
       
       setPennyPositions(
@@ -404,16 +387,9 @@ export const UnifiedDashboard = () => {
     setAddingTickers(new Set(addingTickersRef.current));
     try {
       await addToWatchlist(ticker, undefined, 'WATCHING', undefined, undefined, undefined, stock.dna_score ?? undefined);
-      toast.success(`${ticker} 관심종목 등록`, { description: '오빗 패널에 추가되었습니다.' });
+      toast.success(`${ticker} 관심종목 등록`);
       const wl = await getWatchlist();
-      const wlStocks = wl.length > 0 ? await fetchMultipleStocksOptimized(wl.map(i => i.ticker)) : [];
-      const normalized = wl.map(item => {
-        const s = wlStocks.find(s => s.ticker === item.ticker);
-        const price = s?.price ?? item.buyPrice ?? 0;
-        return { ...item, currentPrice: price, changePercent: s?.changePercent ?? 0, isPenny: price <= PENNY_DISPLAY_THRESHOLD };
-      });
-      setWatchlistItems(normalized);
-      setWatchlistStocks(wlStocks);
+      setWatchlistItems(wl as DashboardWatchlistItem[]);
     } catch (e: any) {
       toast.error(`${ticker} 등록 실패`, { description: e.message });
     } finally {
@@ -422,15 +398,6 @@ export const UnifiedDashboard = () => {
     }
   };
 
-  const handleRemoveWatchlist = async (ticker: string) => {
-    try {
-      await removeFromWatchlist(ticker);
-      toast.success(`${ticker} 관심종목 제거 완료`);
-      loadDashboardData();
-    } catch {
-      toast.error('관심종목 제거 실패');
-    }
-  };
 
   // ── Derived Chart Data ────────────────────────────────────────────────
   const chartData = useMemo(() => {
@@ -780,10 +747,10 @@ export const UnifiedDashboard = () => {
 
         </div>
         {/* ════════ MAIN SECTION ════════ */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-          
-          {/* LEFT 2/3 COLUMN: Chart & Daily recommendations */}
-          <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6">
+
+          {/* FULL WIDTH: Chart & Daily recommendations */}
+          <div className="space-y-6">
             
             {/* A. PERFORMANCE GROWTH CHART */}
             <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)] space-y-6">
@@ -854,14 +821,14 @@ export const UnifiedDashboard = () => {
                   <p className="text-xs font-semibold text-slate-600 mt-1 font-sans">상단의 "라이브 헌팅" 또는 "페니 스캔"을 가동해 보세요.</p>
                 </div>
               ) : (
-                <div className="flex flex-col">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   {discoveryStocks.map((stock) => {
                     const isPenny = (stock.price ?? 0) <= PENNY_DISPLAY_THRESHOLD && (stock.price ?? 0) > 0;
                     return (
                       <div
                         key={stock.ticker}
                         onClick={() => handleDeepDive(stock)}
-                        className="py-5 border-b border-slate-100 last:border-none hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-between group"
+                        className="py-4 px-4 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer flex items-center justify-between group"
                       >
                         <div className="flex items-center gap-3">
                           <div className={clsx(
@@ -919,17 +886,6 @@ export const UnifiedDashboard = () => {
               )}
             </div>
 
-          </div>
-
-          {/* RIGHT 1/3 COLUMN: Watchlist (Combined Orbit) */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
-            <MonitoringOrbit
-              watchlistItems={watchlistItems}
-              watchlistStocks={watchlistStocks}
-              pulseMap={pulseMap}
-              handleDeepDive={handleDeepDive}
-              handleRemoveWatchlist={handleRemoveWatchlist}
-            />
           </div>
 
         </div>

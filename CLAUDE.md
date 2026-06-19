@@ -197,7 +197,7 @@ scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SC
 |---|---|
 | **헤더** | 시장 개장 상태 · ARM 토글 · 라이브 헌팅 · 페니 스캔 · 설정 |
 | **지표 카드 4개** | 총 자산 · 가용 잔고 · 미실현 손익 · 백테스트 승률 |
-| **메인 2열** | 좌(2/3): 누적 손익 차트 + 퀀트 추천 종목 / 우(1/3): 통합 관심종목 오빗 |
+| **메인 풀와이드** | 누적 손익 차트 + 퀀트 추천 종목 2열 그리드 (full width) |
 | **하단 2열** | 좌(2/3): 현재 보유 포지션 테이블 / 우(1/3): 최근 청산 이력 |
 
 ### 헤더 버튼 동작
@@ -208,12 +208,6 @@ scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SC
 | **라이브 헌팅** | Edge Function `admin-proxy/api/hunt` 트리거 | Alpaca Universe · DNA ≥ 80 · 일반 종목 |
 | **페니 스캔** | `POST /api/penny/scan` | yfinance · $1.50 이하 · DNA ≥ 70 · 2개월 일봉 |
 | **설정** | NexGuard Control 슬라이드 패널 열기 | 전략 파라미터 수정 |
-
-### 관심종목 오빗 패널
-
-- **WATCHING / HOLDING** 종목만 기본 표시
-- **EXITED** 종목은 "청산 완료 N개 ▼ 펼치기" 토글로 숨김 처리
-- 삭제 버튼(휴지통)은 hover 시에만 노출
 
 ### 누적 손익 차트
 
@@ -227,7 +221,7 @@ scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SC
 const PENNY_DISPLAY_THRESHOLD = 1.5; // 현재가 기준 +50% tolerance
 ```
 
-- 관심종목·발굴 종목의 `isPenny` 판정: `currentPrice <= 1.5`
+- 발굴 종목의 `isPenny` 판정: `currentPrice <= 1.5`
 - 포지션·이력의 `isPenny` 판정: `entry_price <= 1.0` (진입가 기준, 변경 없음)
 
 ### 컴포넌트 연결 구조
@@ -247,8 +241,9 @@ Frontend (Vite :5173)
 ### 데이터 로딩 패턴 (UnifiedDashboard)
 
 단일 `loadDashboardData()` 함수가 모든 데이터를 병렬 fetch:
-- watchlist, paper_positions, paper_history, paper_account, daily_discovery
+- watchlist (티커·상태만, 가격 조회 없음), paper_positions, paper_history, paper_account, daily_discovery
 - 30초 `setInterval`로 자동 갱신 (ARM 상태 포함)
+- `watchlistItems`는 discovery 카드의 관심종목 체크 표시에만 사용 (`watchlistedTickers` Set)
 
 ---
 
