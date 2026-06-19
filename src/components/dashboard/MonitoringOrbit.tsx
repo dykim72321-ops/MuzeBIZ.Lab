@@ -226,7 +226,7 @@ const OrbitItem: React.FC<OrbitItemProps> = ({ item, idx, stock, pulseData, isSe
       {/* Hover Trash Button */}
       <button
         onClick={(e) => { e.stopPropagation(); onRemove(item.ticker); }}
-        className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-rose-500 transition-colors opacity-0 group-hover/item:opacity-100 z-20 cursor-pointer"
+        className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all opacity-0 group-hover/item:opacity-100 z-20 cursor-pointer"
         title="제거"
       >
         <Trash2 className="w-4 h-4" />

@@ -13,6 +13,20 @@ import {
   Apple
 } from 'lucide-react';
 
+// 세일 마감 일시 — 여기 한 곳만 수정하면 헤더·히어로 배지 모두 반영
+const SALE_LABEL = '55% 할인';
+const SALE_DEADLINE = new Date('2026-06-30T23:59:59').getTime();
+
+const calcTimeLeft = () => {
+  const diff = SALE_DEADLINE - Date.now();
+  if (diff <= 0) return { hours: 0, minutes: 0, seconds: 0 };
+  return {
+    hours: Math.floor(diff / (1000 * 60 * 60)),
+    minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
+    seconds: Math.floor((diff % (1000 * 60)) / 1000),
+  };
+};
+
 export default function LandingPage() {
   const { isLoading, isAuthenticated, signIn } = useMockAuth();
   const navigate = useNavigate();
@@ -35,28 +49,10 @@ export default function LandingPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
 
-  // Countdown Timer State
-  const [timeLeft, setTimeLeft] = useState({
-    hours: 26,
-    minutes: 46,
-    seconds: 29
-  });
+  const [timeLeft, setTimeLeft] = useState(calcTimeLeft);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev.seconds > 0) {
-          return { ...prev, seconds: prev.seconds - 1 };
-        } else if (prev.minutes > 0) {
-          return { ...prev, minutes: prev.minutes - 1, seconds: 59 };
-        } else if (prev.hours > 0) {
-          return { hours: prev.hours - 1, minutes: 59, seconds: 59 };
-        } else {
-          clearInterval(timer);
-          return prev;
-        }
-      });
-    }, 1000);
+    const timer = setInterval(() => setTimeLeft(calcTimeLeft()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -111,7 +107,7 @@ export default function LandingPage() {
           {/* Right Header Controls */}
           <div className="flex items-center gap-4">
             <button className="bg-blue-50 text-blue-600 border border-blue-200 text-[11px] font-bold tracking-wide px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-all flex items-center gap-1 cursor-pointer">
-              55% 할인 - 반짝 세일
+              {SALE_LABEL} - 반짝 세일
             </button>
             <div className="flex items-center gap-4 text-xs font-bold font-sans">
               <button 
@@ -162,7 +158,7 @@ export default function LandingPage() {
             <span className="text-slate-700 font-mono tracking-wider">
               {formatTime(timeLeft.hours)}시간 : {formatTime(timeLeft.minutes)}분 : {formatTime(timeLeft.seconds)}초
             </span>
-            <span className="bg-blue-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded ml-1">55% 할인</span>
+            <span className="bg-blue-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded ml-1">{SALE_LABEL}</span>
           </div>
 
           {/* Headline */}
@@ -173,7 +169,7 @@ export default function LandingPage() {
 
           {/* Description */}
           <p className="text-slate-600 text-base sm:text-lg max-w-xl leading-relaxed font-medium">
-            진지한 투자자들이 투자를 실행하기 전에 의존하는 데이터, 도구, 그리고 AI 기반 투자 아이디어입니다.
+            진지한 투자자들이 투자를 실행하기 전에 의존하는 데이터, 도구, 그리고 퀀트 알고리즘 기반 투자 시그널입니다.
           </p>
 
           {/* CTAs (Vibrant solid buttons, extremely easy to find) */}

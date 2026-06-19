@@ -470,7 +470,7 @@ export const UnifiedDashboard = () => {
             </div>
             <h1 className="text-[25px] font-extrabold text-slate-900 flex items-center gap-3 tracking-tight">
               <Zap className="w-8 h-8 text-indigo-600 drop-shadow-[0_0_12px_rgba(79,70,229,0.6)] stroke-[2.5]" />
-              통합 자산 지휘소
+              통합 지휘소
             </h1>
             <div className="flex flex-wrap items-center gap-2 mt-1.5">
               <span className={clsx(
@@ -491,7 +491,7 @@ export const UnifiedDashboard = () => {
               onClick={handleToggleArm}
               title={isArmed ? '클릭하면 자동매매를 비활성화합니다' : '클릭하면 자동매매를 활성화합니다'}
               className={clsx(
-                "flex items-center gap-0 border font-bold text-xs uppercase tracking-wider transition-all duration-200 active:scale-95 overflow-hidden",
+                "flex items-center gap-0 border font-bold text-xs uppercase tracking-wider transition-all duration-200 active:scale-95 overflow-hidden hover:shadow-md hover:scale-[1.01]",
                 isArmed
                   ? "border-red-300"
                   : "border-emerald-300"
@@ -528,7 +528,7 @@ export const UnifiedDashboard = () => {
             <button
               onClick={() => setIsSettingsOpen(true)}
               title="퀀트 전략 파라미터 설정"
-              className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors text-xs font-extrabold uppercase tracking-wider cursor-pointer font-sans"
+              className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 transition-all text-xs font-extrabold uppercase tracking-wider cursor-pointer font-sans"
             >
               <ShieldCheck className="w-4 h-4 text-indigo-600 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)] stroke-[2.5]" />
               설정
@@ -872,7 +872,7 @@ export const UnifiedDashboard = () => {
                           ) : (
                             <button
                               onClick={(e) => handleAddDiscoveryToWatchlist(e, stock)}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-200 text-slate-500 hover:text-slate-500 transition-all shrink-0"
+                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-300 text-slate-400 hover:text-indigo-600 transition-all shrink-0"
                               title="관심종목 추가"
                             >
                               <Plus className="w-3.5 h-3.5" />
@@ -966,7 +966,7 @@ export const UnifiedDashboard = () => {
                           <td className="py-4 text-right">
                             <button
                               onClick={() => handleClosePosition(pos.ticker)}
-                              className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-600 border border-rose-500/20 text-rose-450 hover:text-white text-xs font-bold rounded-lg transition-all cursor-pointer font-sans"
+                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-600 border border-rose-200 text-rose-600 hover:text-white text-xs font-bold rounded-lg transition-all cursor-pointer font-sans"
                             >
                               즉시 청산
                             </button>
@@ -1035,7 +1035,7 @@ export const UnifiedDashboard = () => {
                         </div>
                         <button
                           onClick={() => handleDeleteHistory(trade.id, trade.ticker)}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-500 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-500 rounded-lg transition-all"
                           title="이력 삭제"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

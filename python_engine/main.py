@@ -2114,7 +2114,7 @@ async def get_strategy_stats():
             t for t in trades if (t.get("created_at") or "") < cutoff_iso
         ]
 
-        def _win_rate_of(bucket: list) -> float | None:
+        def _win_rate_of(bucket: list):
             if not bucket:
                 return None
             wins = sum(1 for t in bucket if float(t.get("pnl_pct") or 0) > 0)
@@ -2778,10 +2778,21 @@ async def run_penny_scan_internal(
                 trading_client.get_all_assets, assets_req
             )
             # tradable 주식만 필터 (OTC 제외)
+            import re as _re
+
+            _SKIP_PATTERN = _re.compile(
+                r"\."  # 우선주/유닛 (BFH.PRA, AMPX.WS 등 점 포함 심볼)
+                r"|W[SR]?$"  # 워런트 접미사 (W, WS, WR)
+                r"|[0-9]$"  # 숫자로 끝나는 비정규 심볼
+                r"|R$"  # 권리주 (5자 이상, ex. RDACR)
+            )
             tradable = [
                 a.symbol
                 for a in all_assets
-                if a.tradable and a.exchange in ("NASDAQ", "NYSE", "AMEX", "ARCA")
+                if a.tradable
+                and a.exchange in ("NASDAQ", "NYSE", "AMEX", "ARCA")
+                and not _SKIP_PATTERN.search(a.symbol)
+                and len(a.symbol) <= 5  # 6자 이상은 비정규 파생 심볼
             ]
             print(f"📡 [Penny] Alpaca universe: {len(tradable)} tradable US equities")
 
