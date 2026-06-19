@@ -17,6 +17,91 @@ import {
 } from 'recharts';
 import { generateVerdictFromIndicators } from '../../utils/generateVerdictFromIndicators';
 
+// ── Candlestick Chart (SVG-based) ──────────────────────────────────────
+const CandlestickChart = ({
+    ohlcData,
+}: {
+    ohlcData: { date: string; open: number; high: number; low: number; close: number }[];
+}) => {
+    const data = ohlcData.slice(-30);
+    if (data.length < 2) return null;
+
+    const allHighs = data.map(d => d.high);
+    const allLows = data.map(d => d.low);
+    const minPrice = Math.min(...allLows);
+    const maxPrice = Math.max(...allHighs);
+    const pad = (maxPrice - minPrice) * 0.08 || maxPrice * 0.02;
+    const domMin = minPrice - pad;
+    const domMax = maxPrice + pad;
+    const range = domMax - domMin || 1;
+
+    const WIDTH = 400;
+    const HEIGHT = 180;
+    const MARGIN = { top: 10, right: 40, bottom: 24, left: 4 };
+    const chartW = WIDTH - MARGIN.left - MARGIN.right;
+    const chartH = HEIGHT - MARGIN.top - MARGIN.bottom;
+
+    const toY = (price: number) => MARGIN.top + chartH - ((price - domMin) / range) * chartH;
+    const candleW = Math.max(2, (chartW / data.length) * 0.6);
+
+    const yTicks = 4;
+    const yTickValues = Array.from({ length: yTicks + 1 }, (_, i) => domMin + (range * i) / yTicks);
+
+    const xLabelIndices = [0, Math.floor(data.length / 3), Math.floor((2 * data.length) / 3), data.length - 1];
+
+    return (
+        <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-slate-800/80 overflow-hidden">
+            <svg width="100%" height="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="xMidYMid meet">
+                {/* Grid lines */}
+                {yTickValues.map((v, i) => (
+                    <g key={i}>
+                        <line
+                            x1={MARGIN.left} y1={toY(v)}
+                            x2={WIDTH - MARGIN.right} y2={toY(v)}
+                            stroke="#1e293b" strokeWidth={0.5}
+                        />
+                        <text
+                            x={WIDTH - MARGIN.right + 4} y={toY(v) + 3}
+                            fontSize={8} fill="#475569" fontFamily="monospace"
+                        >
+                            ${v.toFixed(v < 1 ? 3 : 2)}
+                        </text>
+                    </g>
+                ))}
+                {/* Candles */}
+                {data.map((d, i) => {
+                    const x = MARGIN.left + (i + 0.5) * (chartW / data.length);
+                    const isUp = d.close >= d.open;
+                    const color = isUp ? '#10b981' : '#f43f5e';
+                    const bodyTop = toY(Math.max(d.open, d.close));
+                    const bodyBot = toY(Math.min(d.open, d.close));
+                    const bodyH = Math.max(1, bodyBot - bodyTop);
+                    return (
+                        <g key={i}>
+                            {/* Wick */}
+                            <line x1={x} y1={toY(d.high)} x2={x} y2={toY(d.low)} stroke={color} strokeWidth={1} />
+                            {/* Body */}
+                            <rect x={x - candleW / 2} y={bodyTop} width={candleW} height={bodyH} fill={color} fillOpacity={0.9} />
+                        </g>
+                    );
+                })}
+                {/* X axis labels */}
+                {xLabelIndices.map(i => {
+                    if (i >= data.length) return null;
+                    const x = MARGIN.left + (i + 0.5) * (chartW / data.length);
+                    const d = data[i];
+                    const label = d.date ? d.date.substring(5).replace('-', '/') : '';
+                    return (
+                        <text key={i} x={x} y={HEIGHT - 4} fontSize={8} fill="#475569" fontFamily="monospace" textAnchor="middle">
+                            {label}
+                        </text>
+                    );
+                })}
+            </svg>
+        </div>
+    );
+};
+
 // ── Price Trajectory Chart (실제 히스토리 기반) ───────────────────────────
 const PriceTrajectoryChart = ({
     history,
@@ -24,13 +109,19 @@ const PriceTrajectoryChart = ({
     buyPrice,
     targetPrice,
     stopPrice,
+    ohlcData,
 }: {
     history: { price: number; date: string }[];
     currentPrice: number;
     buyPrice?: number;
     targetPrice?: number;
     stopPrice?: number;
+    ohlcData?: { date: string; open: number; high: number; low: number; close: number }[];
 }) => {
+    // If OHLC data is available, render candlestick chart
+    if (ohlcData && ohlcData.length >= 2) {
+        return <CandlestickChart ohlcData={ohlcData} />;
+    }
     // Ensure current price is included as the last data point
     const chartData = [...history];
     if (currentPrice > 0 && (chartData.length === 0 || chartData[chartData.length - 1]?.price !== currentPrice)) {
@@ -249,6 +340,7 @@ interface StockTerminalModalProps {
         changePercent?: number;
         history?: { price: number; date: string }[];
         buyPrice?: number;
+        ohlcData?: { date: string; open: number; high: number; low: number; close: number }[];
     };
     onAddToWatchlist?: () => Promise<void>;
     onExecuteTrade?: (tradeParams: any) => void;
@@ -416,6 +508,7 @@ export const StockTerminalModal = ({
                                         buyPrice={displayData.buyPrice}
                                         targetPrice={displayData.targetPrice}
                                         stopPrice={displayData.stopPrice}
+                                        ohlcData={displayData.ohlcData}
                                     />
                                     <div className="grid grid-cols-3 gap-3 mt-4">
                                         <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800/60 font-mono">

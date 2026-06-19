@@ -372,6 +372,14 @@ class DNAValidator:
             "avg_days": round(avg_days, 1),
         }
 
+        # equity curve for frontend chart
+        equity_curve = []
+        capital = 10000.0
+        for idx_num, (_, row) in enumerate(df_trades.iterrows()):
+            capital *= 1 + row["pnl"]
+            equity_curve.append({"trade": idx_num + 1, "value": round(capital, 2)})
+        stats["equity_curve"] = [{"trade": 0, "value": 10000.0}] + equity_curve
+
         print("\n" + "=" * 60)
         print("  🧬 DNA Scoring Engine | Statistical Backtest Report")
         print("=" * 60)

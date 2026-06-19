@@ -8,7 +8,8 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid
+  CartesianGrid,
+  Line,
 } from 'recharts';
 
 import {
@@ -55,6 +56,9 @@ import {
 import { CommandSettings } from '../components/dashboard/CommandSettings';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { PennyQuantScoreBar } from '../components/penny/PennyQuantScoreBar';
+import { RiskAnalyticsPanel } from '../components/dashboard/RiskAnalyticsPanel';
+import { PositionAnalyticsPanel } from '../components/dashboard/PositionAnalyticsPanel';
+import { BacktestPanel } from '../components/dashboard/BacktestPanel';
 
 interface DashboardWatchlistItem extends WatchlistItem {
   currentPrice: number;
@@ -95,6 +99,9 @@ export const UnifiedDashboard = () => {
   // 5. Discovery watchlist-add in-flight guard (ref = synchronous, avoids double-click race)
   const addingTickersRef = useRef<Set<string>>(new Set());
   const [addingTickers, setAddingTickers] = useState<Set<string>>(new Set());
+
+  // 6. Chart time range
+  const [chartRange, setChartRange] = useState<'7d' | '30d' | 'all'>('all');
 
   // US 시장 개장 여부 체크 (ET 기준 평일 09:30~16:00)
   useEffect(() => {
@@ -286,8 +293,11 @@ export const UnifiedDashboard = () => {
 
     // 2. 백그라운드에서 실시간 지표 및 30일 가격 히스토리를 가져와 모달 업데이트
     try {
-      const { fetchStockQuote } = await import('../services/stockService');
-      const enrichedStock = await fetchStockQuote(stock.ticker, '1mo');
+      const { fetchStockQuote, fetchStockOHLC } = await import('../services/stockService');
+      const [enrichedStock, ohlc] = await Promise.all([
+        fetchStockQuote(stock.ticker, '1mo'),
+        fetchStockOHLC(stock.ticker, '1mo'),
+      ]);
       if (enrichedStock) {
         setTerminalData((prev: any) => {
           if (!prev || prev.ticker !== stock.ticker) return prev;
@@ -303,8 +313,13 @@ export const UnifiedDashboard = () => {
             adx: enrichedStock.adx,
             rvol: enrichedStock.rvol,
             history: enrichedStock.history?.map(h => ({ price: h.price, date: h.date })) || [],
+            ohlcData: ohlc.length > 0 ? ohlc : undefined,
           };
         });
+      } else if (ohlc.length > 0) {
+        setTerminalData((prev: any) =>
+          prev?.ticker === stock.ticker ? { ...prev, ohlcData: ohlc } : prev
+        );
       }
     } catch (err) {
       console.warn(`Failed to fetch enriched quote in handleDeepDive for ${stock.ticker}:`, err);
@@ -399,19 +414,43 @@ export const UnifiedDashboard = () => {
   };
 
 
-  // ── Derived Chart Data ────────────────────────────────────────────────
+  // ── Derived Chart Data (range-filtered + MA5) ────────────────────────
   const chartData = useMemo(() => {
     if (!pennyHistory || pennyHistory.length === 0) return [];
-    const baseCapital = 100000;
-    const sortedHistory = [...pennyHistory].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
-    let runningTotal = baseCapital;
-    const points = sortedHistory.map((item, idx) => {
-      runningTotal += Number(item.profit_amt || 0);
-      const dateStr = item.created_at ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : `T${idx+1}`;
-      return { name: dateStr, value: runningTotal };
+    const BASE = 100000;
+    const sorted = [...pennyHistory].sort(
+      (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
+    );
+    const now = Date.now();
+    const cutoffMs = chartRange === '7d' ? 7 * 86_400_000 : chartRange === '30d' ? 30 * 86_400_000 : Infinity;
+
+    let running = BASE;
+    const allPoints = sorted.map(item => {
+      running += Number(item.profit_amt ?? 0);
+      return {
+        name: item.created_at
+          ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })
+          : '?',
+        value: running,
+        ts: new Date(item.created_at ?? 0).getTime(),
+      };
     });
-    return [{ name: 'Start', value: baseCapital }, ...points];
-  }, [pennyHistory]);
+
+    const inRange = cutoffMs === Infinity ? allPoints : allPoints.filter(p => now - p.ts <= cutoffMs);
+    if (inRange.length === 0) return [];
+
+    const firstIdx = allPoints.indexOf(inRange[0]);
+    const startValue = firstIdx > 0 ? allPoints[firstIdx - 1].value : BASE;
+    const startLabel = chartRange === '7d' ? '-7일' : chartRange === '30d' ? '-30일' : 'Start';
+
+    const maPoints = inRange.map((p, i, arr) => {
+      const window = arr.slice(Math.max(0, i - 4), i + 1);
+      const ma = window.reduce((s, w) => s + w.value, 0) / window.length;
+      return { ...p, ma: Math.round(ma) };
+    });
+
+    return [{ name: startLabel, value: startValue, ts: 0, ma: startValue }, ...maPoints];
+  }, [pennyHistory, chartRange]);
 
 
 
@@ -571,7 +610,7 @@ export const UnifiedDashboard = () => {
 
         {/* ════════ METRICS GRID ════════ */}
         <div className="w-full">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
           {/* 1. Total Assets */}
           <div className="bg-white border border-slate-200/85 rounded-2xl p-6 flex flex-col justify-between min-h-[160px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] relative">
             <div className="flex justify-between items-start z-10">
@@ -760,14 +799,30 @@ export const UnifiedDashboard = () => {
                   <h2 className="text-[15px] font-extrabold text-slate-900 font-sans">포트폴리오 자산 성장 및 누적 손익 곡선</h2>
                   <p className="text-[13px] font-semibold text-slate-650 mt-1 leading-relaxed font-sans">실시간 청산 완료된 거래 내역에 기반한 가상 자산의 누적 성장 흐름을 시각화합니다.</p>
                 </div>
-                <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 font-sans">
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-500" /> 가상 자산 평가액</span>
-                  <span className="text-slate-500">|</span>
-                  <span>최종 갱신: <span className="font-mono text-[11px]">{lastFetchedTime}</span></span>
+                <div className="flex flex-col items-end gap-2">
+                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg">
+                    {(['7d', '30d', 'all'] as const).map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setChartRange(r)}
+                        className={clsx(
+                          "px-3 py-1 text-[11px] font-bold rounded-md transition-all",
+                          chartRange === r ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                        )}
+                      >
+                        {r === '7d' ? '7일' : r === '30d' ? '30일' : '전체'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-500">
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-0.5 bg-indigo-500 rounded" /> 자산</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-0.5 bg-amber-400 rounded" style={{ backgroundImage: 'repeating-linear-gradient(90deg,#f59e0b 0,#f59e0b 4px,transparent 4px,transparent 6px)' }} /> MA5</span>
+                    <span className="font-mono text-[10px] text-slate-400">{lastFetchedTime}</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="h-72 w-full">
+              <div className="h-48 sm:h-72 w-full">
                 {chartData.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center gap-3 border border-dashed border-slate-200">
                     <BarChart3 className="w-8 h-8 text-indigo-500 drop-shadow-[0_0_12px_rgba(79,70,229,0.4)] stroke-[2.5]" />
@@ -795,6 +850,7 @@ export const UnifiedDashboard = () => {
                     />
                     <Tooltip content={<CustomTooltip />} />
                     <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
+                    <Line type="monotone" dataKey="ma" stroke="#f59e0b" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
                   </AreaChart>
                 </ResponsiveContainer>
                 )}
@@ -890,6 +946,12 @@ export const UnifiedDashboard = () => {
 
         </div>
 
+        {/* ════════ ANALYTICS PANELS ════════ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+          <RiskAnalyticsPanel history={pennyHistory} strategyStats={strategyStats} />
+          <PositionAnalyticsPanel positions={pennyPositions} totalEquity={pennyAccount?.total_assets ?? 100000} />
+        </div>
+
         {/* ════════ BOTTOM SECTION: Positions & History ════════ */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start mt-8">
           
@@ -912,10 +974,10 @@ export const UnifiedDashboard = () => {
                   <tr className="border-b border-slate-100 text-[10px] font-mono font-semibold text-slate-600 uppercase tracking-widest">
                     <th className="pb-3">종목</th>
                     <th className="pb-3 text-right">구분</th>
-                    <th className="pb-3 text-right font-mono text-[10px]">수량</th>
+                    <th className="pb-3 text-right font-mono text-[10px] hidden md:table-cell">수량</th>
                     <th className="pb-3 text-right font-mono text-[10px]">진입가</th>
                     <th className="pb-3 text-right font-mono text-[10px]">현재가</th>
-                    <th className="pb-3 text-right font-mono text-[10px]">Trailing Stop</th>
+                    <th className="pb-3 text-right font-mono text-[10px] hidden md:table-cell">Trailing Stop</th>
                     <th className="pb-3 text-right font-mono text-[10px]">평가 손익 (P&L)</th>
                     <th className="pb-3 text-right"></th>
                   </tr>
@@ -947,12 +1009,12 @@ export const UnifiedDashboard = () => {
                               {pos.isPenny ? '페니' : '일반'}
                             </span>
                           </td>
-                          <td className="py-4 text-right font-mono text-slate-600 text-sm font-semibold tabular-nums">{Number(pos.units).toFixed(2)}</td>
+                          <td className="py-4 text-right font-mono text-slate-600 text-sm font-semibold tabular-nums hidden md:table-cell">{Number(pos.units).toFixed(2)}</td>
                           <td className="py-4 text-right font-mono text-slate-600 text-sm font-semibold tabular-nums">${Number(pos.entry_price).toFixed(decimals)}</td>
                           <td className="py-4 text-right font-mono text-slate-900 text-sm font-bold tabular-nums">
                             {pos.current_price != null ? `$${Number(pos.current_price).toFixed(decimals)}` : <span className="text-slate-500">—</span>}
                           </td>
-                          <td className="py-4 text-right font-mono text-rose-500 text-sm font-semibold tabular-nums">
+                          <td className="py-4 text-right font-mono text-rose-500 text-sm font-semibold tabular-nums hidden md:table-cell">
                             {pos.ts_threshold ? `$${Number(pos.ts_threshold).toFixed(decimals)}` : 'N/A'}
                           </td>
                           <td className={clsx("py-4 text-right font-mono tabular-nums text-base font-black", hasPnl ? (isProfit ? "text-emerald-500" : "text-rose-500") : "text-slate-500")}>
@@ -1019,7 +1081,7 @@ export const UnifiedDashboard = () => {
                               {(trade.pnl_pct ?? 0) >= 0 ? '+' : ''}{Number(trade.pnl_pct ?? 0).toFixed(1)}%
                             </span>
                           </div>
-                          <span className="text-xs text-slate-600 font-medium block mt-1.5">
+                          <span className="text-xs text-slate-600 font-medium block mt-1.5 hidden sm:block">
                             진입: ${Number(trade.entry_price || 0).toFixed(isPenny ? 4 : 2)} ➔ 청산: ${Number(trade.exit_price || 0).toFixed(isPenny ? 4 : 2)}
                           </span>
                         </div>
@@ -1095,6 +1157,7 @@ export const UnifiedDashboard = () => {
             </button>
           </div>
           <CommandSettings />
+          <BacktestPanel />
         </div>
       </div>
 

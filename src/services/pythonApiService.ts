@@ -354,3 +354,34 @@ export async function apiFetch(
     throw error;
   }
 }
+
+export interface BacktestRunParams {
+  tickers?: string[];
+  start_date?: string;
+  end_date?: string;
+  gamma?: number;
+  delta?: number;
+  lambda_val?: number;
+  slippage_rate?: number;
+  deviation_threshold?: number;
+  target_atr?: number;
+}
+
+export interface BacktestResult {
+  total_trades: number;
+  win_rate: number;
+  avg_pnl: number;
+  avg_win: number;
+  avg_loss: number;
+  profit_factor: number;
+  mdd: number;
+  recovery_days: number;
+  avg_days: number;
+  equity_curve?: { trade: number; value: number }[];
+  is_empty?: boolean;
+}
+
+export async function runBacktest(params: BacktestRunParams): Promise<BacktestResult> {
+  const res = await brokerApiFetch('/api/backtest/run', 'POST', params);
+  return res as BacktestResult;
+}

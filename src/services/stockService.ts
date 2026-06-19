@@ -665,3 +665,34 @@ function getDescription(ticker: string): string {
   const descriptions: Record<string, string> = { SNDL: 'Cannabis company', CLOV: 'Healthcare AI' };
   return descriptions[ticker] || 'High-growth potential stock.';
 }
+
+export interface OHLCPoint {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+export async function fetchStockOHLC(ticker: string, range: string = '1mo'): Promise<OHLCPoint[]> {
+  try {
+    const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=${range}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]) return [];
+    const q = result.indicators.quote[0];
+    return result.timestamp
+      .map((ts: number, i: number) => ({
+        date: new Date(ts * 1000).toISOString().split('T')[0],
+        open: q.open?.[i] ?? 0,
+        high: q.high?.[i] ?? 0,
+        low: q.low?.[i] ?? 0,
+        close: q.close?.[i] ?? 0,
+      }))
+      .filter((p: OHLCPoint) => p.close > 0);
+  } catch {
+    return [];
+  }
+}
