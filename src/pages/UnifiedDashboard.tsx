@@ -35,6 +35,9 @@ import {
   FlaskConical
 } from 'lucide-react';
 
+// Types
+import type { DiscoveryStock, PaperPosition, PaperHistory, PaperAccount, AlpacaAccount, TerminalData } from '../types/dashboard';
+
 // Hooks & Services
 import { useMarketEngine } from '../hooks/useMarketEngine';
 import { useStrategyStats } from '../hooks/useStrategyStats';
@@ -79,9 +82,9 @@ export const UnifiedDashboard = () => {
 
   // 1. Data States
   const [watchlistItems, setWatchlistItems] = useState<DashboardWatchlistItem[]>([]);
-  const [discoveryStocks, setDiscoveryStocks] = useState<any[]>([]);
+  const [discoveryStocks, setDiscoveryStocks] = useState<DiscoveryStock[]>([]);
   const [loading, setLoading] = useState(true);
-  const [terminalData, setTerminalData] = useState<any | null>(null);
+  const [terminalData, setTerminalData] = useState<TerminalData | null>(null);
   const [lastFetchedTime, setLastFetchedTime] = useState<string>('--:--:--');
   const [isMarketOpen, setIsMarketOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -91,10 +94,10 @@ export const UnifiedDashboard = () => {
   const [pennyScanStatus, setPennyScanStatus] = useState<PennyScanStatus | null>(null);
 
   // 3. Trade & Account States
-  const [pennyPositions, setPennyPositions] = useState<any[]>([]);
-  const [pennyHistory, setPennyHistory] = useState<any[]>([]);
-  const [pennyAccount, setPennyAccount] = useState<any>(null);
-  const [alpacaAccount, setAlpacaAccount] = useState<any>(null);
+  const [pennyPositions, setPennyPositions] = useState<PaperPosition[]>([]);
+  const [pennyHistory, setPennyHistory] = useState<PaperHistory[]>([]);
+  const [pennyAccount, setPennyAccount] = useState<PaperAccount | null>(null);
+  const [alpacaAccount, setAlpacaAccount] = useState<AlpacaAccount | null>(null);
 
   // 4. Edge Monitor alert state
   const [edgeAlert, setEdgeAlert] = useState<{ active: boolean; message: string | null }>({ active: false, message: null });
@@ -170,7 +173,7 @@ export const UnifiedDashboard = () => {
         unifiedMap.set(item.ticker, { ...item } as DashboardWatchlistItem);
       });
 
-      pp.forEach((pos: any) => {
+      pp.forEach((pos: PaperPosition) => {
         if (unifiedMap.has(pos.ticker)) {
           const existing = unifiedMap.get(pos.ticker)!;
           existing.status = 'HOLDING';
@@ -185,8 +188,8 @@ export const UnifiedDashboard = () => {
         }
       });
 
-      ph.forEach((hist: any) => {
-        if (!pp.some((p: any) => p.ticker === hist.ticker)) {
+      ph.forEach((hist: PaperHistory) => {
+        if (!pp.some((p: PaperPosition) => p.ticker === hist.ticker)) {
           if (unifiedMap.has(hist.ticker)) {
             const existing = unifiedMap.get(hist.ticker)!;
             // If it's not holding anymore, but we have history, it's EXITED
@@ -209,7 +212,7 @@ export const UnifiedDashboard = () => {
       setDiscoveryStocks((discoveryResult.data || []).filter(s => s.dna_score != null && s.price != null));
       
       setPennyPositions(
-        pp.map((pos: any) => {
+        pp.map((pos: PaperPosition) => {
           const cp = pos.current_price != null ? Number(pos.current_price) : null;
           const ep = Number(pos.entry_price);
           const units = Number(pos.units);
@@ -257,11 +260,11 @@ export const UnifiedDashboard = () => {
   }, [loadDashboardData, loadArmStatus]);
 
   // ── Handlers ─────────────────────────────────────────────────────────
-  const handleDeepDive = async (stock: any) => {
+  const handleDeepDive = async (stock: DiscoveryStock) => {
     const displaySignal = processSignal(stock);
     const rawSummary = stock.rawAiSummary || "";
 
-    let quantData: any = null;
+    let quantData: Record<string, unknown> | null = null;
     if (rawSummary && rawSummary.trim().startsWith('{')) {
       try {
         quantData = JSON.parse(rawSummary);
@@ -275,10 +278,10 @@ export const UnifiedDashboard = () => {
     // 1. 모달이 즉시 반응하도록 로컬 데이터로 초기화
     const initialData = {
       ticker: stock.ticker,
-      dnaScore: stock.dna_score || stock.dnaScore || 0,
+      dnaScore: stock.dna_score || 0,
       bullPoints: displaySignal.bullPoints,
       bearPoints: displaySignal.bearPoints,
-      riskLevel: (stock.dna_score || stock.dnaScore || 0) >= 70 ? 'Low' : (stock.dna_score || stock.dnaScore || 0) >= 50 ? 'Medium' : 'High',
+      riskLevel: (stock.dna_score || 0) >= 70 ? 'Low' : (stock.dna_score || 0) >= 50 ? 'Medium' : 'High',
       formulaVerdict: displaySignal.reasoning,
       price: stock.price || 0,
       change: `${(stock.change_percent || stock.changePercent || 0).toFixed(2)}%`,
@@ -302,7 +305,7 @@ export const UnifiedDashboard = () => {
         fetchStockOHLC(stock.ticker, '1mo'),
       ]);
       if (enrichedStock) {
-        setTerminalData((prev: any) => {
+        setTerminalData((prev: TerminalData | null) => {
           if (!prev || prev.ticker !== stock.ticker) return prev;
           return {
             ...prev,
@@ -320,7 +323,7 @@ export const UnifiedDashboard = () => {
           };
         });
       } else if (ohlc.length > 0) {
-        setTerminalData((prev: any) =>
+        setTerminalData((prev: TerminalData | null) =>
           prev?.ticker === stock.ticker ? { ...prev, ohlcData: ohlc } : prev
         );
       }
@@ -397,7 +400,7 @@ export const UnifiedDashboard = () => {
     [watchlistItems]
   );
 
-  const handleAddDiscoveryToWatchlist = async (e: React.MouseEvent, stock: any) => {
+  const handleAddDiscoveryToWatchlist = async (e: React.MouseEvent, stock: DiscoveryStock) => {
     e.stopPropagation();
     const ticker: string = stock.ticker;
     if (addingTickersRef.current.has(ticker)) return; // synchronous double-click guard
@@ -459,7 +462,7 @@ export const UnifiedDashboard = () => {
 
   // Derived Account PnL
   const totalPnl = useMemo(() => {
-    return pennyPositions.reduce((sum, p) => sum + ((p.current_price - p.entry_price) * p.units || 0), 0);
+    return pennyPositions.reduce((sum, p) => sum + (((p.current_price ?? p.entry_price) - p.entry_price) * p.units || 0), 0);
   }, [pennyPositions]);
 
   // Portfolio Concentration
@@ -474,7 +477,7 @@ export const UnifiedDashboard = () => {
     return (investedCapital / equity) * 100;
   }, [investedCapital, pennyAccount]);
 
-  const CustomTooltip = ({ active, payload }: any) => {
+  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { value: number; payload: { name: string } }[] }) => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-white p-4 border border-slate-200 leading-none text-slate-800">

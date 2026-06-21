@@ -10,8 +10,19 @@ import {
   Bell,
   Laptop,
   X,
-  Apple
+  Apple,
+  Dna,
+  LayoutDashboard,
+  Target,
+  FlaskConical
 } from 'lucide-react';
+
+const LANDING_NAV = [
+  { name: '통합 지휘소', icon: LayoutDashboard, path: '/stock/dashboard' },
+  { name: '모니터링 오빗', icon: Target, path: '/watchlist' },
+  { name: 'DNA 시뮬레이터', icon: FlaskConical, path: '/dna-simulator' },
+  { name: '제품 검색', icon: Search, path: '/parts-search' },
+];
 
 // 세일 마감 일시 — 여기 한 곳만 수정하면 헤더·히어로 배지 모두 반영
 const SALE_LABEL = '55% 할인';
@@ -45,10 +56,6 @@ export default function LandingPage() {
   const [email, setEmail] = useState('admin@muzestop.lab');
   const [password, setPassword] = useState('hunterpassword');
   
-  // State for search bar
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-
   const [timeLeft, setTimeLeft] = useState(calcTimeLeft);
 
   useEffect(() => {
@@ -80,75 +87,70 @@ export default function LandingPage() {
       <div className="absolute top-[20%] right-[10%] w-[500px] h-[500px] bg-radial from-indigo-500/5 to-transparent rounded-full blur-[120px] pointer-events-none z-0" />
       <div className="absolute top-[10%] left-[5%] w-[400px] h-[400px] bg-radial from-cyan-500/5 to-transparent rounded-full blur-[100px] pointer-events-none z-0" />
       
-      {/* Top Header Panel (Clean White Layout) */}
-      <header className="fixed top-0 w-full z-50 bg-white/95 border-b border-slate-200/80 shadow-sm backdrop-blur-md">
-        <div className="flex justify-between items-center w-full px-6 py-3 h-16 max-w-[1440px] mx-auto">
-          {/* Logo & Search */}
-          <div className="flex items-center gap-8">
-            <div className="text-2xl font-black tracking-tighter text-slate-900 cursor-pointer select-none font-mono">
-              MuzeBIZ<span className="text-indigo-600">.com</span>
+      {/* Top Header — Dark, matches internal TopNav */}
+      <header className="fixed top-0 w-full z-50 bg-[#0a0f1c]/90 backdrop-blur-3xl border-b border-slate-800 shadow-lg">
+        <div className="max-w-[1700px] mx-auto px-6 md:px-10 h-20 flex items-center justify-between">
+
+          {/* Left: Logo & Nav */}
+          <div className="flex items-center h-full gap-12">
+            <div className="flex items-center gap-3 group cursor-pointer select-none">
+              <div className="w-10 h-10 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-center shadow-[inset_0_0_15px_rgba(99,102,241,0.05)] group-hover:border-indigo-500/30 transition-all">
+                <Dna className="w-6 h-6 text-indigo-400 group-hover:scale-110 transition-transform" />
+              </div>
+              <span className="text-2xl font-black text-white tracking-tighter uppercase font-mono">
+                MuzeBIZ<span className="text-indigo-400 group-hover:text-indigo-300 transition-colors">.LAB</span>
+              </span>
             </div>
-            
-            {/* Search Bar */}
-            <div className={`relative hidden lg:block transition-all duration-300 ${isSearchFocused ? 'w-[450px]' : 'w-[350px]'}`}>
-              <input 
-                className="w-full bg-slate-100/80 text-slate-800 text-sm px-4 pr-10 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all placeholder:text-slate-800 font-mono"
-                placeholder="웹사이트 검색..." 
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => setIsSearchFocused(true)}
-                onBlur={() => setIsSearchFocused(false)}
-              />
-              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-800 w-4 h-4" />
+
+            <div className="hidden lg:flex h-full items-center gap-1">
+              {LANDING_NAV.map((item) => (
+                <button
+                  key={item.path}
+                  onClick={async () => { await signIn(''); navigate(item.path); }}
+                  className="h-12 px-5 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] transition-all rounded-xl border border-transparent text-slate-400 hover:text-white hover:bg-white/5 cursor-pointer"
+                >
+                  <item.icon className="w-3.5 h-3.5" />
+                  <span>{item.name}</span>
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Right Header Controls */}
+          {/* Right: Auth + Sale + Bell */}
           <div className="flex items-center gap-4">
-            <button className="bg-indigo-50 text-indigo-600 border border-indigo-200 text-sm font-bold tracking-wide px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-all flex items-center gap-1 cursor-pointer">
+            <button
+              onClick={() => setShowLoginModal(true)}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-[11px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-500/20 transition-all cursor-pointer"
+            >
               {SALE_LABEL} - 반짝 세일
             </button>
-            <div className="flex items-center gap-4 text-xs font-bold font-sans">
-              <button 
-                onClick={() => setShowLoginModal(true)} 
-                className="text-slate-800 hover:text-slate-900 transition-colors cursor-pointer"
+
+            <div className="flex items-center gap-3 text-[11px] font-black uppercase tracking-widest">
+              <button
+                onClick={() => setShowLoginModal(true)}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 로그인
               </button>
-              <span className="text-slate-350">/</span>
-              <button 
-                onClick={() => setShowLoginModal(true)} 
-                className="text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer"
+              <span className="text-slate-700">/</span>
+              <button
+                onClick={() => setShowLoginModal(true)}
+                className="text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
               >
                 무료 회원가입
               </button>
             </div>
-            <div className="flex items-center gap-2.5 text-slate-800 border-l border-slate-200 pl-4">
-              <Bell className="cursor-pointer hover:text-slate-900 w-4.5 h-4.5 transition-colors" />
-              <div className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-pulse shadow-[0_0_8px_rgba(79,70,229,0.6)]" />
-            </div>
+
+            <button className="p-3 text-slate-400 hover:text-indigo-400 hover:bg-white/5 group border border-transparent hover:border-slate-800 rounded-xl transition-all relative cursor-pointer">
+              <Bell className="w-5 h-5" />
+              <span className="absolute top-3 right-3 w-2 h-2 bg-rose-500 rounded-full border-2 border-[#0a0f1c] shadow-[0_0_10px_rgba(244,63,94,0.5)]" />
+            </button>
           </div>
         </div>
-
-        {/* Main Navigation Row */}
-        <nav className="border-t border-slate-200/60 overflow-x-auto no-scrollbar">
-          <div className="flex items-center px-6 h-11 max-w-[1440px] mx-auto gap-6 whitespace-nowrap text-xs font-bold text-slate-800 font-mono">
-            <button onClick={async () => { await signIn(''); navigate('/stock/dashboard'); }} className="text-indigo-600 border-b-2 border-indigo-600 h-full flex items-center px-1 cursor-pointer">
-              통합지휘소
-            </button>
-            <button onClick={async () => { await signIn(''); navigate('/parts-search'); }} className="hover:text-slate-900 transition-colors h-full flex items-center px-1 cursor-pointer">
-              제품검색
-            </button>
-            <button onClick={async () => { await signIn(''); navigate('/watchlist'); }} className="hover:text-slate-900 transition-colors h-full flex items-center px-1 cursor-pointer">
-              모니터링 오빗
-            </button>
-          </div>
-        </nav>
       </header>
 
-      {/* Main Content Area (Header Padding increased from pt-16 to pt-40 to clear fixed header) */}
-      <main className="relative max-w-[1440px] mx-auto px-6 pt-40 pb-24 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center z-10">
+      {/* Main Content Area */}
+      <main className="relative max-w-[1440px] mx-auto px-6 pt-36 pb-24 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center z-10">
         
         {/* Left Column: Hero Text */}
         <div className="lg:col-span-7 space-y-8">
