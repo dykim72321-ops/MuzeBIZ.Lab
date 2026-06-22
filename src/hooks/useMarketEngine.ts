@@ -7,8 +7,12 @@ import { triggerHunt, apiFetch } from '../services/pythonApiService';
  * 퀀트 엔진의 실시간 상태와 제어를 담당하는 통합 훅
  */
 export const useMarketEngine = () => {
+  // 로컬 dev에서는 Vite 프록시(/py-api)를 사용해 localhost:8001로 라우팅
+  // 프로덕션(HTTPS)에서만 VITE_WS_BASE_URL(Railway 등) 사용
   const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsBase = import.meta.env.VITE_WS_BASE_URL ?? `${wsProto}//${window.location.host}/py-api`;
+  const wsBase = import.meta.env.DEV
+    ? `${wsProto}//${window.location.host}/py-api`
+    : (import.meta.env.VITE_WS_BASE_URL ?? `${wsProto}//${window.location.host}/py-api`);
   const pulseUrl = `${wsBase}/ws/pulse`;
   const { pulseMap, isConnected, lastUpdatedTicker, error, seedMap } = usePulseSocket(pulseUrl);
 

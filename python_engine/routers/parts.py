@@ -209,6 +209,9 @@ class SourcingEngine:
             return self.search_cache[q_norm]
 
         print(f"📡 [ENGINE] Triggering parallel scouting for: {q}...", flush=True)
+        if SearchAggregator is None:
+            print("❌ [ENGINE] SearchAggregator unavailable (playwright not installed)")
+            return await self._fetch_from_local(q)
         aggregator = SearchAggregator()
 
         tasks = [

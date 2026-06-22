@@ -47,6 +47,8 @@ import { supabase as supabaseClient } from '../lib/supabase';
 import {
   fetchBrokerStatus,
   fetchBrokerAccount,
+  fetchBrokerPositions,
+  closePosition,
   toggleSystemArm,
   fetchPaperAccount,
   fetchPaperPositions,
@@ -147,7 +149,7 @@ export const UnifiedDashboard = () => {
       // 1. Run cleanup for old WATCHING items (non-blocking)
       cleanupOldWatchlistItems(7).catch(console.error);
 
-      const [wl, pp, ph, pa, alpaca, discoveryResult, scanStatus] = await Promise.all([
+      const [wl, pp, ph, pa, alpaca, discoveryResult, scanStatus, brokerPositions] = await Promise.all([
         getWatchlist(),
         fetchPaperPositions(),
         fetchPaperHistory(),
@@ -162,8 +164,33 @@ export const UnifiedDashboard = () => {
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
+        fetchBrokerPositions().catch(() => []),
       ]);
       if (scanStatus) setPennyScanStatus(scanStatus);
+
+      let activePositions = pp;
+      if (alpaca && !alpaca.error) {
+        activePositions = brokerPositions.map((bp: any) => {
+          const entry = Number(bp.entry_price);
+          const current = Number(bp.current_price);
+          const isPenny = entry <= 1.0;
+          const highestPrice = Math.max(entry, current);
+          const tsInitPct = isPenny ? 0.85 : 0.90;
+          const estimatedTsThreshold = highestPrice * tsInitPct;
+
+          return {
+            ticker: bp.ticker,
+            units: Number(bp.quantity),
+            entry_price: entry,
+            current_price: current,
+            ts_threshold: estimatedTsThreshold,
+            trailing_stop: estimatedTsThreshold,
+            highest_price: highestPrice,
+            status: 'HOLDING',
+            is_penny: isPenny,
+          };
+        });
+      }
 
       // Fetch current prices of watchlist items to identify penny stocks accurately
       // 1. Create a unified map
@@ -173,7 +200,7 @@ export const UnifiedDashboard = () => {
         unifiedMap.set(item.ticker, { ...item } as DashboardWatchlistItem);
       });
 
-      pp.forEach((pos: PaperPosition) => {
+      activePositions.forEach((pos: PaperPosition) => {
         if (unifiedMap.has(pos.ticker)) {
           const existing = unifiedMap.get(pos.ticker)!;
           existing.status = 'HOLDING';
@@ -189,7 +216,7 @@ export const UnifiedDashboard = () => {
       });
 
       ph.forEach((hist: PaperHistory) => {
-        if (!pp.some((p: PaperPosition) => p.ticker === hist.ticker)) {
+        if (!activePositions.some((p: PaperPosition) => p.ticker === hist.ticker)) {
           if (unifiedMap.has(hist.ticker)) {
             const existing = unifiedMap.get(hist.ticker)!;
             // If it's not holding anymore, but we have history, it's EXITED
@@ -212,7 +239,7 @@ export const UnifiedDashboard = () => {
       setDiscoveryStocks((discoveryResult.data || []).filter(s => s.dna_score != null && s.price != null));
       
       setPennyPositions(
-        pp.map((pos: PaperPosition) => {
+        activePositions.map((pos: PaperPosition) => {
           const cp = pos.current_price != null ? Number(pos.current_price) : null;
           const ep = Number(pos.entry_price);
           const units = Number(pos.units);
@@ -368,8 +395,8 @@ export const UnifiedDashboard = () => {
         onClick: async () => {
           const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
           try {
-            const result = await sellPaperPosition(ticker);
-            if (result?.status === 'success') {
+            const result = alpacaAccount ? await closePosition(ticker) : await sellPaperPosition(ticker);
+            if (result?.status === 'success' || result?.symbol || result?.id) {
               toast.success(`${ticker} 청산 성공`, { id: toastId });
               loadDashboardData();
             } else {
@@ -702,41 +729,45 @@ export const UnifiedDashboard = () => {
 
           {/* 4. Win Rate (Speedometer Gauge) */}
           {(() => {
-            const winRateVal = statsLoading ? 68.7 : strategyStats ? strategyStats.win_rate : 68.7;
+            const hasData = !statsLoading && strategyStats != null;
+            const winRateVal = hasData ? strategyStats!.win_rate : 0;
+            const totalTrades = hasData ? strategyStats!.total_trades : 0;
             const angle = -180 + (winRateVal / 100) * 180;
             const rad = (angle * Math.PI) / 180;
             const needleX = 50 + 30 * Math.cos(rad);
             const needleY = 50 + 30 * Math.sin(rad);
             return (
-              <div className="bg-white border border-slate-200/85 rounded-2xl p-6 flex flex-col items-center justify-between min-h-[160px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] relative">
+              <div className="bg-white border border-slate-200/85 rounded-2xl p-6 flex flex-col items-center justify-between min-h-[200px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] relative">
                 <div className="w-full flex justify-between items-start mb-1 z-10">
                   <span className="text-xs font-mono font-bold text-slate-800 uppercase tracking-widest block">Win Rate</span>
                   <Star className="w-3.5 h-3.5 text-cyan-600" />
                 </div>
-                
-                <div className="relative w-36 h-20 flex items-center justify-center overflow-hidden z-10">
+
+                <div className="relative w-52 h-32 flex items-center justify-center overflow-hidden z-10">
                   <svg className="w-full h-full transform translate-y-3" viewBox="0 0 100 55">
                     <path d="M 15 50 A 35 35 0 0 1 85 50" fill="none" stroke="#f1f5f9" strokeWidth="6" strokeLinecap="round" />
-                    <path 
-                      d="M 15 50 A 35 35 0 0 1 85 50" 
-                      fill="none" 
-                      stroke="#2563eb" 
-                      strokeWidth="6" 
-                      strokeLinecap="round" 
+                    <path
+                      d="M 15 50 A 35 35 0 0 1 85 50"
+                      fill="none"
+                      stroke="#2563eb"
+                      strokeWidth="6"
+                      strokeLinecap="round"
                       strokeDasharray="110"
-                      strokeDashoffset={110 - (110 * winRateVal) / 100}
+                      strokeDashoffset={hasData ? 110 - (110 * winRateVal) / 100 : 110}
                     />
-                    <line x1="50" y1="50" x2={needleX} y2={needleY} stroke="#ef4444" strokeWidth="2" strokeLinecap="round" />
+                    {hasData && <line x1="50" y1="50" x2={needleX} y2={needleY} stroke="#ef4444" strokeWidth="2" strokeLinecap="round" />}
                     <circle cx="50" cy="50" r="3.5" fill="#ffffff" stroke="#2563eb" strokeWidth="1.5" />
                   </svg>
                   <div className="absolute bottom-1 text-center font-mono leading-none">
-                    <span className="text-xl font-black text-slate-900">{winRateVal.toFixed(1)}%</span>
+                    <span className="text-2xl font-black text-slate-900">
+                      {statsLoading ? '···' : hasData ? `${winRateVal.toFixed(1)}%` : '--'}
+                    </span>
                     <span className="text-xs font-mono text-slate-800 font-bold block mt-0.5">WIN RATIO</span>
                   </div>
                 </div>
-                
+
                 <p className="text-xs font-semibold text-slate-800 text-center leading-normal border-t border-slate-100 pt-2 w-full z-10 font-sans">
-                  {statsLoading ? '연산 중...' : `최근 30일 승률 변동성 보합`}
+                  {statsLoading ? '연산 중...' : hasData ? `총 ${totalTrades}건 거래 기준 실현 승률` : '거래 이력 없음'}
                 </p>
               </div>
             );
@@ -754,21 +785,21 @@ export const UnifiedDashboard = () => {
             const dialColor = isWarn ? '#ef4444' : isCaution ? '#f59e0b' : '#10b981';
             const label = isWarn ? '위험 (≥70%)' : isCaution ? '주의 (≥50%)' : '안전';
             return (
-              <div className="bg-white border border-slate-200/85 rounded-2xl p-6 flex flex-col items-center justify-between min-h-[160px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] relative">
+              <div className="bg-white border border-slate-200/85 rounded-2xl p-6 flex flex-col items-center justify-between min-h-[200px] shadow-[0_1px_3px_rgba(0,0,0,0.05)] relative">
                 <div className="w-full flex justify-between items-start mb-1 z-10">
                   <span className="text-xs font-mono font-bold text-slate-800 uppercase tracking-widest block">Concentration</span>
                   <PieChart className="w-3.5 h-3.5 text-cyan-600" />
                 </div>
-                
-                <div className="relative w-36 h-20 flex items-center justify-center overflow-hidden z-10">
+
+                <div className="relative w-52 h-32 flex items-center justify-center overflow-hidden z-10">
                   <svg className="w-full h-full transform translate-y-3" viewBox="0 0 100 55">
                     <path d="M 15 50 A 35 35 0 0 1 85 50" fill="none" stroke="#f1f5f9" strokeWidth="6" strokeLinecap="round" />
-                    <path 
-                      d="M 15 50 A 35 35 0 0 1 85 50" 
-                      fill="none" 
-                      stroke={dialColor} 
-                      strokeWidth="6" 
-                      strokeLinecap="round" 
+                    <path
+                      d="M 15 50 A 35 35 0 0 1 85 50"
+                      fill="none"
+                      stroke={dialColor}
+                      strokeWidth="6"
+                      strokeLinecap="round"
                       strokeDasharray="110"
                       strokeDashoffset={110 - (110 * Math.min(pct, 100)) / 100}
                     />
@@ -776,7 +807,7 @@ export const UnifiedDashboard = () => {
                     <circle cx="50" cy="50" r="3.5" fill="#ffffff" stroke={dialColor} strokeWidth="1.5" />
                   </svg>
                   <div className="absolute bottom-1 text-center font-mono leading-none">
-                    <span className="text-xl font-black text-slate-900">{pct.toFixed(1)}%</span>
+                    <span className="text-2xl font-black text-slate-900">{pct.toFixed(1)}%</span>
                     <span className="text-xs font-bold text-slate-800 block mt-0.5 font-sans">{label}</span>
                   </div>
                 </div>

@@ -824,7 +824,7 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         payload["ai_metadata"] = {"dna_score": dna_score}
 
     payload["dna_score"] = dna_score
-    payload["atr"] = sizing.get("atr", 0.0)
+    # payload["atr"] = sizing.get("atr", 0.0)  # Temporarily disabled to prevent Supabase PGRST204 schema error
     payload["data_source"] = "alpaca_iex"
     payload["volume_multiplier"] = _candle_state.volume_multiplier.get(
         ticker.upper(), 1.0

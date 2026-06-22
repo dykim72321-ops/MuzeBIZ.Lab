@@ -26,65 +26,60 @@ export interface PulseData {
   timestamp: string;
 }
 
+const MAX_RETRIES = 8;
+const BASE_DELAY_MS = 3000;
+const MAX_DELAY_MS = 60000;
+
 export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => {
-  // 최신 수신된 단일 결과 (기존 컴포넌트 호환용)
   const [pulseData, setPulseData] = useState<PulseData | null>(null);
-  // 전체 종목별 최신 상태 맵 (Live Dashboard용)
-  // 전체 종목별 최신 상태 맵 (Live Dashboard용)
   const [pulseMap, setPulseMap] = useState<Record<string, PulseData>>({});
-  // 실시간 시그널 상태 전환 감지용 Ref (onmessage 클로저 stale 상태 및 중복 알림 방지)
   const pulseMapRef = useRef<Record<string, PulseData>>({});
-  // Live Flash: 마지막으로 업데이트된 티커 (2초 후 자동 초기화)
   const [lastUpdatedTicker, setLastUpdatedTicker] = useState<string | null>(null);
-  
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  
-  // 상태 변경 없이 WebSocket 인스턴스를 유지하기 위해 useRef 사용
   const socketRef = useRef<WebSocket | null>(null);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
 
   const connect = useCallback(() => {
+    if (!isMountedRef.current) return;
     try {
-      if (socketRef.current?.readyState === WebSocket.OPEN) return;
+      const state = socketRef.current?.readyState;
+      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
 
       const ws = new WebSocket(url);
-      
+
       ws.onopen = () => {
+        if (!isMountedRef.current) { ws.close(); return; }
         console.log('✅ WebSocket Connected to Pulse Engine:', url);
+        retryCountRef.current = 0;
         setIsConnected(true);
         setError(null);
       };
 
       ws.onmessage = (event) => {
+        if (!isMountedRef.current) return;
         try {
           const data: PulseData = JSON.parse(event.data);
-          
-          // 1. 단일 최신 데이터 업데이트
+
           setPulseData(data);
-          
-          // 2. 이전 데이터 추출 및 Ref 업데이트
+
           const prevData = pulseMapRef.current[data.ticker];
           pulseMapRef.current[data.ticker] = data;
-          
-          // 3. 종목 맵 업데이트
-          setPulseMap((prev) => ({
-            ...prev,
-            [data.ticker]: data
-          }));
 
-          // 4. Live Flash: 방금 수신된 티커 설정 → 2초 후 자동 초기화
+          setPulseMap((prev) => ({ ...prev, [data.ticker]: data }));
+
           setLastUpdatedTicker(data.ticker);
           setTimeout(() => setLastUpdatedTicker(null), 2000);
-          
+
           console.log(`💓 Pulse received for ${data.ticker}:`, data);
 
-          // 시그널 상태가 실제로 변했는지 감지 (이전 데이터가 없거나, 시그널 종류 혹은 강도가 달라진 경우만)
-          const isTransition = !prevData || 
-            prevData.signal !== data.signal || 
+          const isTransition = !prevData ||
+            prevData.signal !== data.signal ||
             prevData.strength !== data.strength;
 
-          // 강한 시그널로의 새로운 상태 전환일 때만 전역 알림(Toast) 발생 (중복 알림 도배 방지)
           if (isTransition && data.strength === 'STRONG') {
             if (data.signal === 'BUY') {
               toast.success(`🚀 [STRONG BUY] ${data.ticker} 포착!`, {
@@ -103,19 +98,29 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
         }
       };
 
-      ws.onerror = (event) => {
-        const ts = new Date().toLocaleTimeString('ko-KR');
-        const errMsg = `WebSocket 연결 오류 (${ts}) — ${url} 응답 없음`;
-        console.error('❌ WebSocket Error:', event.type, '|', url, '@', ts);
-        setError(errMsg);
+      ws.onerror = () => {
+        // onerror 직후 onclose가 항상 호출되므로 여기선 상태만 기록
         setIsConnected(false);
       };
 
       ws.onclose = () => {
-        console.warn('⚠️ WebSocket Disconnected');
+        if (!isMountedRef.current) return;
         setIsConnected(false);
-        // 연결이 끊어지면 자동 재연결 시도
-        setTimeout(connect, 3000); 
+
+        if (retryCountRef.current >= MAX_RETRIES) {
+          const ts = new Date().toLocaleTimeString('ko-KR');
+          const msg = `Pulse WS 재연결 실패 (${MAX_RETRIES}회 시도) — 백엔드 엔진 상태를 확인하세요`;
+          console.warn(`⚠️ ${msg} @ ${ts}`);
+          setError(msg);
+          return;
+        }
+
+        // 지수 백오프: 3s → 6s → 12s → ... (최대 60s)
+        const delay = Math.min(BASE_DELAY_MS * 2 ** retryCountRef.current, MAX_DELAY_MS);
+        retryCountRef.current += 1;
+        console.warn(`⚠️ Pulse WS disconnected — retry #${retryCountRef.current} in ${delay / 1000}s`);
+
+        retryTimerRef.current = setTimeout(connect, delay);
       };
 
       socketRef.current = ws;
@@ -125,21 +130,22 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
   }, [url]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     connect();
 
-    // 컴포넌트 마운트 해제 시 소켓 연결 안전하게 종료
     return () => {
-      if (socketRef.current) {
-        socketRef.current.close();
-      }
+      isMountedRef.current = false;
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      if (socketRef.current) socketRef.current.close();
     };
   }, [connect]);
 
-  // 수동으로 재연결할 수 있는 매서드 제공
+  // 수동 재연결 — 재시도 카운터 초기화 후 즉시 연결
   const reconnect = () => {
-    if (socketRef.current) {
-      socketRef.current.close();
-    }
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    if (socketRef.current) socketRef.current.close();
+    retryCountRef.current = 0;
+    setError(null);
     connect();
   };
 
