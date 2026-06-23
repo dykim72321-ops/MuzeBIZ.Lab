@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { Stock } from '../types';
 import { calculateDnaScore } from '../utils/dnaMath';
+import { fetchAlpacaQuote, fetchAlpacaQuotes } from './pythonApiService';
 
 // Focused Penny Stock Watchlist
 export const WATCHLIST_TICKERS = [
@@ -202,10 +203,218 @@ function formatMarketCap(value: number): string {
   return `$${value.toLocaleString()}`;
 }
 
+async function fetchAlpacaQuoteEnriched(ticker: string): Promise<Stock | null> {
+  try {
+    const alpacaData = await fetchAlpacaQuote(ticker);
+    if (!alpacaData || alpacaData.error || !alpacaData.price) {
+      return null;
+    }
+
+    const price = alpacaData.price;
+    let changePercent = 0;
+    let prevClose = 0;
+    let volume = alpacaData.size;
+
+    // Fast client-side yfinance query to get previous close for changePercent calculation
+    try {
+      const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const json = await res.json();
+        const meta = json?.chart?.result?.[0]?.meta;
+        if (meta) {
+          prevClose = meta.chartPreviousClose ?? meta.previousClose ?? 0;
+          if (prevClose > 0) {
+            changePercent = ((price - prevClose) / prevClose) * 100;
+          }
+          volume = meta.regularMarketVolume ?? volume;
+        }
+      }
+    } catch (yErr) {
+      console.warn(`[AlpacaQuote] Failed to fetch previous close from Yahoo for ${ticker}:`, yErr);
+    }
+
+    const dnaScore = calculateDnaScore(price, changePercent, volume, 0);
+
+    const stock: Stock = {
+      id: ticker,
+      ticker: ticker,
+      name: getCompanyName(ticker),
+      price: price,
+      changePercent: changePercent,
+      volume: volume,
+      marketCap: 'N/A',
+      dnaScore: dnaScore,
+      currentHigh: price,
+      sector: getSector(ticker),
+      description: '',
+      relevantMetrics: {
+        debtToEquity: 0,
+        rndRatio: 0,
+        sentimentScore: 0,
+        institutionalOwnership: 0,
+        bidPrice: alpacaData.bid_price,
+        askPrice: alpacaData.ask_price,
+        bidSize: alpacaData.bid_size,
+        askSize: alpacaData.ask_size,
+      }
+    };
+
+    // Retrieve technical indicators from realtime_signals if they exist
+    try {
+      const { data: sigData } = await supabase
+        .from('realtime_signals')
+        .select('rsi, macd_diff, adx, rvol, dna_score')
+        .eq('ticker', ticker)
+        .maybeSingle();
+
+      if (sigData) {
+        stock.rsi = sigData.rsi ?? undefined;
+        stock.macdDiff = sigData.macd_diff ?? undefined;
+        stock.adx = sigData.adx ?? undefined;
+        stock.rvol = sigData.rvol ?? undefined;
+        if (sigData.dna_score !== null && sigData.dna_score !== undefined && sigData.dna_score > 0) {
+          stock.dnaScore = sigData.dna_score;
+        }
+      }
+    } catch (err) {
+      console.warn(`[AlpacaQuote] Failed to fetch realtime signals:`, err);
+    }
+
+    return stock;
+  } catch (err) {
+    console.error(`[AlpacaQuote] fetchAlpacaQuoteEnriched error for ${ticker}:`, err);
+    return null;
+  }
+}
+
+async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
+  if (tickers.length === 0) return [];
+  try {
+    const alpacaMap = await fetchAlpacaQuotes(tickers);
+    if (!alpacaMap || alpacaMap.error) {
+      return [];
+    }
+
+    const results: Stock[] = [];
+    
+    // We can fetch details for each ticker in parallel
+    const promises = tickers.map(async (ticker) => {
+      const alpacaData = alpacaMap[ticker];
+      if (!alpacaData || !alpacaData.price) return null;
+
+      const price = alpacaData.price;
+      let changePercent = 0;
+      let prevClose = 0;
+      let volume = alpacaData.size;
+
+      // Fast client-side yfinance query to get previous close for changePercent calculation
+      try {
+        const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const json = await res.json();
+          const meta = json?.chart?.result?.[0]?.meta;
+          if (meta) {
+            prevClose = meta.chartPreviousClose ?? meta.previousClose ?? 0;
+            if (prevClose > 0) {
+              changePercent = ((price - prevClose) / prevClose) * 100;
+            }
+            volume = meta.regularMarketVolume ?? volume;
+          }
+        }
+      } catch (yErr) {
+        // ignore
+      }
+
+      const dnaScore = calculateDnaScore(price, changePercent, volume, 0);
+
+      const stock: Stock = {
+        id: ticker,
+        ticker: ticker,
+        name: getCompanyName(ticker),
+        price: price,
+        changePercent: changePercent,
+        volume: volume,
+        marketCap: 'N/A',
+        dnaScore: dnaScore,
+        currentHigh: price,
+        sector: getSector(ticker),
+        description: '',
+        relevantMetrics: {
+          debtToEquity: 0,
+          rndRatio: 0,
+          sentimentScore: 0,
+          institutionalOwnership: 0,
+          bidPrice: alpacaData.bid_price,
+          askPrice: alpacaData.ask_price,
+          bidSize: alpacaData.bid_size,
+          askSize: alpacaData.ask_size,
+        }
+      };
+      
+      return stock;
+    });
+
+    const parsed = await Promise.all(promises);
+    const validStocks = parsed.filter((s): s is Stock => s !== null);
+
+    // Batch fetch realtime signals for technical indicators
+    if (validStocks.length > 0) {
+      try {
+        const { data: signalData } = await supabase
+          .from('realtime_signals')
+          .select('ticker, rsi, macd_diff, adx, rvol, dna_score')
+          .in('ticker', validStocks.map(s => s.ticker));
+        
+        if (signalData) {
+          validStocks.forEach(stock => {
+            const match = signalData.find(sig => sig.ticker === stock.ticker);
+            if (match) {
+              stock.rsi = match.rsi ?? undefined;
+              stock.macdDiff = match.macd_diff ?? undefined;
+              stock.adx = match.adx ?? undefined;
+              stock.rvol = match.rvol ?? undefined;
+              if (match.dna_score !== null && match.dna_score !== undefined && match.dna_score > 0) {
+                stock.dnaScore = match.dna_score;
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('[AlpacaQuotesEnriched] Failed to fetch realtime signals:', err);
+      }
+    }
+
+    return validStocks;
+  } catch (err) {
+    console.error('[AlpacaQuotesEnriched] Error:', err);
+    return [];
+  }
+}
+
 export async function fetchStockQuote(ticker: string, historyRange?: string): Promise<Stock | null> {
   const cached = cache.get(ticker);
   if (cached && Date.now() - cached.timestamp < getCacheDuration() && (!historyRange || (cached.data.history && cached.data.history.length > 0))) {
     return cached.data;
+  }
+
+  // 1. Try Alpaca Enriched Quote first
+  try {
+    const alpacaStock = await fetchAlpacaQuoteEnriched(ticker);
+    if (alpacaStock) {
+      // If history is requested, load it asynchronously or just return
+      if (historyRange) {
+        try {
+          const hist = await fetchStockHistory(ticker, '1m', 30);
+          alpacaStock.history = hist;
+        } catch {}
+      }
+      cache.set(ticker, { data: alpacaStock, timestamp: Date.now() });
+      return alpacaStock;
+    }
+  } catch (err) {
+    console.warn(`[AlpacaQuote] Failed for ${ticker}, falling back:`, err);
   }
 
   const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
@@ -318,41 +527,55 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
 const pendingRequests = new Map<string, Promise<Stock | null>>();
 
 export async function fetchMultipleStocksOptimized(tickers: string[], historyRange?: string): Promise<Stock[]> {
+  // Deduplicate and filter out empty tickers
+  const uniqueTickers = [...new Set(tickers.filter(Boolean))];
+
+  // 1. Try Alpaca Enriched Batch Quotes first
+  let alpacaStocks: Stock[] = [];
+  try {
+    alpacaStocks = await fetchAlpacaQuotesEnriched(uniqueTickers);
+  } catch (err) {
+    console.warn('[AlpacaQuotes] Batch fetch failed, falling back:', err);
+  }
+
+  const fetchedTickers = new Set(alpacaStocks.map(s => s.ticker));
+  const missingTickers = uniqueTickers.filter(t => !fetchedTickers.has(t));
+
+  const results: Stock[] = [...alpacaStocks];
+
   // Dynamically adjust chunk size based on API provider limits
   // Dynamically adjust chunk size - increased for better performance
   const CHUNK_SIZE = FINNHUB_API_KEY ? 20 : 12; 
-  const results: Stock[] = [];
-  
-  // Deduplicate and filter out empty tickers
-  const uniqueTickers = [...new Set(tickers.filter(Boolean))];
-  
-  for (let i = 0; i < uniqueTickers.length; i += CHUNK_SIZE) {
-    const chunk = uniqueTickers.slice(i, i + CHUNK_SIZE);
-    
-    const chunkPromises = chunk.map(ticker => {
-      // 🆕 Deduplication Logic: If a request for this ticker is already pending, reuse it
-      if (pendingRequests.has(ticker)) {
-        return pendingRequests.get(ticker)!;
-      }
+
+  if (missingTickers.length > 0) {
+    for (let i = 0; i < missingTickers.length; i += CHUNK_SIZE) {
+      const chunk = missingTickers.slice(i, i + CHUNK_SIZE);
       
-      const request = fetchStockQuote(ticker, historyRange).finally(() => {
-        pendingRequests.delete(ticker);
+      const chunkPromises = chunk.map(ticker => {
+        // 🆕 Deduplication Logic: If a request for this ticker is already pending, reuse it
+        if (pendingRequests.has(ticker)) {
+          return pendingRequests.get(ticker)!;
+        }
+        
+        const request = fetchStockQuote(ticker, historyRange).finally(() => {
+          pendingRequests.delete(ticker);
+        });
+        
+        pendingRequests.set(ticker, request);
+        return request;
       });
       
-      pendingRequests.set(ticker, request);
-      return request;
-    });
-    
-    try {
-      const chunkResults = await Promise.all(chunkPromises);
-      results.push(...chunkResults.filter((s): s is Stock => s !== null));
-    } catch (err) {
-      console.error(`[Fetch Optimization] Chunk failed for ${chunk.join(',')}:`, err);
-    }
-    
-    // Minimal delay between chunks to be safe but fast
-    if (i + CHUNK_SIZE < uniqueTickers.length) {
-      await new Promise(resolve => setTimeout(resolve, 200)); 
+      try {
+        const chunkResults = await Promise.all(chunkPromises);
+        results.push(...chunkResults.filter((s): s is Stock => s !== null));
+      } catch (err) {
+        console.error(`[Fetch Optimization] Chunk failed for ${chunk.join(',')}:`, err);
+      }
+      
+      // Minimal delay between chunks to be safe but fast
+      if (i + CHUNK_SIZE < missingTickers.length) {
+        await new Promise(resolve => setTimeout(resolve, 200)); 
+      }
     }
   }
   

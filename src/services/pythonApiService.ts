@@ -1,8 +1,9 @@
 import { supabase } from '../lib/supabase';
 
 // 로컬: Vite 프록시(/py-api → localhost:8001)
-// Vercel: VITE_API_BASE_URL 환경변수로 Railway URL 직접 지정
-const PY_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/py-api';
+const PY_API_BASE = import.meta.env.DEV
+  ? '/py-api'
+  : (import.meta.env.VITE_API_BASE_URL ?? '/py-api');
 
 export interface TechnicalIndicators {
   ticker: string;
@@ -231,6 +232,20 @@ export async function closePosition(ticker: string): Promise<any> {
 }
 
 /**
+ * Alpaca 실시간 단일 시세 및 거래 정보 조회
+ */
+export async function fetchAlpacaQuote(ticker: string): Promise<any> {
+  return brokerApiFetch(`/api/broker/quote/${ticker.toUpperCase()}`);
+}
+
+/**
+ * Alpaca 실시간 다중 시세 및 거래 정보 조회 (Batch)
+ */
+export async function fetchAlpacaQuotes(tickers: string[]): Promise<any> {
+  return brokerApiFetch('/api/broker/quotes', 'POST', { tickers: tickers.map(t => t.toUpperCase()) });
+}
+
+/**
  * 페이퍼 트레이딩 포지션 수동 청산 (사령관 매도)
  */
 export async function sellPaperPosition(ticker: string): Promise<any> {
@@ -242,6 +257,19 @@ export async function sellPaperPosition(ticker: string): Promise<any> {
  */
 export async function deletePaperHistory(historyId: string): Promise<any> {
   return brokerApiFetch(`/api/broker/paper/history/${historyId}`, 'DELETE');
+}
+
+/**
+ * Alpaca 실계좌 체결 이력 조회 (FIFO PnL 매칭)
+ */
+export async function fetchClosedTrades(limit: number = 30): Promise<any[]> {
+  try {
+    const data = await brokerApiFetch(`/api/broker/closed-trades?limit=${limit}`);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Closed trades fetch error:', error);
+    return [];
+  }
 }
 
 /**

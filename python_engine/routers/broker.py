@@ -7,7 +7,7 @@ Alpaca 실계좌 + Paper Trading 양쪽 모두 포함.
 import asyncio
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 import yfinance as yf
 from fastapi import APIRouter, HTTPException, Security, status
@@ -780,3 +780,185 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
         "tickers": closed_tickers,
         "is_armed": False,
     }
+
+
+class QuotesRequest(BaseModel):
+    tickers: List[str]
+
+
+@router.get("/closed-trades")
+async def get_closed_trades(limit: int = 30, api_key: str = Security(get_api_key)):
+    """Alpaca 체결 주문 기반 FIFO 손익 계산 — 완성된 매수→매도 라운드트립 반환"""
+    trading_client = app_state.trading_client
+    if not trading_client:
+        return []
+
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+
+        req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500, nested=False)
+        orders = await asyncio.to_thread(trading_client.get_orders, filter=req)
+
+        # 체결 완료 주문만 필터, fill 시각 오름차순 정렬
+        filled = [
+            o
+            for o in orders
+            if str(o.status.value) == "filled"
+            and o.filled_at
+            and float(o.filled_qty or 0) > 0
+        ]
+        filled.sort(key=lambda o: o.filled_at)
+
+        # FIFO 포지션 장부: ticker → [{price, qty}]
+        book: dict[str, list[dict]] = {}
+        closed_trades: list[dict] = []
+
+        for o in filled:
+            ticker = o.symbol
+            qty = float(o.filled_qty or 0)
+            price = float(o.filled_avg_price or 0)
+            side = str(o.side.value)
+            filled_at = o.filled_at
+
+            if side == "buy":
+                book.setdefault(ticker, []).append({"price": price, "qty": qty})
+
+            elif side == "sell" and book.get(ticker):
+                remain = qty
+                total_cost = 0.0
+                matched = 0.0
+
+                lots = book[ticker]
+                while remain > 0 and lots:
+                    lot = lots[0]
+                    take = min(lot["qty"], remain)
+                    total_cost += lot["price"] * take
+                    matched += take
+                    remain -= take
+                    lot["qty"] -= take
+                    if lot["qty"] < 1e-6:
+                        lots.pop(0)
+
+                if matched > 0:
+                    avg_entry = total_cost / matched
+                    pnl_pct = (price / avg_entry - 1) * 100 if avg_entry > 0 else 0.0
+                    profit_amt = (price - avg_entry) * matched
+                    closed_trades.append(
+                        {
+                            "id": str(o.id),
+                            "ticker": ticker,
+                            "units": round(matched, 4),
+                            "entry_price": round(avg_entry, 4),
+                            "exit_price": round(price, 4),
+                            "pnl_pct": round(pnl_pct, 2),
+                            "profit_amt": round(profit_amt, 2),
+                            "exit_reason": "Alpaca Order",
+                            "created_at": filled_at.isoformat(),
+                        }
+                    )
+
+        # 최신순 반환
+        closed_trades.reverse()
+        return closed_trades[:limit]
+
+    except Exception as e:
+        print(f"❌ Closed Trades Error: {e}")
+        return []
+
+
+@router.get("/quote/{ticker}")
+async def get_alpaca_quote(ticker: str, api_key: str = Security(get_api_key)):
+    """Alpaca 실시간 단일 시세 및 거래 정보 조회"""
+    api_key_id = os.getenv("APCA_API_KEY_ID")
+    api_secret = os.getenv("APCA_API_SECRET_KEY")
+    if not api_key_id or not api_secret:
+        raise HTTPException(status_code=400, detail="Alpaca API keys not configured")
+
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import (
+            StockLatestTradeRequest,
+            StockLatestQuoteRequest,
+        )
+
+        client = StockHistoricalDataClient(api_key_id, api_secret)
+
+        # 1. Latest Trade
+        trade_req = StockLatestTradeRequest(symbol_or_symbols=ticker)
+        trade_res = await asyncio.to_thread(client.get_stock_latest_trade, trade_req)
+
+        # 2. Latest Quote
+        quote_req = StockLatestQuoteRequest(symbol_or_symbols=ticker)
+        quote_res = await asyncio.to_thread(client.get_stock_latest_quote, quote_req)
+
+        trade = trade_res.get(ticker)
+        quote = quote_res.get(ticker)
+
+        if not trade:
+            raise HTTPException(
+                status_code=404, detail=f"No trade data found for {ticker}"
+            )
+
+        return {
+            "ticker": ticker,
+            "price": float(trade.price),
+            "size": float(trade.size),
+            "timestamp": trade.timestamp.isoformat(),
+            "bid_price": float(quote.bid_price) if quote else 0.0,
+            "ask_price": float(quote.ask_price) if quote else 0.0,
+            "bid_size": float(quote.bid_size) if quote else 0.0,
+            "ask_size": float(quote.ask_size) if quote else 0.0,
+        }
+    except Exception as e:
+        print(f"❌ Alpaca Quote Error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/quotes")
+async def get_alpaca_quotes(req: QuotesRequest, api_key: str = Security(get_api_key)):
+    """Alpaca 실시간 다중 시세 및 거래 정보 조회 (Batch)"""
+    api_key_id = os.getenv("APCA_API_KEY_ID")
+    api_secret = os.getenv("APCA_API_SECRET_KEY")
+    if not api_key_id or not api_secret:
+        raise HTTPException(status_code=400, detail="Alpaca API keys not configured")
+
+    if not req.tickers:
+        return {}
+
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import (
+            StockLatestTradeRequest,
+            StockLatestQuoteRequest,
+        )
+
+        client = StockHistoricalDataClient(api_key_id, api_secret)
+
+        # 1. Latest Trades
+        trade_req = StockLatestTradeRequest(symbol_or_symbols=req.tickers)
+        trade_res = await asyncio.to_thread(client.get_stock_latest_trade, trade_req)
+
+        # 2. Latest Quotes
+        quote_req = StockLatestQuoteRequest(symbol_or_symbols=req.tickers)
+        quote_res = await asyncio.to_thread(client.get_stock_latest_quote, quote_req)
+
+        results = {}
+        for ticker in req.tickers:
+            trade = trade_res.get(ticker)
+            quote = quote_res.get(ticker)
+            if trade:
+                results[ticker] = {
+                    "ticker": ticker,
+                    "price": float(trade.price),
+                    "size": float(trade.size),
+                    "timestamp": trade.timestamp.isoformat(),
+                    "bid_price": float(quote.bid_price) if quote else 0.0,
+                    "ask_price": float(quote.ask_price) if quote else 0.0,
+                    "bid_size": float(quote.bid_size) if quote else 0.0,
+                    "ask_size": float(quote.ask_size) if quote else 0.0,
+                }
+        return results
+    except Exception as e:
+        print(f"❌ Alpaca Quotes Batch Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
