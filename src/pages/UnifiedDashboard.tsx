@@ -103,9 +103,10 @@ export const UnifiedDashboard = () => {
   // 6. Chart time range
   const [chartRange, setChartRange] = useState<'7d' | '30d' | 'all'>('all');
 
-  // Derived states (always live/Alpaca)
-  const displayedPositions = livePositions;
-  const displayedHistory = liveHistory;
+  // Derived states (always live/Alpaca mode)
+  const displayedPositions = useMemo(() => livePositions, [livePositions]);
+
+  const displayedHistory = useMemo(() => liveHistory, [liveHistory]);
 
   const displayedAccount = useMemo(() => ({
     total_assets: alpacaAccount?.equity ?? 0,
@@ -120,7 +121,7 @@ export const UnifiedDashboard = () => {
     return (wins / liveHistory.length) * 100;
   }, [liveHistory]);
 
-  const displayedTotalTrades = liveHistory.length;
+  const displayedTotalTrades = useMemo(() => liveHistory.length, [liveHistory]);
 
   // Derived Watchlist with Statuses mapped from active displayed positions & history
   const watchlistItems = useMemo(() => {
