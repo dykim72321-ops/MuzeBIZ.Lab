@@ -40,6 +40,10 @@ export interface Stock {
     relativeVolume?: number; // Current volume / Avg volume (key momentum signal)
     atr5?: number; // 🆕 5-day Average True Range
     dailyChangeStdDev?: number; // 🆕 Historical volatility measure
+    bidPrice?: number;
+    askPrice?: number;
+    bidSize?: number;
+    askSize?: number;
   };
   news?: { title: string; url: string; time_published: string }[];
   newsHeadlines?: string[]; // 🆕 Google News headlines

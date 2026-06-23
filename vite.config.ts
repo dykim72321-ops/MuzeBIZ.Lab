@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
   server: {
     proxy: {
       '/py-api': {
@@ -25,5 +25,8 @@ export default defineConfig({
         },
       },
     },
+    watch: {
+      ignored: ['**/python_engine/**', '**/.venv/**', '**/.venv_*/**', '**/venv_backup/**', '**/venv/**']
+    }
   },
 })

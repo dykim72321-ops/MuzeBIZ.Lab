@@ -22,8 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 # Python
-python_engine/venv/
-python_engine/venv_backup/
+.venv*
+venv/
+python_engine/venv*/
 python_engine/.env
 __pycache__/
 *.py[cod]

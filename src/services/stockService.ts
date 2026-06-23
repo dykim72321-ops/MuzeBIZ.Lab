@@ -296,8 +296,6 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
       return [];
     }
 
-    const results: Stock[] = [];
-    
     // We can fetch details for each ticker in parallel
     const promises = tickers.map(async (ticker) => {
       const alpacaData = alpacaMap[ticker];
