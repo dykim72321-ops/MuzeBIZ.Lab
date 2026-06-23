@@ -1,0 +1,10 @@
+python_engine/venv/
+python_engine/venv_backup/
+python_engine/__pycache__/
+python_engine/.env
+__pycache__/
+*.py[cod]
+node_modules/
+.claude/
+check_db.js
+python_engine/test_db.py

@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 # Python
 python_engine/venv/
+python_engine/venv_backup/
 python_engine/.env
 __pycache__/
 *.py[cod]
