@@ -31,16 +31,14 @@ import {
   Plus,
   Loader2,
   PieChart,
-  Trash2,
   FlaskConical
 } from 'lucide-react';
 
 // Types
-import type { DiscoveryStock, PaperPosition, PaperHistory, PaperAccount, AlpacaAccount, TerminalData } from '../types/dashboard';
+import type { DiscoveryStock, PaperPosition, PaperHistory, AlpacaAccount, TerminalData } from '../types/dashboard';
 
 // Hooks & Services
 import { useMarketEngine } from '../hooks/useMarketEngine';
-import { useStrategyStats } from '../hooks/useStrategyStats';
 import { getWatchlist, addToWatchlist, cleanupOldWatchlistItems, type WatchlistItem } from '../services/watchlistService';
 import { processSignal } from '../utils/signalProcessor';
 import { supabase as supabaseClient } from '../lib/supabase';
@@ -50,11 +48,6 @@ import {
   fetchBrokerPositions,
   closePosition,
   toggleSystemArm,
-  fetchPaperAccount,
-  fetchPaperPositions,
-  fetchPaperHistory,
-  sellPaperPosition,
-  deletePaperHistory,
   fetchPennyScanStatus,
   fetchClosedTrades,
   type PennyScanStatus
@@ -81,10 +74,8 @@ const PENNY_DISPLAY_THRESHOLD = 1.5;
 export const UnifiedDashboard = () => {
   const navigate = useNavigate();
   const { isHunting, triggerHunt } = useMarketEngine();
-  const { data: strategyStats, isLoading: statsLoading } = useStrategyStats();
 
   // 1. Data States
-  const [tradingMode, setTradingMode] = useState<'paper' | 'live'>('paper');
   const [watchlistRaw, setWatchlistRaw] = useState<WatchlistItem[]>([]);
   const [discoveryStocks, setDiscoveryStocks] = useState<DiscoveryStock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,9 +89,6 @@ export const UnifiedDashboard = () => {
   const [pennyScanStatus, setPennyScanStatus] = useState<PennyScanStatus | null>(null);
 
   // 3. Trade & Account States
-  const [paperPositions, setPaperPositions] = useState<PaperPosition[]>([]);
-  const [paperHistory, setPaperHistory] = useState<PaperHistory[]>([]);
-  const [paperAccount, setPaperAccount] = useState<PaperAccount | null>(null);
   const [livePositions, setLivePositions] = useState<PaperPosition[]>([]);
   const [liveHistory, setLiveHistory] = useState<PaperHistory[]>([]);
   const [alpacaAccount, setAlpacaAccount] = useState<AlpacaAccount | null>(null);
@@ -115,50 +103,24 @@ export const UnifiedDashboard = () => {
   // 6. Chart time range
   const [chartRange, setChartRange] = useState<'7d' | '30d' | 'all'>('all');
 
-  // Derived unified states based on active trading mode
-  const displayedPositions = useMemo(() => {
-    return tradingMode === 'live' ? livePositions : paperPositions;
-  }, [tradingMode, livePositions, paperPositions]);
+  // Derived states (always live/Alpaca)
+  const displayedPositions = livePositions;
+  const displayedHistory = liveHistory;
 
-  const displayedHistory = useMemo(() => {
-    return tradingMode === 'live' ? liveHistory : paperHistory;
-  }, [tradingMode, liveHistory, paperHistory]);
-
-  const displayedAccount = useMemo(() => {
-    if (tradingMode === 'live') {
-      return {
-        total_assets: alpacaAccount?.equity ?? 0,
-        cash_available: alpacaAccount?.buying_power ?? 0,
-        today_pnl: alpacaAccount?.today_pnl ?? 0,
-        today_pnl_pct: alpacaAccount?.today_pnl_pct ?? 0,
-      };
-    } else {
-      return {
-        total_assets: paperAccount?.total_assets ?? 100000,
-        cash_available: paperAccount?.cash_available ?? 100000,
-        today_pnl: 0,
-        today_pnl_pct: 0,
-      };
-    }
-  }, [tradingMode, alpacaAccount, paperAccount]);
+  const displayedAccount = useMemo(() => ({
+    total_assets: alpacaAccount?.equity ?? 0,
+    cash_available: alpacaAccount?.buying_power ?? 0,
+    today_pnl: alpacaAccount?.today_pnl ?? 0,
+    today_pnl_pct: alpacaAccount?.today_pnl_pct ?? 0,
+  }), [alpacaAccount]);
 
   const displayedWinRate = useMemo(() => {
-    if (tradingMode === 'live') {
-      if (!liveHistory || liveHistory.length === 0) return 0;
-      const wins = liveHistory.filter(t => (t.pnl_pct ?? 0) > 0).length;
-      return (wins / liveHistory.length) * 100;
-    } else {
-      return strategyStats?.win_rate ?? 0;
-    }
-  }, [tradingMode, liveHistory, strategyStats]);
+    if (!liveHistory || liveHistory.length === 0) return 0;
+    const wins = liveHistory.filter(t => (t.pnl_pct ?? 0) > 0).length;
+    return (wins / liveHistory.length) * 100;
+  }, [liveHistory]);
 
-  const displayedTotalTrades = useMemo(() => {
-    if (tradingMode === 'live') {
-      return liveHistory.length;
-    } else {
-      return strategyStats?.total_trades ?? 0;
-    }
-  }, [tradingMode, liveHistory, strategyStats]);
+  const displayedTotalTrades = liveHistory.length;
 
   // Derived Watchlist with Statuses mapped from active displayed positions & history
   const watchlistItems = useMemo(() => {
@@ -241,11 +203,8 @@ export const UnifiedDashboard = () => {
       // 1. Run cleanup for old WATCHING items (non-blocking)
       cleanupOldWatchlistItems(7).catch(console.error);
 
-      const [wl, pp, ph, pa, alpaca, discoveryResult, scanStatus, brokerPositions, alpacaClosedTrades] = await Promise.all([
+      const [wl, alpaca, discoveryResult, scanStatus, brokerPositions, alpacaClosedTrades] = await Promise.all([
         getWatchlist(),
-        fetchPaperPositions(),
-        fetchPaperHistory(),
-        fetchPaperAccount(),
         fetchBrokerAccount().catch(() => null),
         supabaseClient
           .from('daily_discovery')
@@ -312,9 +271,6 @@ export const UnifiedDashboard = () => {
 
       setWatchlistRaw(wl);
       setDiscoveryStocks((discoveryResult.data || []).filter(s => s.dna_score != null && s.price != null));
-      setPaperPositions(mapPositionData(pp));
-      setPaperHistory(ph || []);
-      setPaperAccount(pa);
       setLivePositions(mapPositionData(mappedBrokerPositions));
       setLiveHistory(mappedLiveHistory);
       if (alpaca && !alpaca.error) setAlpacaAccount(alpaca);
@@ -458,7 +414,7 @@ export const UnifiedDashboard = () => {
         onClick: async () => {
           const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
           try {
-            const result = tradingMode === 'live' ? await closePosition(ticker) : await sellPaperPosition(ticker);
+            const result = await closePosition(ticker);
             if (result?.status === 'success' || result?.symbol || result?.id) {
               toast.success(`${ticker} 청산 성공`, { id: toastId });
               loadDashboardData();
@@ -471,17 +427,6 @@ export const UnifiedDashboard = () => {
         }
       }
     });
-  };
-
-  const handleDeleteHistory = async (historyId: string, ticker: string) => {
-    const toastId = toast.loading(`${ticker} 이력 삭제 중...`);
-    try {
-      await deletePaperHistory(historyId);
-      toast.success(`${ticker} 청산 이력 삭제 완료`, { id: toastId });
-      loadDashboardData();
-    } catch {
-      toast.error('삭제 실패', { id: toastId });
-    }
   };
 
   // EXITED 종목은 재등록 가능하도록 제외
@@ -646,38 +591,11 @@ export const UnifiedDashboard = () => {
                 US Market {isMarketOpen ? 'Open' : 'Closed'}
               </span>
               <span className="text-slate-300">|</span>
-              <p className="text-[13px] font-semibold text-slate-800">실시간 시장 펄스 감시, 오늘의 알파 발굴, 그리고 포트폴리오의 실시간 가상 매매 현황 통합 관제</p>
+              <p className="text-[13px] font-semibold text-slate-800">실시간 시장 펄스 감시, 오늘의 알파 발굴, 그리고 실계좌 포트폴리오 현황 통합 관제</p>
             </div>
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
-            {/* Trading Environment Toggle */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 gap-1 animate-in fade-in zoom-in-95 duration-300">
-              <button
-                onClick={() => setTradingMode('paper')}
-                className={clsx(
-                  "px-3 py-1.5 text-xs font-extrabold rounded-lg transition-all duration-200 cursor-pointer font-sans",
-                  tradingMode === 'paper'
-                    ? "bg-white text-indigo-650 shadow-sm border border-slate-200"
-                    : "text-slate-600 hover:text-slate-800"
-                )}
-              >
-                가상 모의투자 (Paper)
-              </button>
-              <button
-                onClick={() => setTradingMode('live')}
-                className={clsx(
-                  "px-3 py-1.5 text-xs font-extrabold rounded-lg transition-all duration-200 flex items-center gap-1.5 font-sans cursor-pointer",
-                  alpacaAccount ? "text-slate-600 hover:text-slate-800" : "text-slate-400",
-                  tradingMode === 'live' && "bg-white text-emerald-650 shadow-sm border border-slate-200"
-                )}
-                title={alpacaAccount ? "실계좌 거래 및 잔고 확인" : "Alpaca 백엔드 연결 중... 잔고 데이터 없이 포지션/이력은 조회됩니다."}
-              >
-                실계좌 (Alpaca)
-                {!alpacaAccount && <Lock className="w-3 h-3 text-slate-400" />}
-              </button>
-            </div>
-
             {/* System ARM Toggle — 현재 상태 표시 + 클릭 시 전환 방향 명시 */}
             <button
               onClick={handleToggleArm}
@@ -773,7 +691,7 @@ export const UnifiedDashboard = () => {
                   ${displayedAccount.total_assets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs font-semibold text-slate-800 leading-none block pt-2 font-sans">
-                  {tradingMode === 'live' ? 'Alpaca 실계좌 Equity' : '현금 + 포지션 평가액'}
+                  Alpaca 실계좌 Equity
                 </span>
               </div>
               <div className="text-indigo-600 shrink-0 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)]">
@@ -795,7 +713,7 @@ export const UnifiedDashboard = () => {
                   ${displayedAccount.cash_available.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-xs font-semibold text-slate-800 leading-none block pt-2 font-sans">
-                  {tradingMode === 'live' ? 'Alpaca Buying Power' : '가상 매수 가능 예치금'}
+                  Alpaca Buying Power
                 </span>
               </div>
               <div className="text-amber-700 shrink-0 drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]">
@@ -841,7 +759,7 @@ export const UnifiedDashboard = () => {
 
           {/* 4. Win Rate (Speedometer Gauge) */}
           {(() => {
-            const hasData = tradingMode === 'live' ? liveHistory.length > 0 : (!statsLoading && strategyStats != null);
+            const hasData = liveHistory.length > 0;
             const winRateVal = displayedWinRate;
             const totalTrades = displayedTotalTrades;
             const angle = -180 + (winRateVal / 100) * 180;
@@ -872,14 +790,14 @@ export const UnifiedDashboard = () => {
                   </svg>
                   <div className="absolute bottom-1 text-center font-mono leading-none">
                     <span className="text-2xl font-black text-slate-900">
-                      {tradingMode === 'live' ? `${winRateVal.toFixed(1)}%` : (statsLoading ? '···' : hasData ? `${winRateVal.toFixed(1)}%` : '--')}
+                      {hasData ? `${winRateVal.toFixed(1)}%` : '--'}
                     </span>
                     <span className="text-xs font-mono text-slate-800 font-bold block mt-0.5">WIN RATIO</span>
                   </div>
                 </div>
 
                 <p className="text-xs font-semibold text-slate-800 text-center leading-normal border-t border-slate-100 pt-2 w-full z-10 font-sans">
-                  {tradingMode === 'live' ? `총 ${totalTrades}건 실계좌 거래 기준 승률` : (statsLoading ? '연산 중...' : hasData ? `총 ${totalTrades}건 거래 기준 실현 승률` : '거래 이력 없음')}
+                  {hasData ? `총 ${totalTrades}건 실계좌 거래 기준 승률` : '거래 이력 없음'}
                 </p>
               </div>
             );
@@ -1116,7 +1034,7 @@ export const UnifiedDashboard = () => {
 
         {/* ════════ ANALYTICS PANELS ════════ */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-          <RiskAnalyticsPanel history={displayedHistory} strategyStats={tradingMode === 'live' ? null : strategyStats} />
+          <RiskAnalyticsPanel history={displayedHistory} strategyStats={null} />
           <PositionAnalyticsPanel positions={displayedPositions} totalEquity={displayedAccount.total_assets} />
         </div>
 
@@ -1130,9 +1048,7 @@ export const UnifiedDashboard = () => {
                 <span className="text-xs font-mono font-semibold text-slate-800 uppercase tracking-widest block mb-0.5">Active Positions</span>
                 <h2 className="text-[15px] font-extrabold text-slate-900 font-sans">현재 보유 중인 매수 포지션</h2>
                 <p className="text-[13px] font-semibold text-slate-800 mt-1 leading-relaxed font-sans">
-                  {tradingMode === 'live' 
-                    ? '실시간 매수가 완료되어 Alpaca 실계좌에서 운용 중인 주식 자산입니다. 우측 청산 클릭 시 즉시 전량 매도됩니다.' 
-                    : '실시간 매수가 완료되어 운용 중인 가상 주식 자산입니다. 트레일링 스탑에 도달하거나 우측 청산 클릭 시 즉시 전량 매도됩니다.'}
+                  실시간 매수가 완료되어 Alpaca 실계좌에서 운용 중인 주식 자산입니다. 우측 청산 클릭 시 즉시 전량 매도됩니다.
                 </p>
               </div>
               <span className="text-xs font-black text-emerald-700 border-b-2 border-emerald-500 pb-0.5 shrink-0 self-start sm:self-auto font-sans">
@@ -1158,7 +1074,7 @@ export const UnifiedDashboard = () => {
                   {displayedPositions.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-12 text-center text-slate-800 font-extrabold text-sm">
-                        {tradingMode === 'live' ? '보유중인 실계좌 매수 포지션이 없습니다.' : '보유중인 가상 매수 포지션이 없습니다.'}
+                        보유중인 실계좌 매수 포지션이 없습니다.
                       </td>
                     </tr>
                   ) : (
@@ -1223,9 +1139,7 @@ export const UnifiedDashboard = () => {
                   <h2 className="text-[15px] font-extrabold text-slate-900 font-sans">최근 청산 이력</h2>
                 </div>
                 <p className="text-[13px] font-semibold text-slate-800 mt-1 leading-relaxed font-sans">
-                  {tradingMode === 'live' 
-                    ? '실계좌에서 매도가 완료되어 최종 손익이 확정된 거래 내역입니다.' 
-                    : '매도가 완료되어 최종 손익금과 사유가 확정된 거래 내역입니다.'}
+                  실계좌에서 매도가 완료되어 최종 손익이 확정된 거래 내역입니다.
                 </p>
               </div>
               <span className="text-xs font-bold text-slate-800 font-sans">{displayedHistory.length}건 기록</span>
@@ -1236,7 +1150,7 @@ export const UnifiedDashboard = () => {
                 <div className="text-center py-12 text-slate-800 border border-dashed border-slate-200 font-sans">
                   <Clock className="w-8 h-8 text-indigo-500 mx-auto mb-2 opacity-80 drop-shadow-[0_0_8px_rgba(79,70,229,0.4)] stroke-[2.5]" />
                   <p className="text-sm font-extrabold text-slate-800">
-                    {tradingMode === 'live' ? '최근 종료된 실계좌 매매 기록이 없습니다.' : '최근 종료된 매매 기록이 없습니다.'}
+                    최근 종료된 실계좌 매매 기록이 없습니다.
                   </p>
                 </div>
               ) : (
@@ -1273,15 +1187,6 @@ export const UnifiedDashboard = () => {
                             {trade.exit_reason || 'Exit'}
                           </span>
                         </div>
-                        {tradingMode === 'paper' && (
-                          <button
-                            onClick={() => handleDeleteHistory(trade.id, trade.ticker)}
-                            className="opacity-0 group-hover:opacity-100 p-1.5 bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-slate-800 hover:text-rose-500 rounded-lg transition-all"
-                            title="이력 삭제"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
                       </div>
                     </div>
                   );
