@@ -217,7 +217,7 @@ export const UnifiedDashboard = () => {
           .limit(8),
         fetchPennyScanStatus(),
         fetchBrokerPositions().catch(() => []),
-        fetchClosedTrades(30).catch(() => []),
+        fetchClosedTrades(1000).catch(() => []),
       ]);
       if (scanStatus) setPennyScanStatus(scanStatus);
 
@@ -461,7 +461,15 @@ export const UnifiedDashboard = () => {
     const BASE = 100000;
     const now = Date.now();
     const cutoffMs = chartRange === '7d' ? 7 * 86_400_000 : chartRange === '30d' ? 30 * 86_400_000 : Infinity;
-    const startLabel = chartRange === '7d' ? '-7일' : chartRange === '30d' ? '-30일' : 'Start';
+    
+    let startLabel = 'Start';
+    if (chartRange === '7d') {
+      const d = new Date(now - 7 * 86_400_000);
+      startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+    } else if (chartRange === '30d') {
+      const d = new Date(now - 30 * 86_400_000);
+      startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+    }
 
     // 현재 실계좌 가치 (총 자산 = 현금 + 미실현 포지션 시가)
     const currentActualValue = displayedAccount?.total_assets != null
@@ -486,14 +494,22 @@ export const UnifiedDashboard = () => {
     let running = BASE;
     const allPoints = sorted.map(item => {
       running += Number(item.profit_amt ?? 0);
+      let name = '?';
+      if (item.created_at) {
+        const d = new Date(item.created_at);
+        name = `${d.getMonth() + 1}/${d.getDate()}`;
+      }
       return {
-        name: item.created_at
-          ? new Date(item.created_at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })
-          : '?',
+        name,
         value: Math.round(running),
         ts: new Date(item.created_at ?? 0).getTime(),
       };
     });
+
+    if (chartRange === 'all' && allPoints.length > 0) {
+      const d = new Date(allPoints[0].ts);
+      startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+    }
 
     const inRange = cutoffMs === Infinity ? allPoints : allPoints.filter(p => now - p.ts <= cutoffMs);
     if (inRange.length === 0) return [];
