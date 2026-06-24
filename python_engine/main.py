@@ -1968,28 +1968,39 @@ async def run_startup_sequence():
 
                 if supabase:
                     try:
+                        allowed_keys = {
+                            "ticker",
+                            "indicator",
+                            "value",
+                            "rsi",
+                            "macd_line",
+                            "macd_signal",
+                            "macd_diff",
+                            "adx",
+                            "rvol",
+                            "volatility_ann",
+                            "vol_weight",
+                            "kelly_f",
+                            "recommended_weight",
+                            "price",
+                            "signal",
+                            "strength",
+                            "ai_report",
+                            "timestamp",
+                            "dna_score",
+                        }
+                        db_payload = {
+                            k: v for k, v in payload.items() if k in allowed_keys
+                        }
+
                         await asyncio.to_thread(
-                            supabase.table("realtime_signals").insert(payload).execute
+                            supabase.table("realtime_signals")
+                            .insert(db_payload)
+                            .execute
                         )
                         print(f"💾 Snapshot for {ticker} saved to DB.")
                     except Exception as db_err:
-                        err_str = str(db_err)
-                        if (
-                            "PGRST204" in err_str
-                            or "data_source" in err_str
-                            or "volume_multiplier" in err_str
-                        ):
-                            safe_payload = payload.copy()
-                            safe_payload.pop("data_source", None)
-                            safe_payload.pop("volume_multiplier", None)
-                            await asyncio.to_thread(
-                                supabase.table("realtime_signals")
-                                .insert(safe_payload)
-                                .execute
-                            )
-                            print(f"💾 Snapshot for {ticker} saved (Safe Mode).")
-                        else:
-                            print(f"⚠️ Initial pulse for {ticker} failed: {db_err}")
+                        print(f"⚠️ Initial pulse for {ticker} failed: {db_err}")
             except Exception as e:
                 print(f"⚠️ Initial pulse for {ticker} failed: {e}")
 
