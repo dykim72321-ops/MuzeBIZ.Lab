@@ -280,16 +280,15 @@ class PaperTradingManager:
                 )
                 return
             # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
-            # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 없음 → 진입 차단 (데이터 오류 보호)
+            # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → KELLY_FRACTION 기본값으로 폴백.
             if recommended_weight <= 0:
                 print(
-                    f"⛔ [{ticker}] Kelly 회로차단기 작동 (recommended_weight=0) — 진입 차단"
+                    f"⚠️ [{ticker}] Kelly 계산 불가 (recommended_weight=0) "
+                    f"— 기본 비중 {KELLY_FRACTION*100:.0f}%로 폴백"
                 )
-                return
-            effective_fraction = recommended_weight / 100.0
-            effective_fraction = min(
-                effective_fraction, 0.25
-            )  # 단일 종목 최대 25% 제한
+                effective_fraction = KELLY_FRACTION
+            else:
+                effective_fraction = min(recommended_weight / 100.0, 0.25)
             buy_budget = min(
                 acc["cash_available"] * effective_fraction,
                 MAX_BUY_BUDGET,

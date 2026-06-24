@@ -467,7 +467,7 @@ def calculate_advanced_signals(df: pd.DataFrame, avg_daily_volume: float = 0.0):
     score += np.where(
         is_golden,
         20,
-        np.where(is_dead, -20, np.where(macd_diff > macd_diff_prev, 8, -8)),
+        np.where(is_dead, -20, np.where(macd_diff > macd_diff_prev, 15, -8)),
     )
 
     adx_is_bearish = df["-DI"] > df["+DI"]
@@ -624,7 +624,7 @@ def calculate_dna_score(
     elif macd_diff < 0 and macd_diff_prev >= 0:
         score -= 20
     elif macd_diff > macd_diff_prev:
-        score += 8
+        score += 15
     else:
         score -= 8
 
@@ -1303,6 +1303,27 @@ async def on_minute_bar_closed(bar):
 
         if len(df_hist) < 35:
             return
+
+        # ── avg_daily_volume 지연 초기화 ─────────────────────────────────────
+        # warm_up 대상이 아니었던 종목은 avg_daily_volume=0 → RVOL=1.0 고정 버그 방지.
+        # 첫 35번째 봉 시점에 한 번만 yfinance로 조회하여 캐시에 저장.
+        if ticker_symbol not in _candle_state.avg_daily_volume:
+            try:
+                tk = yf.Ticker(ticker_symbol)
+                daily = await asyncio.to_thread(tk.history, period="30d", interval="1d")
+                if not daily.empty:
+                    _candle_state.avg_daily_volume[ticker_symbol] = float(
+                        daily["Volume"].mean()
+                    )
+                    print(
+                        f"📈 [AvgVol-lazy] {ticker_symbol}: "
+                        f"{_candle_state.avg_daily_volume[ticker_symbol]:,.0f} avg daily shares"
+                    )
+                else:
+                    _candle_state.avg_daily_volume[ticker_symbol] = 0.0
+            except Exception as avg_err:
+                _candle_state.avg_daily_volume[ticker_symbol] = 0.0
+                print(f"⚠️ [AvgVol-lazy] {ticker_symbol}: {avg_err}")
 
         current_price = float(bar.close)
 

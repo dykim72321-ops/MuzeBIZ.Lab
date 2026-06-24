@@ -67,7 +67,7 @@ function calcDna(p: DnaParams): DnaResult {
   score += deltas.rsi;
 
   // MACD
-  deltas.macd = p.macdStatus === 'golden' ? 20 : p.macdStatus === 'dead' ? -20 : p.macdStatus === 'rising' ? 8 : -8;
+  deltas.macd = p.macdStatus === 'golden' ? 20 : p.macdStatus === 'dead' ? -20 : p.macdStatus === 'rising' ? 15 : -8;
   score += deltas.macd;
 
   // ADX
@@ -310,7 +310,7 @@ export function DnaSimulatorPage() {
   const macdOptions: { value: MacdStatus; label: string; score: number }[] = [
     { value: 'golden', label: '골든크로스', score: 20 },
     { value: 'dead',   label: '데드크로스', score: -20 },
-    { value: 'rising', label: '상승 모멘텀', score: 8 },
+    { value: 'rising', label: '상승 모멘텀', score: 15 },
     { value: 'falling',label: '하락 모멘텀', score: -8 },
   ];
 
