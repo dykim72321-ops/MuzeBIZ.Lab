@@ -824,7 +824,19 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         payload["ai_metadata"] = {"dna_score": dna_score}
 
     payload["dna_score"] = dna_score
-    # payload["atr"] = sizing.get("atr", 0.0)  # Temporarily disabled to prevent Supabase PGRST204 schema error
+    payload["macd_diff_prev"] = round(macd_diff_prev, 4)
+    payload["di_positive"] = bool(
+        (
+            float(latest["+DI"])
+            if "+DI" in latest and not pd.isna(latest["+DI"])
+            else 0.0
+        )
+        > (
+            float(latest["-DI"])
+            if "-DI" in latest and not pd.isna(latest["-DI"])
+            else 0.0
+        )
+    )
     payload["data_source"] = "alpaca_iex"
     payload["volume_multiplier"] = _candle_state.volume_multiplier.get(
         ticker.upper(), 1.0
@@ -1404,6 +1416,12 @@ async def on_minute_bar_closed(bar):
                 )
                 volume_val = int(df_hist["Volume"].iloc[-1]) if len(df_hist) >= 1 else 0
                 try:
+                    import math as _math
+
+                    _vol_ann = float(payload.get("volatility_ann") or 0.0)
+                    _atr_pct = (
+                        round(_vol_ann / _math.sqrt(252), 4) if _vol_ann > 0 else 0.0
+                    )
                     await asyncio.to_thread(
                         app_state.supabase.table("daily_discovery")
                         .upsert(
@@ -1412,8 +1430,17 @@ async def on_minute_bar_closed(bar):
                                 "dna_score": int(round(dna_val)),
                                 "price": price_val,
                                 "change": str(round(change_pct, 2)),
+                                "change_percent": round(change_pct, 2),
                                 "volume": str(volume_val),
                                 "updated_at": datetime.now().isoformat(),
+                                "rsi": payload.get("rsi"),
+                                "rvol": payload.get("rvol"),
+                                "adx": payload.get("adx"),
+                                "macd_diff": payload.get("macd_diff"),
+                                "macd_diff_prev": payload.get("macd_diff_prev"),
+                                "di_positive": payload.get("di_positive"),
+                                "is_extended": payload.get("is_extended"),
+                                "atr_pct": _atr_pct,
                             },
                             on_conflict="ticker",
                         )
