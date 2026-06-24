@@ -512,10 +512,14 @@ export const UnifiedDashboard = () => {
     }
 
     const inRange = cutoffMs === Infinity ? allPoints : allPoints.filter(p => now - p.ts <= cutoffMs);
-    if (inRange.length === 0) return [];
 
-    const firstIdx = allPoints.indexOf(inRange[0]);
-    const startValue = firstIdx > 0 ? allPoints[firstIdx - 1].value : BASE;
+    let startValue = BASE;
+    if (inRange.length > 0) {
+      const firstIdx = allPoints.indexOf(inRange[0]);
+      startValue = firstIdx > 0 ? allPoints[firstIdx - 1].value : BASE;
+    } else {
+      startValue = allPoints.length > 0 ? allPoints[allPoints.length - 1].value : BASE;
+    }
 
     const maPoints = inRange.map((p, i, arr) => {
       const window = arr.slice(Math.max(0, i - 4), i + 1);
@@ -529,12 +533,10 @@ export const UnifiedDashboard = () => {
     ];
 
     // 마지막 청산 이후 현재 실계좌 총 자산으로 앵커 — 미실현 손익 포함
-    if (currentActualValue != null) {
-      const lastTs = maPoints.length > 0 ? maPoints[maPoints.length - 1].ts : 0;
-      // 같은 시각에 중복 포인트 방지: 최소 1분 이상 지났을 때만 추가
-      if (now - lastTs > 60_000) {
-        series.push({ name: '현재', value: currentActualValue, ts: now, ma: currentActualValue });
-      }
+    const lastTs = maPoints.length > 0 ? maPoints[maPoints.length - 1].ts : 0;
+    if (now - lastTs > 60_000) {
+      const currentVal = currentActualValue != null ? currentActualValue : (maPoints.length > 0 ? maPoints[maPoints.length - 1].value : startValue);
+      series.push({ name: '현재', value: currentVal, ts: now, ma: currentVal });
     }
 
     return series;
