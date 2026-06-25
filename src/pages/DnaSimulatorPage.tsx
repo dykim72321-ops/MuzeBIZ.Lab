@@ -100,6 +100,12 @@ function calcDna(p: DnaParams): DnaResult {
   else if (isTier2) { tier = 'Tier-2'; tierColor = 'text-teal-700'; signal = 'BUY'; }
   else if (isSell) { tier = 'SELL'; tierColor = 'text-rose-700'; signal = 'STRONG SELL'; }
 
+  // ── Momentum Interceptor 동기화 (main.py) ──
+  if (signal === 'STRONG BUY' && rvol < 3.0) {
+    signal = 'HOLD (Momentum Blocked)';
+    tierColor = 'text-amber-700';
+  }
+
   return { score: finalScore, deltas, tier, tierColor, signal };
 }
 
