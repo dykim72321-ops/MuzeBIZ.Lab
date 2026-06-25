@@ -276,17 +276,109 @@ class TickerDataState:
                 print(f"⚠️ [AvgVol] {ticker}: {e}")
 
 
+# ── Momentum Validator & MTF Cache ───────────────────────────────────────────
+
+
+class MTFCache:
+    """15분봉 20 EMA 값을 백그라운드에서 주기적으로 캐싱하는 클래스"""
+
+    def __init__(self):
+        self.ema_15m_20: Dict[str, float] = {}
+
+    async def update_cache(self, tickers: List[str]):
+        """yfinance를 통해 15분봉 20 EMA 계산 및 갱신 (15분 스케줄러용)"""
+        if not tickers:
+            return
+
+        print(f"🔄 [MTF Cache] Updating 15m 20 EMA for {len(tickers)} tickers...")
+
+        batch_str = " ".join(tickers)
+        try:
+            df_15m = await asyncio.to_thread(
+                yf.download,
+                batch_str,
+                period="5d",
+                interval="15m",
+                progress=False,
+                threads=True,
+            )
+
+            if df_15m is None or df_15m.empty:
+                return
+
+            close_data = df_15m.get("Close")
+            if close_data is None or close_data.empty:
+                return
+
+            if isinstance(close_data, pd.Series):
+                ema_20 = ta.trend.EMAIndicator(close_data, window=20).ema_indicator()
+                if not ema_20.empty and not pd.isna(ema_20.iloc[-1]):
+                    self.ema_15m_20[tickers[0]] = float(ema_20.iloc[-1])
+            else:
+                for ticker in tickers:
+                    if ticker in close_data.columns:
+                        series = close_data[ticker].dropna()
+                        if len(series) >= 20:
+                            ema_20 = ta.trend.EMAIndicator(
+                                series, window=20
+                            ).ema_indicator()
+                            if not ema_20.empty and not pd.isna(ema_20.iloc[-1]):
+                                self.ema_15m_20[ticker] = float(ema_20.iloc[-1])
+
+            print("✅ [MTF Cache] 15m 20 EMA update complete.")
+        except Exception as e:
+            print(f"⚠️ [MTF Cache] Update failed: {e}")
+
+    def get_15m_ema(self, ticker: str) -> Optional[float]:
+        return self.ema_15m_20.get(ticker)
+
+
+class MomentumValidator:
+    """진입 전 거래량과 상위 추세를 검증하는 인터셉터"""
+
+    def __init__(self, mtf_cache: MTFCache, rvol_threshold: float = 3.0):
+        self.mtf_cache = mtf_cache
+        self.rvol_threshold = rvol_threshold
+
+    def validate(
+        self, ticker: str, current_price: float, rvol: float
+    ) -> tuple[bool, str]:
+        # 1. RVOL 검증
+        if rvol < self.rvol_threshold:
+            return (
+                False,
+                f"RVOL 부족 (현재: {rvol:.1f}x < 기준: {self.rvol_threshold}x)",
+            )
+
+        # 2. MTF (15분봉 20 EMA) 검증
+        ema_15m = self.mtf_cache.get_15m_ema(ticker)
+        if ema_15m is not None:
+            if current_price < ema_15m:
+                return (
+                    False,
+                    f"상위 추세 하락 (현재가 ${current_price:.4f} < 15m EMA ${ema_15m:.4f})",
+                )
+        else:
+            print(f"⚠️ [Interceptor] {ticker} MTF 캐시 없음 — 검증 스킵")
+            return True, "MTF 캐시 없음 (검증 스킵)"
+
+        return True, "검증 통과"
+
+
 # ── 전역 인스턴스 초기화 ─────────────────────────────────────────────────────
 _manager = ConnectionManager()
 _candle_state = TickerDataState(max_bars=100)
 _db = DBManager()
 _webhook = WebhookManager()
+_mtf_cache = MTFCache()
+_momentum_validator = MomentumValidator(mtf_cache=_mtf_cache, rvol_threshold=3.0)
 
 # AppState에 주입
 app_state.manager = _manager
 app_state.candle_state = _candle_state
 app_state.db = _db
 app_state.webhook = _webhook
+app_state.mtf_cache = _mtf_cache
 
 # Alpaca TradingClient (키가 있을 때만 초기화)
 _APCA_API_KEY = os.getenv("APCA_API_KEY_ID")
@@ -1376,6 +1468,22 @@ async def on_minute_bar_closed(bar):
         # ── 전체 DNA 경로 (신규 발굴 / 미보유 종목) ────────────────────────
         payload = await asyncio.to_thread(run_pulse_engine, ticker_symbol, df_hist)
 
+        # ── Momentum Interceptor ──────────────────────────────────────────
+        if payload.get("signal") == "BUY" and payload.get("strength") == "STRONG":
+            is_valid, reject_reason = _momentum_validator.validate(
+                ticker=ticker_symbol,
+                current_price=payload.get("price", 0.0),
+                rvol=payload.get("rvol", 1.0),
+            )
+            if not is_valid:
+                print(f"🛡️ [Interceptor] {ticker_symbol} 매수 차단: {reject_reason}")
+                payload["signal"] = "HOLD"
+                payload["strength"] = "NORMAL"
+                payload["ai_report"] = (
+                    f"⛔ [진입 보류] {reject_reason}\n\n" + payload.get("ai_report", "")
+                )
+        # ─────────────────────────────────────────────────────────────────
+
         await _manager.broadcast(payload)
 
         if app_state.supabase:
@@ -1685,6 +1793,25 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
 # ── 스케줄러 ─────────────────────────────────────────────────────────────────
 
 
+async def mtf_cache_scheduler():
+    """15분 주기로 Watchlist 종목들의 15분봉 20 EMA를 캐싱"""
+    print("🛡️ [Scheduler] MTF Cache Scheduler started.")
+    await asyncio.sleep(10)
+
+    while True:
+        try:
+            if is_market_hours():
+                held = list(app_state._held_tickers)
+                watching = await asyncio.to_thread(_db.get_active_tickers, limit=30)
+                active_tickers = list(set(held) | set(watching))
+
+                await _mtf_cache.update_cache(active_tickers)
+        except Exception as e:
+            print(f"⚠️ [Scheduler] MTF Cache Error: {e}")
+
+        await asyncio.sleep(900)
+
+
 async def auto_penny_scan_scheduler():
     """서버 시작 시 즉시 + 이후 4시간 주기로 페니 스캔 자동 실행."""
     await asyncio.sleep(30)
@@ -1950,6 +2077,15 @@ async def run_startup_sequence():
     if active_tickers:
         await _candle_state.warm_up(active_tickers)
 
+    # 1-2. MTF 캐시 초기 프리워밍 (스냅샷 및 스트림 시작 전에 완벽히 장전)
+    print("🔄 [Startup] Pre-warming MTF Cache for 15m 20 EMA...")
+    try:
+        initial_mtf_tickers = list(set(app_state._held_tickers) | set(active_tickers))
+        if initial_mtf_tickers:
+            await _mtf_cache.update_cache(initial_mtf_tickers)
+    except Exception as e:
+        print(f"⚠️ [Startup] MTF Cache pre-warm failed: {e}")
+
     # 2. 스냅샷 펄스 1회 방출
     print("📸 [Startup] Emitting initial snapshot pulses...")
     for ticker in active_tickers:
@@ -2009,6 +2145,9 @@ async def run_startup_sequence():
     asyncio.create_task(stream_scheduler())
     asyncio.create_task(auto_penny_scan_scheduler())
     asyncio.create_task(auto_cleanup_scheduler())
+
+    # MTF 캐시 주기적 갱신 스케줄러 시작 (프리워밍은 1-2 단계에서 완료)
+    asyncio.create_task(mtf_cache_scheduler())
 
 
 # ── 진입점 ───────────────────────────────────────────────────────────────────

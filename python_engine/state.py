@@ -33,6 +33,9 @@ class AppState:
     last_penny_scan_at: Optional[object] = None  # datetime | None
     penny_scan_results_cache: List[dict] = []
 
+    # ── MTF 캐시 (15분봉 20 EMA) ───────────────────────────────────────
+    mtf_cache = None  # MTFCache (main.py에서 주입)
+
     # ── Alpaca 스트림 태스크 참조 ────────────────────────────────────────
     _current_stream_task = None  # asyncio.Task | None
     _current_ws_stream = None  # StockDataStream | None
