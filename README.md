@@ -2,7 +2,7 @@
 
 **100% Quant Algorithm Architecture — Zero AI Heuristics**
 
-> **v4 Paper Trading Auto-Sell fully implemented.** The Operations Command (작전지휘소) dashboard now supports real-time position monitoring, automated 2-stage exits (Scale-Out + Trailing Stop), and manual sell buttons per position.
+> **v5 Paper Trading Engine.** Full pipeline: quant scanner → watchlist → auto buy/sell → trailing stop exit. MomentumValidator interceptor (RVOL + MTF EMA) guards every STRONG BUY entry. Penny Lab runs on a separate state machine with its own parameters.
 
 MuzeStock.Lab is a fully systematic, data-driven quantitative trading engine engineered for robust alpha generation. Every position taken is backed by mathematically structured statistical models, specifically tailored for volatile penny stocks and high-beta assets. There are **no LLM outputs, no AI-generated text, and no black-box heuristics** in any execution path.
 
@@ -78,6 +78,8 @@ When live ATR data is unavailable, a price-tiered fallback is applied:
 
 Stop prices use a Time-based Tightening multiplier. As holding days increase, the multiplier tightens from **2.5× ATR → 1.5× ATR**, protecting gains without premature exits.
 
+Constants: `CHANDELIER_K_NORMAL = 3.0`, `CHANDELIER_K_PENNY = 5.0` (wider stop for high-volatility penny stocks).
+
 ### 4. R/R Reject Gate
 
 ```text
@@ -91,7 +93,16 @@ The system will never artificially inflate the target price to meet a ratio. If 
 
 Allocations dynamically shrink with low conviction scores and high-variance regimes. Quarter-Kelly is applied with a Max R/R cap of 5.0 for safety.
 
-### 6. Walk-Forward Analysis (WFA) Module
+### 6. MomentumValidator Interceptor
+
+After a STRONG BUY signal is generated, a 2-layer interceptor validates before execution:
+
+1. **RVOL ≥ 3.0** — confirms real volume surge (not noise)
+2. **Current price ≥ 15-min 20 EMA** (`MTFCache`) — confirms uptrend alignment
+
+If either condition fails, the signal is downgraded to HOLD before reaching `process_signal()`.
+
+### 7. Walk-Forward Analysis (WFA) Module
 
 Located in `python_engine/portfolio_backtester.py`. Parameters are dynamically retrained on rolling windows and applied strictly to the subsequent unseen (OOS) window.
 
@@ -99,45 +110,50 @@ Located in `python_engine/portfolio_backtester.py`. Parameters are dynamically r
 
 ## Paper Trading Auto-Sell System
 
-The v4 paper trading engine (`python_engine/paper_engine.py`) implements a fully automated 2-stage exit state machine triggered on every 1-minute Alpaca bar close.
+The paper trading engine (`python_engine/paper_engine.py`) implements a fully automated 2-stage exit state machine triggered on every 1-minute Alpaca bar close.
 
 ### Automated Exit Flow
 
 ```
 Alpaca 1-min bar → on_minute_bar_closed() → paper_engine.process_signal()
     │
-    ├─ [Stage 1 — Scale-Out]  RSI > 60 & not scaled-out & ARMED
+    ├─ [Stage 1 — Scale-Out]  RSI > 60 (일반) / RSI > 70 or profit ≥ 20% (페니)
     │   → Sell 50% of position at market price
     │   → Raise trailing stop to entry_price × 1.01 (break-even +1%)
     │   → Status: HOLD → SCALE_OUT
     │   → Discord 🟠 alert
     │
-    ├─ [Stage 2 — Trailing Stop]  price < ts_threshold & ARMED
+    ├─ [Stage 2 — Trailing Stop]  price < ts_threshold
     │   → Liquidate remaining units at market price
     │   → Record PnL to paper_history table
     │   → Delete from paper_positions
     │   → Discord ✅ / 🛑 alert
     │
+    ├─ [EOD Force Exit]  15:30 ET → liquidate all positions
+    │
     └─ [Normal]  Update current_price, highest_price, ts_threshold
 ```
 
-### Trailing Stop Tightening
+### Trailing Stop Parameters
 
-| Phase | Multiplier | Trigger |
+| Scenario | Stop | Trigger |
 |---|---|---|
-| Initial entry | 90% of entry price | Set on BUY |
-| Price rise | 90% of highest_high | Dynamic update |
-| After Scale-Out | entry_price × 1.01 | RSI > 60 |
+| Initial entry (normal) | entry × 0.90 (−10%) | Set on BUY |
+| Initial entry (penny) | entry × 0.85 (−15%) | Set on BUY |
+| Price rises (normal) | highest × 0.90 | Dynamic |
+| After Scale-Out | entry × 1.01 | RSI threshold |
+| Penny break-even lock | entry price | Profit ≥ +10% |
+| Penny tight TS | highest × 0.93 (−7%) | After scale-out |
 
-### Manual Sell (사령관 수동 매도)
+### Watchlist Sync
 
-The Operations Command dashboard provides a **per-position SELL button**. On click:
+| Method | Trigger | Action |
+|---|---|---|
+| `_sync_watchlist_buy()` | On BUY | status=HOLDING, buy_price, stop_loss |
+| `_sync_watchlist_stop_loss()` | On Scale-Out | stop_loss update |
+| `_sync_watchlist_exit()` | On liquidation | status=EXITED |
 
-1. Fetches live price via yfinance (fallback: last streamed `current_price`)
-2. Calculates PnL vs entry price
-3. Posts to `POST /api/broker/paper/sell`
-4. Backend liquidates position, writes `paper_history`, sends Discord alert
-5. UI refreshes automatically
+All watchlist mutations include `.is_("user_id", "null")` to isolate engine-managed rows.
 
 ### API Endpoints (Paper Trading)
 
@@ -153,47 +169,34 @@ The Operations Command dashboard provides a **per-position SELL button**. On cli
 
 ## Operations Command Dashboard
 
-The **작전지휘소** (`/stock/dashboard`) is the real-time command center for monitoring and controlling the trading engine.
+The **작전지휘소** (`/stock/dashboard`) is the real-time command center for monitoring and controlling the trading engine. Single-scroll view, no tabs.
 
 ### Dashboard Sections
 
-| Section | Component | Data Source |
-|---|---|---|
-| **System Defense (MDD)** | `Dashboard.tsx` | `GET /api/strategy/stats` via FastAPI |
-| **Engine Win Rate** | `Dashboard.tsx` | `GET /api/strategy/stats` via FastAPI |
-| **Live Detection** | `Dashboard.tsx` + `useMarketEngine` | `GET /api/pulse/status` + `WS /ws/pulse` |
-| **Virtual Portfolio** | `PortfolioStatus.tsx` | `GET /api/broker/paper/*` via FastAPI |
-| **System Control Panel** | `CommandSettings.tsx` | `system_settings` table via Supabase client |
-| **Quant Signal Feed** | `QuantSignalCard.tsx` | WebSocket `WS /ws/pulse` real-time stream |
+| Section | Data Source |
+|---|---|
+| Market status / ARM toggle / scan buttons | Header |
+| 4 metric cards (equity, cash, unrealized PnL, win rate) | `paper_account`, `strategy/stats` |
+| Cumulative PnL chart + discovery grid | `paper_history`, `daily_discovery` |
+| Open positions table | `paper_positions` |
+| Recent exits history | `paper_history` |
 
 ### Dashboard Connection Map
 
 ```
 Browser
   ├─ WS  ws://<host>/py-api/ws/pulse  ──────────────────► FastAPI :8001 /ws/pulse
-  │        (Vite proxy: /py-api → localhost:8001)
-  │
-  ├─ REST /py-api/api/broker/paper/*  ──────────────────► FastAPI :8001 (X-Admin-Key auth)
+  ├─ REST /py-api/api/broker/paper/*  ──────────────────► FastAPI :8001 (X-Admin-Key)
   ├─ REST /py-api/api/strategy/stats  ──────────────────► FastAPI :8001
   ├─ REST /py-api/api/pulse/status    ──────────────────► FastAPI :8001
-  │
   ├─ Supabase JS  system_settings     ──────────────────► Supabase DB (RLS: anon UPDATE ok)
   ├─ Supabase JS  watchlist / paper_* ──────────────────► Supabase DB
-  │
   └─ Edge Fn  admin-proxy/api/hunt    ──────────────────► Supabase Edge Function
 ```
 
-### Known Constraints
-
-| Item | Detail |
-|---|---|
-| **Backend required** | FastAPI must be running on `:8001` for Portfolio, Stats, Pulse feed |
-| **Market hours** | WebSocket pulse only fires during Alpaca market hours; off-hours shows last snapshot |
-| **Trigger Hunt** | Calls `admin-proxy` Supabase Edge Function — requires it to be deployed |
-
 ### System Armed State
 
-The `SYSTEM_ARMED` flag (toggled via **System Control Panel**) gates all automated buy and sell execution. When disarmed, the engine streams and scores but does not trade.
+The `SYSTEM_ARMED` flag (toggled via the ARM button) gates all automated buy execution. Trailing stop exits run regardless of armed state to prevent runaway losses.
 
 ---
 
@@ -207,7 +210,7 @@ The `SYSTEM_ARMED` flag (toggled via **System Control Panel**) gates all automat
 | **Backend API** | FastAPI (Python 3.11) + Uvicorn + WebSocket |
 | **Broker** | Alpaca Markets API (Paper & Live trading) |
 | **Database** | PostgreSQL via Supabase |
-| **Edge Functions** | Supabase Edge Functions (Deno/TypeScript) — 12 functions |
+| **Edge Functions** | Supabase Edge Functions (Deno/TypeScript) — 13 functions |
 | **Alerts** | Discord Webhook (`webhook_manager.py`) |
 | **CI** | GitHub Actions (`python-ci.yml`) |
 
@@ -224,10 +227,12 @@ The `SYSTEM_ARMED` flag (toggled via **System Control Panel**) gates all automat
 │  FastAPI Backend   │  │   Supabase Edge Functions   │
 │  main.py :8001     │  │   run-quant-scanner         │
 │                    │  │   analyze-stock             │
-│  /api/analyze      │  │   execute-trades            │
-│  /api/portfolio    │  │   monitor-positions         │
-│  /api/broker/*     │  │   run-backtest  · +8 more   │
-│  /ws/pulse (WS)    │  └──────────────┬──────────────┘
+│  routers/          │  │   execute-trades            │
+│  ├─ broker.py      │  │   monitor-positions         │
+│  ├─ penny.py       │  │   admin-proxy  · +8 more    │
+│  ├─ strategy.py    │  └──────────────┬──────────────┘
+│  └─ ...            │                 │
+│  /ws/pulse (WS)    │                 │
 └────────┬───────────┘                 │
          │                            │
          ▼                            ▼
@@ -239,8 +244,8 @@ The `SYSTEM_ARMED` flag (toggled via **System Control Panel**) gates all automat
          ▼
 ┌────────────────────┐
 │  Discord Webhook   │
-│  Super Oversold    │
-│  & Standard Alerts │
+│  Trade Alerts      │
+│  10min Heartbeat   │
 └────────────────────┘
 ```
 
@@ -248,25 +253,39 @@ The `SYSTEM_ARMED` flag (toggled via **System Control Panel**) gates all automat
 
 | Module | Purpose |
 |---|---|
-| `main.py` | FastAPI server — analysis, broker, paper trading, WebSocket endpoints |
+| `main.py` | FastAPI server — app assembly, pulse engine, penny scan, schedulers, WebSocket |
 | `paper_engine.py` | Paper trading state machine — auto buy/sell/scale-out/trailing stop |
+| `state.py` | Shared `AppState` singleton (Supabase, PaperEngine, Alpaca, MTFCache, armed flag) |
 | `portfolio_backtester.py` | DNA Validator + Walk-Forward Analysis |
 | `optimize_dna.py` | Grid-search optimizer for γ, δ, λ parameters |
-| `scraper.py` | Playwright-based market data scraper |
-| `db_manager.py` | Supabase client factory |
-| `cache_manager.py` | Request caching layer |
-| `news_manager.py` | Finnhub news feed integration |
+| `db_manager.py` | Supabase client factory + `get_active_tickers()` |
 | `webhook_manager.py` | Discord alert dispatcher |
-| `inventory_service.py` | Position inventory tracking |
-| `utils.py` | Shared utilities |
+| `watchdog.py` | External process monitor (PID-file guarded) |
+| `scraper.py` | Playwright-based market data scraper |
+| `news_manager.py` | Finnhub news feed integration |
 
-### Supabase Tables (Paper Trading)
+### Background Schedulers (started at FastAPI startup)
+
+| Scheduler | Interval | Purpose |
+|---|---|---|
+| `stream_scheduler` | 60s | Open/close detection → start/stop Alpaca stream |
+| `mtf_cache_scheduler` | 15min | Refresh 15-min 20 EMA for MomentumValidator |
+| `auto_penny_scan_scheduler` | 4h (first run: 30s) | Automatic penny scan |
+| `auto_cleanup_scheduler` | 24h | Delete stale watchlist rows |
+| `stream_liveness_watchdog` | 3min | Force reconnect if no bar for 5min |
+| `system_heartbeat` | 10min | Discord dead-man's switch |
+
+### Supabase Tables
 
 | Table | Purpose |
 |---|---|
 | `paper_account` | Virtual cash balance |
 | `paper_positions` | Active positions: entry/current/highest price, TS threshold, units, status |
 | `paper_history` | Closed trades: entry/exit price, PnL%, exit reason |
+| `watchlist` | Monitored tickers (engine rows: `user_id IS NULL`) |
+| `daily_discovery` | Scanner output — DNA score, price, indicators |
+| `realtime_signals` | Pulse Engine signal archive |
+| `penny_universe_pool` | Accumulated penny ticker pool for re-prioritized scanning |
 
 ---
 
@@ -276,7 +295,6 @@ The `SYSTEM_ARMED` flag (toggled via **System Control Panel**) gates all automat
 |---|---|---|
 | **Python** | 3.11 | Required for CI and local dev |
 | **Node.js** | 18+ | For the React frontend |
-| **Docker** | 24+ | Optional — for containerized backend |
 | **Supabase account** | — | Project URL + keys required |
 | **Alpaca account** | — | Paper trading free; live trading requires funded account |
 | **Finnhub account** | — | Free tier sufficient for news feed |
@@ -316,6 +334,9 @@ DISCORD_WEBHOOK_URL=<your-discord-webhook-url>
 
 # Admin
 ADMIN_SECRET_KEY=<your-admin-secret>
+
+# Optional — disables WebSocket, falls back to 60s REST polling
+DISABLE_ALPACA_STREAM=false
 ```
 
 > **Note**: `APCA_PAPER=true` enables paper trading mode (default). Set to `false` only with a funded Alpaca live account.
@@ -329,20 +350,14 @@ ADMIN_SECRET_KEY=<your-admin-secret>
 ```bash
 git clone https://github.com/dykim72321-ops/muzestock.lab.git
 cd MuzeStock.Lab
-
 npm install
 ```
 
 ### 2. Configure Supabase
 
 ```bash
-# Install Supabase CLI if not already installed
 npm install -g supabase
-
-# Apply database migrations
 supabase db push
-
-# Deploy Edge Functions
 supabase functions deploy
 ```
 
@@ -351,7 +366,6 @@ supabase functions deploy
 ```bash
 cd python_engine
 pip install -r requirements.txt
-
 uvicorn main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
@@ -362,22 +376,17 @@ cd python_engine
 docker-compose up --build
 ```
 
-The FastAPI server will be available at `http://localhost:8001`.
-
 ---
 
 ## Usage
 
-### Launch the Quant Terminal UI
+### Launch Full Stack
 
 ```bash
-# From project root
-npm run dev
+npm run dev:all   # Frontend :5173 + Backend :8001 simultaneously
 ```
 
-The React terminal will start at `http://localhost:5173`.
-
-### Run DNA Scoring Backtester (Walk-Forward)
+### DNA Scoring Backtester (Walk-Forward)
 
 ```bash
 cd python_engine
@@ -393,15 +402,6 @@ python optimize_dna.py
 
 Runs a grid search over γ, δ, λ and outputs the parameter set with the best OOS Sharpe ratio.
 
-### Check Monitored Stocks
-
-```bash
-cd python_engine
-python check_stocks.py
-```
-
-Queries the `daily_discovery` table and prints the top 5 stocks by DNA score.
-
 ### Paper Trading vs Live Trading
 
 Toggle the `APCA_PAPER` environment variable:
@@ -411,27 +411,19 @@ APCA_PAPER=true    # Paper trading (default, no real money)
 APCA_PAPER=false   # Live trading (real money — use with caution)
 ```
 
-Paper trading state is persisted in the `paper_account` and `paper_positions` Supabase tables.
-
 ### API Endpoints (FastAPI)
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/analyze` | POST | Run DNA scoring on a ticker |
-| `/api/portfolio` | GET | Current portfolio state |
-| `/api/broker/status` | GET | Alpaca broker connection status |
-| `/api/broker/account` | GET | Account equity & buying power |
-| `/api/broker/order` | POST | Place a new order |
-| `/api/broker/positions` | GET | Open positions |
-| `/api/broker/close-position` | POST | Close a specific Alpaca position |
-| `/api/broker/liquidate-all` | POST | Liquidate all Alpaca positions |
-| `/api/broker/paper/account` | GET | Paper trading account balance |
+| `/api/broker/paper/account` | GET | Paper account equity |
 | `/api/broker/paper/positions` | GET | Open paper positions |
 | `/api/broker/paper/history` | GET | Closed paper trade history |
 | `/api/broker/paper/sell` | POST | Manual paper position liquidation |
 | `/api/broker/arm` | POST | Toggle SYSTEM_ARMED auto-trade flag |
-| `/api/validate_candidates` | POST | Batch-validate candidate tickers |
+| `/api/penny/scan` | POST | Run penny stock scan |
 | `/api/strategy/stats` | GET | Strategy performance statistics |
+| `/api/pulse/status` | GET | Pulse engine market status |
 | `/ws/pulse` | WebSocket | Live market data stream |
 
 ---

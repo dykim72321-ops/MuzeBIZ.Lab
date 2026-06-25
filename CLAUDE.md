@@ -81,17 +81,19 @@ supabase functions deploy
 
 ```
 [1] POST /api/penny/scan
-    - Alpaca universe 샘플링 (600개) → $1 이하 필터
+    - Alpaca universe 샘플링 (500개 신규 + 최대 100개 pool 축적) → $1 이하 필터
     - yfinance 2개월 일봉 → RSI/MACD/ADX/RVOL → DNA 점수
         │
         ▼
 [2] Top 3 자동 watchlist 등록 (status=WATCHING)
-    ※ 단, 기존 HOLDING/EXITED 종목은 갱신 금지 (미수정 버그 — 아래 참고)
+    ※ HOLDING/EXITED 종목은 status 갱신 금지
+    ※ 신규 등록 종목 발생 시 → 장 중이면 Alpaca 스트림 즉시 재시작
         │
         ▼
 [3] STRONG BUY 신호 → paper_engine.process_signal()
     - 진입가 ≤ $1이면 페니 파라미터 자동 전환 (is_penny = entry_price ≤ 1.0)
     - 초기 TS: -15% (일반: -10%)
+    - MomentumValidator 인터셉터: RVOL < 3.0 또는 현재가 < 15분봉 20 EMA → 차단
         │
         ▼
 [4] 페니 상태 머신
@@ -99,6 +101,61 @@ supabase functions deploy
     ├─ RSI > 70 OR 수익률 ≥ +20%: 50% Scale-Out + -7% 타이트 TS
     └─ 가격 < TS: 전량 청산
 ```
+
+---
+
+## 백엔드 모듈 구조 (`python_engine/`)
+
+### 진입점 & 핵심 클래스 (`main.py`)
+
+`main.py`는 FastAPI 앱 조립과 퀀트 엔진 핵심 로직을 모두 담는다.
+
+| 클래스/함수 | 역할 |
+|---|---|
+| `ConnectionManager` | WebSocket 브로드캐스터 |
+| `TickerDataState` | 1분봉 히스토리 유지 + Volume Multiplier(IEX→Full Market) 캘리브레이션 |
+| `MTFCache` | 15분봉 20 EMA를 15분 주기로 캐싱 (MomentumValidator에 공급) |
+| `MomentumValidator` | STRONG BUY 직전 RVOL·상위 추세 2중 검증 인터셉터 |
+| `calculate_advanced_signals()` | RSI·MACD·ADX·RVOL → `DNA_Score`·`Strong_Buy` 컬럼 생성 |
+| `calculate_dna_score()` | 스칼라 입력 → 0~100 DNA 점수 반환 (페니 스캔용) |
+| `run_pulse_engine()` | 1분봉 → 지표·포지션 사이징·DNA 합성 → WebSocket payload |
+| `run_penny_scan_internal()` | 페니 스캔 핵심 — HTTP 엔드포인트·자동 스케줄러 양쪽에서 호출 |
+| `on_minute_bar_closed()` | Alpaca 1분봉 콜백: HOLD 포지션은 경량 모니터 경로, 미보유는 전체 DNA 경로 분기 |
+| `start_alpaca_stream()` | Alpaca WebSocket IEX 스트림 기동 (인증 실패·connection limit 시 REST 폴링 폴백) |
+| `stream_scheduler()` | 개장/폐장 감지해 스트림 자동 시작/종료 |
+| `mtf_cache_scheduler()` | 15분봉 EMA 캐시 갱신 (15분 주기) |
+| `auto_penny_scan_scheduler()` | 서버 기동 30초 후 즉시 + 이후 4시간 주기 자동 페니 스캔 |
+| `auto_cleanup_scheduler()` | EXITED 3일, WATCHING 7일 초과 watchlist 행 자동 삭제 |
+| `stream_liveness_watchdog()` | 3분 주기로 WebSocket 생존 체크 — 5분 무응답 시 강제 재연결 |
+| `system_heartbeat()` | 10분 주기 Discord Dead Man's Switch |
+
+### 라우터 (`python_engine/routers/`)
+
+| 파일 | 역할 |
+|---|---|
+| `analyze.py` | `POST /api/analyze` — DNA 분석 |
+| `broker.py` | paper 계좌·포지션·수동 매도·ARM 토글 |
+| `penny.py` | `POST /api/penny/scan` |
+| `pulse.py` | `GET /api/pulse/status` |
+| `strategy.py` | `GET /api/strategy/stats` + `stats_cache` 공유 |
+| `backtest.py` | 백테스트 엔드포인트 |
+| `settings.py` | 전략 파라미터 조회/수정 |
+| `edge.py`, `parts.py`, `portfolio.py` | 기타 분석·포트폴리오 |
+
+### 공유 전역 상태 (`state.py`)
+
+모든 라우터와 `main.py`가 `from state import app_state`로 참조한다. `AppState` 단일 인스턴스에 Supabase 클라이언트, PaperEngine, Alpaca TradingClient, Webhook, ConnectionManager, TickerDataState, MTFCache, `SYSTEM_ARMED` 플래그, `_held_tickers` Set 등이 집약된다.
+
+### 기타 모듈
+
+| 모듈 | 역할 |
+|---|---|
+| `paper_engine.py` | Paper trading 상태 머신 (매수/Scale-Out/TS/청산) |
+| `db_manager.py` | Supabase 클라이언트 팩토리 + `get_active_tickers()` |
+| `webhook_manager.py` | Discord Webhook 발송 |
+| `portfolio_backtester.py` | Walk-Forward Analysis DNA 백테스터 |
+| `optimize_dna.py` | γ·δ·λ 그리드 서치 최적화 |
+| `watchdog.py` | 외부 watchdog 프로세스 (PID 파일로 중복 방지) |
 
 ---
 
@@ -110,7 +167,7 @@ supabase functions deploy
 |---|---|---|
 | **Edge Function 스캐너** | `supabase/functions/run-quant-scanner/index.ts` | 수동 또는 스케줄 |
 | **Pulse Engine 스캐너** | `python_engine/main.py → run_pulse_engine()` | Alpaca 1분봉 실시간 |
-| **Penny 스캐너** | `python_engine/main.py → penny_scan()` | 수동 (POST /api/penny/scan) |
+| **Penny 스캐너** | `python_engine/main.py → run_penny_scan_internal()` | 자동(4h) + 수동(POST /api/penny/scan) |
 
 ### DNA 점수 기준
 
@@ -122,7 +179,7 @@ HOLD 시그널  → DNA 60
 SELL 시그널  → DNA 40
 ```
 
-### STRONG BUY 조건 (`python_engine/main.py`)
+### STRONG BUY 조건 (`calculate_advanced_signals()` in `main.py`)
 
 ```python
 Strong_Buy = (
@@ -133,6 +190,19 @@ Strong_Buy = (
     AND NOT Is_Extended # 당일 50% 이상 급등 종목 제외
 )
 ```
+
+### MomentumValidator 인터셉터 (`main.py`)
+
+STRONG BUY 신호가 생성된 후, `on_minute_bar_closed()` 내부에서 두 가지를 추가 검증한다:
+
+1. **RVOL < 3.0** → 차단 (거래량 부족)
+2. **현재가 < 15분봉 20 EMA** (`MTFCache`) → 차단 (상위 추세 하락)
+
+MTF 캐시 미존재 시 검증을 스킵하고 진입 허용한다.
+
+### 1분봉 경로 분기 (`on_minute_bar_closed()`)
+
+HOLD 포지션(`app_state._held_tickers`)은 경량 경로: RSI-14·ATR-14만 계산하고 `process_signal()`에 직접 전달. 미보유 종목은 전체 `run_pulse_engine()` 경로(DNA·포지션 사이징·WebSocket broadcast).
 
 ---
 
@@ -179,6 +249,16 @@ scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SC
 | `_sync_watchlist_buy()` | 매수 실행 시 | status=HOLDING, buy_price, stop_loss 기록 |
 | `_sync_watchlist_stop_loss()` | Scale-Out 시 | stop_loss 갱신 |
 | `_sync_watchlist_exit()` | 청산 시 | status=EXITED |
+
+---
+
+## DnaSimulatorPage (`src/pages/DnaSimulatorPage.tsx`)
+
+백엔드 `paper_engine.py`·`main.py`의 DNA 점수·포지션 사이징·Chandelier Exit 수식을 TypeScript로 수동 복제한 시뮬레이터. **백엔드 상수나 로직 변경 시 이 파일도 반드시 동시에 수정**해야 한다.
+
+```
+참조 상수: CHANDELIER_K_NORMAL=3.0, CHANDELIER_K_PENNY=5.0 (paper_engine.py)
+```
 
 ---
 
@@ -297,6 +377,7 @@ Frontend (Vite :5173)
 | `daily_discovery` | 스캐너 발굴 종목 (DNA, 섹터, 가격) |
 | `quant_signals` | Edge Function 시그널 아카이브 |
 | `realtime_signals` | Pulse Engine 실시간 시그널 |
+| `penny_universe_pool` | 페니 스캔 누적 종목 풀 (scan_count, last_seen_at 기반 우선 재검) |
 
 ### watchlist 상태 전이
 
@@ -311,7 +392,7 @@ watchlist 자동 조작 시 반드시 `.is_("user_id", "null")` 필터를 포함
 
 ## SYSTEM_ARMED 플래그
 
-`python_engine/main.py` 전역 변수. `False`이면 스캐닝은 하되 매수 실행 없음. 트레일링 스탑 청산은 ARMED 해제 상태에서도 실행됨(손실 확대 방지 우선).
+`python_engine/state.py` → `app_state.SYSTEM_ARMED`. `False`이면 스캐닝은 하되 매수 실행 없음. 트레일링 스탑 청산은 ARMED 해제 상태에서도 실행됨(손실 확대 방지 우선).
 
 ```
 POST /api/broker/arm { "arm": true }   # 자동 매매 활성화
@@ -323,13 +404,16 @@ POST /api/broker/arm { "arm": false }  # 관제 전용
 ## 새 기능 추가 가이드
 
 ### FastAPI 엔드포인트 추가
-`python_engine/main.py` — Pydantic `BaseModel`로 요청 스키마 정의 후 `api_key: str = Security(get_api_key)` 인증 패턴 사용.
+`python_engine/routers/` 아래에 라우터 파일 작성 후 `main.py`에 `app.include_router()`. Pydantic `BaseModel`로 요청 스키마 정의, `api_key: str = Security(get_api_key)` 인증 패턴 사용.
 
 ### Frontend API 호출 추가
 `src/services/pythonApiService.ts` — `brokerApiFetch()` (X-Admin-Key 인증) 또는 `apiFetch()` (공개) 사용.
 
 ### Supabase 테이블 추가
 `supabase/migrations/` 에 타임스탬프 prefix로 마이그레이션 파일 생성 → `supabase db push`.
+
+### DnaSimulatorPage 수식 동기화
+`paper_engine.py` 또는 `main.py`의 DNA·포지션 사이징·Chandelier Exit 로직 변경 시 `src/pages/DnaSimulatorPage.tsx`를 반드시 함께 수정한다.
 
 ---
 
@@ -354,6 +438,7 @@ APCA_API_SECRET_KEY
 APCA_PAPER=true               # false = 실제 자금 (주의)
 DISCORD_WEBHOOK_URL
 ADMIN_SECRET_KEY
+DISABLE_ALPACA_STREAM=false   # true 시 WebSocket 비활성화 → REST 60초 폴링 모드
 ```
 
 ---
@@ -362,21 +447,21 @@ ADMIN_SECRET_KEY
 
 | 버그 | 파일 | 위치 | 현상 |
 |---|---|---|---|
-| Discord 알림 본문 불일치 | `main.py` | `penny_scan()` Discord 블록 | `auto_registered`(성공) 기준이 아닌 `results[:top_n]`(전체) 기준으로 알림 생성 |
+| Discord 알림 본문 불일치 | `main.py` | `run_penny_scan_internal()` Discord 블록 | `auto_registered`(성공) 기준이 아닌 `results[:top_n]`(전체) 기준으로 알림 생성 |
 
 ## 과거 수정된 버그
 
 | 버그 | 파일 | 원인 | 수정 |
 |---|---|---|---|
-| Penny scan이 HOLDING/EXITED 상태 덮어씀 | `main.py` | `penny_scan()` auto-register | `!= "HOLDING"` 조건이 EXITED를 보호 못함 | `not in ("HOLDING","EXITED")` 로 수정 |
-| pennyPositions에 일반 포지션 혼입 | `UnifiedDashboard.tsx` | `loadPennySideData()` | entry_price 필터 없이 ALL 포지션 저장 | `entry_price <= 1.0` 필터 추가 |
-| pennyWatchlist가 현재가 기준 필터 | `UnifiedDashboard.tsx` | `loadPennySideData()` | 현재가 > $1 이면 활성 페니 포지션이 탭에서 사라짐 | `buyPrice <= 1.0` 기준으로 변경 |
-| DNA 게이트 80이 페니 시그널 차단 | `paper_engine.py` | `process_signal()` BUY 조건 | 페니 종목 DNA 70~79 구간 자동 매수 불발 | 페니는 70, 일반은 80으로 분기 |
-| Scale-Out RSI arm 최소 수익 가드 없음 | `paper_engine.py` | `process_signal()` SCALE_OUT | RSI > 70만으로 +0.1% 수익에서 50% 청산 가능 | RSI arm에 `profit >= 5%` 가드 추가 |
-| unrealized_plpc NaN 표시 | `UnifiedDashboard.tsx` | `pennyPositions` map | current_price=null 시 NaN/-100% 표시 | null 가드 후 undefined 저장, UI에서 0 폴백 |
-| Lambda 클로저 버그 (fallback 루프) | `main.py` | `penny_scan()` fallback | `lambda: tk.fast_info` 가 tk를 레퍼런스 캡처 | `lambda t=tk: t.fast_info` 로 수정 |
-| pennyWatchlist 분류 위해 전체 종목 가격 조회 | `UnifiedDashboard.tsx` | `loadPennySideData()` | 30초마다 전체 watchlist Yahoo 가격 조회 후 버림 | buyPrice 직접 필터로 대체, 외부 요청 제거 |
-| Save Configuration 버튼 크래시 | `CommandSettings.tsx` | `(window as any).apiFetch` 미정의 전역 사용 | `supabase.from('system_settings').update()` 직접 호출로 교체 |
+| Penny scan이 HOLDING/EXITED 상태 덮어씀 | `main.py` | `run_penny_scan_internal()` auto-register | `not in ("HOLDING","EXITED")` 로 수정 |
+| pennyPositions에 일반 포지션 혼입 | `UnifiedDashboard.tsx` | `loadPennySideData()` | `entry_price <= 1.0` 필터 추가 |
+| pennyWatchlist가 현재가 기준 필터 | `UnifiedDashboard.tsx` | `loadPennySideData()` | `buyPrice <= 1.0` 기준으로 변경 |
+| DNA 게이트 80이 페니 시그널 차단 | `paper_engine.py` | `process_signal()` BUY 조건 | 페니는 70, 일반은 80으로 분기 |
+| Scale-Out RSI arm 최소 수익 가드 없음 | `paper_engine.py` | `process_signal()` SCALE_OUT | RSI arm에 `profit >= 5%` 가드 추가 |
+| unrealized_plpc NaN 표시 | `UnifiedDashboard.tsx` | `pennyPositions` map | null 가드 후 undefined 저장, UI에서 0 폴백 |
+| Lambda 클로저 버그 (fallback 루프) | `main.py` | `run_penny_scan_internal()` fallback | `lambda t=tk: t.fast_info` 로 수정 |
+| pennyWatchlist 전체 종목 가격 조회 | `UnifiedDashboard.tsx` | `loadPennySideData()` | buyPrice 직접 필터로 대체 |
+| Save Configuration 버튼 크래시 | `CommandSettings.tsx` | `(window as any).apiFetch` 미정의 | `supabase.from('system_settings').update()` 직접 호출로 교체 |
 | Dashboard 계좌 잔고 $0 표시 | `main.py` + `LiveExecutionCenter.tsx` | 응답 필드명 불일치 | 백엔드 반환 필드명 통일 |
 | watchlist 타 유저 행 덮어쓰기 | `paper_engine.py` | `eq("ticker")` 필터만 사용 | `.is_("user_id", "null")` 필터 추가 |
 | 수동 매도 시 watchlist 미동기화 | `main.py` | `_sync_watchlist_exit()` 미호출 | position 삭제 후 sync 호출 추가 |
