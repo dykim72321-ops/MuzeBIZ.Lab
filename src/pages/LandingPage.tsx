@@ -151,8 +151,14 @@ export default function LandingPage() {
             </button>
           </nav>
 
-          {/* Right Area (Status & Noti) */}
-          <div className="flex items-center gap-5">
+          {/* Right Area (Status & Noti & Login) */}
+          <div className="flex items-center gap-4 sm:gap-5">
+            <button
+              onClick={() => handleNavClick('/dna-simulator')}
+              className="hidden sm:flex px-4 py-1.5 bg-transparent border border-[#3b415a] hover:bg-[#3b415a] hover:text-white text-[#8d90a0] text-[11px] font-bold uppercase tracking-widest font-mono rounded-md transition-colors cursor-pointer"
+            >
+              LOGIN
+            </button>
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#151828] border border-[#2a2f45] rounded-full">
               <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse" />
               <span className="text-[10px] font-bold text-white uppercase tracking-widest font-mono">SYSTEM ONLINE</span>

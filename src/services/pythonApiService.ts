@@ -88,7 +88,7 @@ export async function fetchDiscoveries(
  */
 export async function triggerHunt(): Promise<{ success: boolean; message: string }> {
   try {
-    const data = await adminApiFetch('/api/hunt', 'POST');
+    const data = await adminApiFetch('/api/penny/scan', 'POST');
     return { success: true, message: data.message || 'Hunt triggered!' };
   } catch (error: any) {
     console.error('[PythonAPI] Hunt trigger error:', error);

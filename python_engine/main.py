@@ -8,7 +8,7 @@ main.py — FastAPI 앱 조립 + 핵심 Pulse Engine 로직
   - ConnectionManager / TickerDataState 정의
   - is_market_hours() / calculate_advanced_signals() / calculate_dna_score() 등 공유 유틸
   - run_pulse_engine() — 1분봉 신호 엔진 (WebSocket + DB + Discord 연동)
-  - run_penny_scan_internal() — 페니 스캔 핵심 로직
+  - run_quant_scan_internal() — 퀀트 스캔 핵심 로직 ($100 이하 일반주식)
   - on_minute_bar_closed() — Alpaca 1분봉 콜백
   - start_alpaca_stream() / start_rest_polling() — 스트리밍 데몬
   - startup_event() / run_startup_sequence() — 앱 시작 시퀀스
@@ -937,8 +937,13 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     return payload
 
 
-# ── Penny Lab 상수 ───────────────────────────────────────────────────────────
-PENNY_MAX_PRICE = 1.0
+# ── Quant Scan 상수 ($100 이하 일반 주식 퀀트 스캔) ──────────────────────────
+# Paper Engine 자체의 페니 파라미터(PENNY_*)는 paper_engine.py에 유지됨
+SCAN_MAX_PRICE = 100.0
+SCAN_DATA_LOOKBACK = "2mo"
+SCAN_TOP_N = 5
+
+# 하위 호환 — Paper Engine 내부 페니 상태머신 파라미터 (변경 금지)
 PENNY_DATA_LOOKBACK = "2mo"
 PENNY_TS_INIT_PCT = 0.85
 PENNY_BREAKEVEN_TRIGGER = 1.10
@@ -947,14 +952,13 @@ PENNY_SCALE_OUT_PROFIT = 0.20
 PENNY_SCALE_OUT_RATIO = 0.50
 PENNY_TIGHT_TS_PCT = 0.93
 PENNY_RVOL_MIN = 3.0
-PENNY_TOP_N = 3
 
 
-async def run_penny_scan_internal(
-    max_price: float = PENNY_MAX_PRICE, top_n: int = PENNY_TOP_N
+async def run_quant_scan_internal(
+    max_price: float = SCAN_MAX_PRICE, top_n: int = SCAN_TOP_N
 ) -> dict:
     """
-    페니 스캔 핵심 로직 — HTTP 엔드포인트와 자동 스케줄러 양쪽에서 호출.
+    퀀트 스캔 핵심 로직 ($100 이하 일반 주식) — HTTP 엔드포인트와 자동 스케줄러 양쪽에서 호출.
     완료 시 app_state.last_penny_scan_at, app_state.penny_scan_results_cache 갱신.
     """
     import random
@@ -964,7 +968,7 @@ async def run_penny_scan_internal(
     trading_client = app_state.trading_client
     webhook = app_state.webhook
 
-    penny_tickers: List[str] = []
+    scan_tickers: List[str] = []
     try:
         if trading_client:
             from alpaca.trading.enums import AssetClass, AssetStatus
@@ -987,7 +991,7 @@ async def run_penny_scan_internal(
                 and not _SKIP_PATTERN.search(a.symbol)
                 and len(a.symbol) <= 5
             ]
-            print(f"📡 [Penny] Alpaca universe: {len(tradable)} tradable US equities")
+            print(f"📡 [Scan] Alpaca universe: {len(tradable)} tradable US equities")
 
             pool_tickers: List[str] = []
             if supabase:
@@ -1004,10 +1008,10 @@ async def run_penny_scan_internal(
                     if pool_res.data:
                         pool_tickers = [r["ticker"] for r in pool_res.data]
                         print(
-                            f"📦 [Penny Pool] Loaded {len(pool_tickers)} tickers from accumulated pool"
+                            f"📦 [Scan Pool] Loaded {len(pool_tickers)} tickers from accumulated pool"
                         )
                 except Exception as pool_err:
-                    print(f"⚠️ [Penny Pool] Pool fetch skipped: {pool_err}")
+                    print(f"⚠️ [Scan Pool] Pool fetch skipped: {pool_err}")
 
             pool_set = set(pool_tickers)
             fresh_sample = random.sample(
@@ -1016,7 +1020,7 @@ async def run_penny_scan_internal(
             )
             sampled = fresh_sample + pool_tickers
             print(
-                f"🔀 [Penny] Universe mix: {len(fresh_sample)} fresh + {len(pool_tickers)} pool = {len(sampled)} total"
+                f"🔀 [Scan] Universe mix: {len(fresh_sample)} fresh + {len(pool_tickers)} pool = {len(sampled)} total"
             )
 
             batch_size = 50
@@ -1048,7 +1052,7 @@ async def run_penny_scan_internal(
                                         0.01 < last_price <= max_price
                                         and (last_price * last_vol) > 500000
                                     ):
-                                        penny_tickers.append(batch[0])
+                                        scan_tickers.append(batch[0])
                             else:
                                 last_row = close_col.iloc[-1]
                                 last_vol_row = volume_col.iloc[-1]
@@ -1065,33 +1069,33 @@ async def run_penny_scan_internal(
                                                 0.01 < p_val <= max_price
                                                 and (p_val * v_val) > 500000
                                             ):
-                                                penny_tickers.append(sym)
+                                                scan_tickers.append(sym)
                 except Exception as e:
-                    print(f"⚠️ [Penny] Batch price fetch error: {e}")
+                    print(f"⚠️ [Scan] Batch price fetch error: {e}")
                     continue
 
-        if not penny_tickers:
+        if not scan_tickers:
             fallback_tickers = [
-                "SNDL",
-                "NKLA",
-                "CLOV",
-                "TLRY",
-                "GOEV",
-                "GNUS",
-                "CENN",
-                "MULN",
-                "FFIE",
-                "AEMD",
-                "VEON",
-                "HCDI",
-                "WRAP",
-                "RITE",
-                "WISA",
-                "BSFC",
-                "ATNF",
-                "SEEL",
-                "ZVIA",
-                "CTXR",
+                "F",
+                "AAL",
+                "SOFI",
+                "NIO",
+                "RIVN",
+                "LCID",
+                "PLUG",
+                "SNAP",
+                "CLSK",
+                "MARA",
+                "RIOT",
+                "HIMS",
+                "OPEN",
+                "JOBY",
+                "DNA",
+                "SPCE",
+                "WKHS",
+                "PRPL",
+                "BARK",
+                "LIDR",
             ]
             for sym in fallback_tickers:
                 try:
@@ -1099,20 +1103,20 @@ async def run_penny_scan_internal(
                     info = await asyncio.to_thread(lambda t=tk: t.fast_info)
                     price = getattr(info, "last_price", None)
                     if price and 0.01 < price <= max_price:
-                        penny_tickers.append(sym)
+                        scan_tickers.append(sym)
                 except Exception:
                     continue
     except Exception as e:
-        print(f"❌ [Penny] Universe collection error: {e}")
+        print(f"❌ [Scan] Universe collection error: {e}")
 
-    print(f"🪙 [Penny] Found {len(penny_tickers)} stocks under ${max_price}")
+    print(f"📡 [Scan] Found {len(scan_tickers)} stocks under ${max_price}")
 
-    if supabase and penny_tickers:
+    if supabase and scan_tickers:
         try:
             now_iso = datetime.now().isoformat()
             upsert_rows = [
                 {"ticker": t, "last_price": 0.0, "last_seen_at": now_iso}
-                for t in penny_tickers
+                for t in scan_tickers
             ]
             await asyncio.to_thread(
                 supabase.table("penny_universe_pool")
@@ -1120,13 +1124,13 @@ async def run_penny_scan_internal(
                 .execute
             )
             print(
-                f"✅ [Penny Pool] UPSERT {len(penny_tickers)} tickers → penny_universe_pool"
+                f"✅ [Scan Pool] UPSERT {len(scan_tickers)} tickers → penny_universe_pool"
             )
         except Exception as upsert_err:
-            print(f"⚠️ [Penny Pool] UPSERT skipped: {upsert_err}")
+            print(f"⚠️ [Scan Pool] UPSERT skipped: {upsert_err}")
 
     results = []
-    for ticker in penny_tickers[:80]:
+    for ticker in scan_tickers[:80]:
         try:
             tk = yf.Ticker(ticker)
             df = await asyncio.to_thread(
@@ -1253,7 +1257,7 @@ async def run_penny_scan_internal(
                 except Exception:
                     pass
         except Exception as e:
-            print(f"⚠️ [Penny] {ticker} analysis error: {e}")
+            print(f"⚠️ [Scan] {ticker} analysis error: {e}")
             continue
 
     results.sort(key=lambda x: x["dna_score"], reverse=True)
@@ -1300,11 +1304,43 @@ async def run_penny_scan_internal(
                     auto_registered.append(item["ticker"])
                 item["is_watchlisted"] = True
                 print(
-                    f"⭐ [Penny] {item['ticker']} auto-registered to watchlist (DNA: {item['dna_score']})"
+                    f"⭐ [Scan] {item['ticker']} auto-registered to watchlist (DNA: {item['dna_score']})"
                 )
+
+                # [Option A Fix] daily_discovery에도 즉시 upsert하여 UI에 표시되도록 함
+                try:
+                    await asyncio.to_thread(
+                        supabase.table("daily_discovery")
+                        .upsert(
+                            {
+                                "ticker": item["ticker"],
+                                "dna_score": int(round(item["dna_score"])),
+                                "price": item["price"],
+                                "change": str(round(item["change_pct"], 2)),
+                                "change_percent": round(item["change_pct"], 2),
+                                "volume": str(item["volume"]),
+                                "updated_at": datetime.now().isoformat(),
+                                "rsi": item["rsi"],
+                                "rvol": item["rvol"],
+                                "adx": item["adx"],
+                                "macd_diff": item["macd_diff"],
+                                "is_extended": item["is_extended"],
+                            },
+                            on_conflict="ticker",
+                        )
+                        .execute
+                    )
+                    print(
+                        f"⭐ [Scan] {item['ticker']} also upserted to daily_discovery"
+                    )
+                except Exception as dd_e:
+                    print(
+                        f"⚠️ [Scan] daily_discovery upsert error for {item['ticker']}: {dd_e}"
+                    )
+
             except Exception as e:
                 print(
-                    f"⚠️ [Penny] Watchlist auto-register error for {item['ticker']}: {e}"
+                    f"⚠️ [Scan] Watchlist auto-register error for {item['ticker']}: {e}"
                 )
 
     if auto_registered and webhook:
@@ -1316,9 +1352,9 @@ async def run_penny_scan_internal(
             ]
         )
         await webhook.send_alert(
-            title="🪙 [PENNY LAB] 주간 Top 3 관심종목 선정",
-            description=f"스캔 종목: {len(results)}개\n\n{top_summary}",
-            color=0x22D3EE,
+            title="📡 [QUANT SCAN] Top 퀀트 추천 종목 선정",
+            description=f"스캔 종목: {len(results)}개 | $100 이하 일반주식\n\n{top_summary}",
+            color=0x6366F1,
         )
 
     app_state.last_penny_scan_at = datetime.now()
@@ -1334,15 +1370,9 @@ async def run_penny_scan_internal(
     return {
         "scanned_at": app_state.last_penny_scan_at.isoformat(),
         "total_scanned": len(results),
-        "penny_params": {
+        "scan_params": {
             "max_price": max_price,
-            "data_lookback": PENNY_DATA_LOOKBACK,
-            "trailing_stop_pct": (1 - PENNY_TS_INIT_PCT) * 100,
-            "breakeven_trigger_pct": (PENNY_BREAKEVEN_TRIGGER - 1) * 100,
-            "scale_out_rsi": PENNY_SCALE_OUT_RSI,
-            "scale_out_profit_pct": PENNY_SCALE_OUT_PROFIT * 100,
-            "tight_ts_pct": (1 - PENNY_TIGHT_TS_PCT) * 100,
-            "rvol_min": PENNY_RVOL_MIN,
+            "data_lookback": SCAN_DATA_LOOKBACK,
         },
         "results": results,
         "auto_registered": auto_registered,
@@ -1812,8 +1842,8 @@ async def mtf_cache_scheduler():
         await asyncio.sleep(900)
 
 
-async def auto_penny_scan_scheduler():
-    """서버 시작 시 즉시 + 이후 4시간 주기로 페니 스캔 자동 실행."""
+async def auto_quant_scan_scheduler():
+    """서버 시작 시 즉시 + 이후 4시간 주기로 퀀트 스캔 자동 실행 ($100 이하 일반주식)."""
     await asyncio.sleep(30)
 
     while True:
@@ -1821,10 +1851,10 @@ async def auto_penny_scan_scheduler():
             active = await asyncio.to_thread(_db.get_active_tickers, limit=15)
             watching_count = len(active)
             print(
-                f"🪙 [Auto-Scan] 자동 페니 스캔 시작 (현재 watchlist: {watching_count}개)"
+                f"📡 [Auto-Scan] 자동 퀀트 스캔 시작 (현재 watchlist: {watching_count}개)"
             )
-            await run_penny_scan_internal()
-            print("✅ [Auto-Scan] 페니 스캔 완료 — 다음 실행까지 4시간 대기")
+            await run_quant_scan_internal()
+            print("✅ [Auto-Scan] 퀀트 스캔 완료 — 다음 실행까지 4시간 대기")
         except Exception as e:
             print(f"⚠️ [Auto-Scan] 스캔 중 오류: {e}")
 
@@ -2143,7 +2173,7 @@ async def run_startup_sequence():
     # 3. 실시간 스트림, 하트비트, 자동 스캔 스케줄러 시작
     asyncio.create_task(system_heartbeat())
     asyncio.create_task(stream_scheduler())
-    asyncio.create_task(auto_penny_scan_scheduler())
+    asyncio.create_task(auto_quant_scan_scheduler())
     asyncio.create_task(auto_cleanup_scheduler())
 
     # MTF 캐시 주기적 갱신 스케줄러 시작 (프리워밍은 1-2 단계에서 완료)

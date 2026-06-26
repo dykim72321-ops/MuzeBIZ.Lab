@@ -67,9 +67,8 @@ interface DashboardWatchlistItem extends WatchlistItem {
   isPenny: boolean;
 }
 
-// Current-price tolerance for penny display: stocks that entered ≤$1 can rise above $1,
-// so we treat anything ≤ this threshold as "penny" for UI purposes.
-const PENNY_DISPLAY_THRESHOLD = 1.5;
+// Paper Engine 페니 경계 ($1 이하 → -15% TS, $1 초과 → -10% TS)
+const PENNY_ENGINE_THRESHOLD = 1.0;
 
 export const UnifiedDashboard = () => {
   const navigate = useNavigate();
@@ -212,7 +211,7 @@ export const UnifiedDashboard = () => {
           .select('*')
           .gte('updated_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
           .not('dna_score', 'is', null)
-          .gte('dna_score', 80)
+          .gte('dna_score', 70)
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
@@ -640,12 +639,12 @@ export const UnifiedDashboard = () => {
               </span>
             </button>
  
-            {/* Auto Penny Scan Status Badge */}
-            <div className="flex items-center gap-2 px-4 py-2.5 border-b-2 border-cyan-300">
-              <Coins className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+            {/* Auto Quant Scan Status Badge */}
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b-2 border-indigo-300">
+              <Activity className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
               <div className="leading-none">
-                <span className="text-xs font-bold text-cyan-850 uppercase tracking-widest block font-mono">Auto Penny Scan</span>
-                <span className="text-sm text-cyan-700 font-extrabold block mt-0.5 font-sans">
+                <span className="text-xs font-bold text-indigo-850 uppercase tracking-widest block font-mono">Auto Quant Scan</span>
+                <span className="text-sm text-indigo-700 font-extrabold block mt-0.5 font-sans">
                   {pennyScanStatus?.last_scan_at
                     ? `최근: ${new Date(pennyScanStatus.last_scan_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
                     : '서버 시작 후 30초 내 실행'}
@@ -677,7 +676,7 @@ export const UnifiedDashboard = () => {
             </span>
           </div>
           <div className="text-sm font-semibold text-slate-550 md:text-right shrink-0 font-sans">
-            * 페니 주식(진입가 $1.0 이하) 매수 시 -15% 손절선 및 익절 분할매도 상태머신이 자동 작동합니다.
+            * $100 이하 전 종목 스캔 · 진입가 $1 이하 자동 페니 파라미터 (-15% TS) · $1 초과 일반 파라미터 (-10% TS)
           </div>
         </div>
 
@@ -960,12 +959,12 @@ export const UnifiedDashboard = () => {
                 <div className="text-center py-12 text-slate-800 border border-dashed border-slate-200">
                   <Activity className="w-8 h-8 text-indigo-500 mx-auto mb-3 animate-pulse drop-shadow-[0_0_12px_rgba(79,70,229,0.5)] stroke-[2.5]" />
                   <p className="text-sm font-extrabold text-slate-800 font-sans">발굴된 오늘의 추천 종목이 없습니다.</p>
-                  <p className="text-xs font-semibold text-slate-800 mt-1 font-sans">상단의 "라이브 헌팅" 또는 "페니 스캔"을 가동해 보세요.</p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1 font-sans">우측 설정 패널에서 "AI 퀀트 헌팅"을 가동해 보세요.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   {discoveryStocks.map((stock) => {
-                    const isPenny = (stock.price ?? 0) <= PENNY_DISPLAY_THRESHOLD && (stock.price ?? 0) > 0;
+                    const isPenny = (stock.price ?? 0) <= PENNY_ENGINE_THRESHOLD && (stock.price ?? 0) > 0;
                     return (
                       <div
                         key={stock.ticker}
@@ -984,9 +983,9 @@ export const UnifiedDashboard = () => {
                               <span className="font-extrabold text-slate-900 group-hover:text-slate-800 transition-colors">{stock.ticker}</span>
                               <span className={clsx(
                                 "text-xs font-black px-1.5 py-0.5 rounded tracking-widest border leading-none",
-                                isPenny ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-700" : "bg-slate-500/10 border-indigo-500/20 text-slate-800"
+                                isPenny ? "bg-amber-500/10 border-amber-500/20 text-amber-700" : "bg-indigo-500/10 border-indigo-500/20 text-indigo-700"
                               )}>
-                                <span className="font-extrabold">{isPenny ? '페니' : '일반'}</span>
+                                <span className="font-extrabold">{isPenny ? '$1↓' : '$1↑'}</span>
                               </span>
                             </div>
                             <span className="text-xs text-slate-800 font-bold block mt-0.5">{stock.sector || 'US Stock'}</span>
@@ -1111,9 +1110,9 @@ export const UnifiedDashboard = () => {
                           <td className="py-4 text-right">
                             <span className={clsx(
                               "text-xs font-black px-1.5 py-0.5 rounded border tracking-widest font-sans",
-                              pos.isPenny ? "bg-cyan-50 border-cyan-200 text-cyan-600" : "bg-slate-50 border-slate-200 text-slate-800"
+                              pos.isPenny ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-indigo-50 border-indigo-200 text-indigo-700"
                             )}>
-                              {pos.isPenny ? '페니' : '일반'}
+                              {pos.isPenny ? '$1↓' : '$1↑'}
                             </span>
                           </td>
                           <td className="py-4 text-right font-mono text-slate-800 text-sm font-semibold tabular-nums hidden md:table-cell">{Number(pos.units).toFixed(2)}</td>
@@ -1241,11 +1240,11 @@ export const UnifiedDashboard = () => {
           </button>
         </div>
         <div className="p-6 space-y-6">
-          {/* 라이브 헌팅 — 오퍼레이터 수동 트리거 */}
+          {/* AI 퀀트 헌팅 — 오퍼레이터 수동 트리거 */}
           <div className="bg-slate-50/50 border border-indigo-100 rounded-2xl p-4 space-y-3">
             <div>
               <span className="text-xs font-bold text-slate-800 uppercase tracking-widest block mb-0.5">Manual Override</span>
-              <h3 className="text-sm font-black text-indigo-900">라이브 헌팅 (Edge Function)</h3>
+              <h3 className="text-sm font-black text-indigo-900">AI 퀀트 헌팅 (Edge Function)</h3>
               <p className="text-xs text-indigo-700 mt-1 leading-relaxed">
                 Alpaca Universe 전체를 즉시 스캔합니다.<br/>
                 DNA ≥ 80 일반 종목 발굴 → daily_discovery 갱신
@@ -1257,7 +1256,7 @@ export const UnifiedDashboard = () => {
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all active:scale-95 disabled:bg-slate-350 disabled:cursor-not-allowed cursor-pointer"
             >
               <Activity className={clsx("w-4 h-4", isHunting && "animate-pulse")} />
-              {isHunting ? '헌팅 중...' : '라이브 헌팅 실행'}
+              {isHunting ? '헌팅 중...' : 'AI 퀀트 헌팅 실행'}
             </button>
           </div>
           <CommandSettings />

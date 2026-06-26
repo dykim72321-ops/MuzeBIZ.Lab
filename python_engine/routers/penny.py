@@ -1,8 +1,8 @@
 """
 routers/penny.py — /api/penny/* 엔드포인트
 
-페니 스캔 내부 로직(run_penny_scan_internal)은 main.py에 남아있으며
-이 라우터는 HTTP 엔드포인트만 담당한다.
+퀀트 스캔 내부 로직(run_quant_scan_internal)은 main.py에 정의되어 있으며
+이 라우터는 HTTP 엔드포인트만 담당한다. ($100 이하 일반주식 스캔)
 """
 
 from datetime import datetime
@@ -14,28 +14,27 @@ from pydantic import BaseModel
 from deps import get_api_key
 from state import app_state
 
-router = APIRouter(prefix="/api/penny", tags=["penny"])
+router = APIRouter(prefix="/api/penny", tags=["quant-scan"])
 
 # ── 상수 ────────────────────────────────────────────────────────────────────
-PENNY_MAX_PRICE = 1.0
-PENNY_TOP_N = 3
+SCAN_MAX_PRICE = 100.0
+SCAN_TOP_N = 5
 
 
 class PennyScanRequest(BaseModel):
-    max_price: float = PENNY_MAX_PRICE
-    top_n: int = PENNY_TOP_N
+    max_price: float = SCAN_MAX_PRICE
+    top_n: int = SCAN_TOP_N
 
 
 @router.post("/scan")
-async def penny_scan(
+async def quant_scan(
     req: PennyScanRequest = Body(PennyScanRequest()),
     _api_key: str = Security(get_api_key),
 ):
-    """수동 페니 스캔 트리거 (HTTP endpoint — 내부 로직은 run_penny_scan_internal 사용)"""
-    # run_penny_scan_internal은 main.py에 정의되어 있음 (pulse engine과 결합도 높음)
-    from main import run_penny_scan_internal
+    """수동 퀀트 스캔 트리거 ($100 이하 일반주식 — 내부 로직은 run_quant_scan_internal 사용)"""
+    from main import run_quant_scan_internal
 
-    return await run_penny_scan_internal(max_price=req.max_price, top_n=req.top_n)
+    return await run_quant_scan_internal(max_price=req.max_price, top_n=req.top_n)
 
 
 @router.get("/scan/status")
