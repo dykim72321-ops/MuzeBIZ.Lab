@@ -7,7 +7,7 @@ import { fetchPaperAccount } from '../services/pythonApiService';
 // ⚠️  DRIFT RISK: 이 파일의 세 함수(calcDna, calcSizing, calcChandelier)는
 //     백엔드 Python 수식을 TypeScript로 수동 복제한 것입니다.
 //     백엔드 상수·로직 변경 시 이 파일도 반드시 동시에 수정하세요.
-//     참조 상수: CHANDELIER_K_NORMAL=3.0, CHANDELIER_K_PENNY=5.0 (paper_engine.py)
+//     참조 상수: CHANDELIER_K_NORMAL=3.0, CHANDELIER_K_PENNY=6.5 (paper_engine.py)
 
 type MacdStatus = 'golden' | 'dead' | 'rising' | 'falling';
 
@@ -127,7 +127,7 @@ function calcSizing(p: SizingParams): SizingResult {
 }
 
 function calcChandelier(highest: number, atrPct: number, isPenny: boolean, entryPrice: number): ChandelierResult {
-  const k = isPenny ? 5.0 : 3.0;
+  const k = isPenny ? 6.5 : 3.0;
   // 백엔드 ATR(14)은 현재가(≈진입가) 기준 절댓값. highest 기준으로 계산하면 상승 후 과대 추정됨.
   const atrAbs = entryPrice * atrPct;
   const floorPct = isPenny ? 0.85 : 0.90;
@@ -501,7 +501,7 @@ export function DnaSimulatorPage() {
           <div className="bg-white border border-slate-200/85 rounded-2xl p-5 shadow-sm space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-black uppercase tracking-widest text-slate-700">Chandelier Exit TS (Fix C)</h2>
-              <span className="text-sm text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">k={isPenny ? '5.0 (페니)' : '3.0 (일반)'}</span>
+              <span className="text-sm text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">k={isPenny ? '6.5 (페니)' : '3.0 (일반)'}</span>
             </div>
             <Slider label="진입가 ($)" value={entryPrice} min={0.1} max={isPenny ? 1.0 : 100} step={isPenny ? 0.01 : 0.5} onChange={setEntryPrice} color="cyan" />
             <Slider label="최고가 진입 후 상승%" value={highestPct} min={0} max={50} step={1} onChange={setHighestPct} color="emerald" unit="%" />

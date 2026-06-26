@@ -270,7 +270,7 @@ export const UnifiedDashboard = () => {
       }));
 
       setWatchlistRaw(wl);
-      setDiscoveryStocks((discoveryResult.data || []).filter(s => s.dna_score != null && s.price != null));
+      setDiscoveryStocks((discoveryResult.data || []).filter((s: any) => s.dna_score != null && s.price != null));
       setLivePositions(mapPositionData(mappedBrokerPositions));
       setLiveHistory(mappedLiveHistory);
       if (alpaca && !alpaca.error) setAlpacaAccount(alpaca);
