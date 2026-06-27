@@ -2,18 +2,13 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
     LayoutDashboard,
-    Search,
-    Zap,
-    History,
+    FlaskConical,
     List,
     Settings,
     Dna,
     LifeBuoy,
     Folder,
     Server,
-    Briefcase,
-    Users,
-    KanbanSquare
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { LucideIcon } from 'lucide-react';
@@ -32,9 +27,7 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
     {
         section: 'MAIN OPERATION',
         items: [
-            { name: '작전 지휘소 (Command)', icon: LayoutDashboard, path: '/' },
-            { name: '퀀트 펄스 (Live Feed)', icon: Zap, path: '/pulse', isHot: true },
-            { name: '마켓 스캐너 (Scanner)', icon: Search, path: '/scanner' },
+            { name: '작전 지휘소 (Command)', icon: LayoutDashboard, path: '/stock/dashboard' },
             { name: '부품 조회 (Parts)', icon: Server, path: '/parts-search' },
         ]
     },
@@ -42,21 +35,13 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
         section: 'ANALYSIS & FUND',
         items: [
             { name: '알파 펀드 (Alpha Fund)', icon: Folder, path: '/portfolio' },
-            { name: '백테스팅 (Backtest)', icon: History, path: '/backtesting' },
+            { name: 'DNA 시뮬레이터', icon: FlaskConical, path: '/dna-simulator' },
         ]
     },
     {
         section: 'ASSETS',
         items: [
             { name: '관심 종목 (Watchlist)', icon: List, path: '/watchlist' },
-        ]
-    },
-    {
-        section: 'B2B INTELLIGENCE',
-        items: [
-            { name: 'CRM 허브 (Hub)', icon: Briefcase, path: '/crm' },
-            { name: '고객/담당자 (Contacts)', icon: Users, path: '/crm/contacts' },
-            { name: '프로젝트 파이프라인', icon: KanbanSquare, path: '/crm/projects' },
         ]
     },
     {

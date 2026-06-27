@@ -254,11 +254,15 @@ scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SC
 
 ## DnaSimulatorPage (`src/pages/DnaSimulatorPage.tsx`)
 
-백엔드 `paper_engine.py`·`main.py`의 DNA 점수·포지션 사이징·Chandelier Exit 수식을 TypeScript로 수동 복제한 시뮬레이터. **백엔드 상수나 로직 변경 시 이 파일도 반드시 동시에 수정**해야 한다.
+`POST /api/simulate` (→ `routers/simulate.py`)를 호출해 DNA 점수·포지션 사이징·Chandelier TS를 서버에서 계산한다. 백엔드 상수(`paper_engine.py`) 변경이 자동 반영되므로 프론트엔드 수식을 별도로 동기화할 필요 없음.
+
+백엔드 오프라인 시에는 로컬 폴백(TypeScript 복제 수식)으로 자동 전환된다. 헤더 배지(서버 연동 / 로컬 폴백)로 현재 모드를 표시.
 
 ```
-참조 상수: CHANDELIER_K_NORMAL=3.0, CHANDELIER_K_PENNY=5.0 (paper_engine.py)
+참조 상수: CHANDELIER_K_NORMAL=3.0, CHANDELIER_K_PENNY=6.5 (paper_engine.py)
 ```
+
+`routers/simulate.py`는 `paper_engine.py`의 상수를 직접 import하므로 상수 변경 시 시뮬레이터에 즉시 반영된다.
 
 ---
 

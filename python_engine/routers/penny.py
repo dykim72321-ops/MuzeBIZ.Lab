@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from deps import get_api_key
 from state import app_state
 
-router = APIRouter(prefix="/api/penny", tags=["quant-scan"])
+router = APIRouter(prefix="/api/quant", tags=["quant-scan"])
 
 # ── 상수 ────────────────────────────────────────────────────────────────────
 SCAN_MAX_PRICE = 100.0

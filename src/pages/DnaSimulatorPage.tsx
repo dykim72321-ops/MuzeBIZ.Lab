@@ -1,7 +1,41 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { FlaskConical, AlertTriangle, ChevronRight, ArrowLeft, Sparkles, TrendingDown, Scale } from 'lucide-react';
 import { fetchPaperAccount } from '../services/pythonApiService';
+import { apiClient } from '../services/apiClient';
+
+interface SimulateApiResponse {
+  dna: {
+    score: number;
+    deltas: { base: number; rsi: number; macd: number; adx: number; rvol: number; ext: number };
+    tier: string;
+    tier_color: string;
+    signal: string;
+  };
+  sizing: {
+    ann_vol: number;
+    vol_weight: number;
+    kelly_f: number;
+    optimal_kelly: number;
+    final_weight: number;
+    buy_budget_pct: number;
+  };
+  chandelier: {
+    k: number;
+    floor: number;
+    ts_fixed: number;
+    ts_chandelier: number;
+    effective: number;
+  };
+  scale_out: {
+    fires: boolean;
+    rsi_trigger: boolean;
+    profit_trigger: boolean;
+    profit_ok: boolean;
+    post_scale_ts: number;
+    post_scale_ts_label: string;
+  };
+}
 
 // ── 수식 (백엔드 paper_engine / main.py와 동일, Fix A+B+C+D 적용) ─────────────
 // ⚠️  DRIFT RISK: 이 파일의 세 함수(calcDna, calcSizing, calcChandelier)는
@@ -283,10 +317,14 @@ export function DnaSimulatorPage() {
 
   // 실제 계좌 잔고
   const [buyingPower, setBuyingPower] = useState<number | null>(null);
+  // 백엔드 /api/simulate 연동 상태
+  const [serverResult, setServerResult] = useState<SimulateApiResponse | null>(null);
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetchPaperAccount()
-      .then(acc => { if (acc?.buying_power != null) setBuyingPower(acc.buying_power); })
+      .then(acc => { if (acc?.cash_available != null) setBuyingPower(acc.cash_available); })
       .catch(() => {});
   }, []);
 
@@ -296,22 +334,78 @@ export function DnaSimulatorPage() {
     else setEntryPrice(p => Math.max(p, 1.0));
   }, [isPenny]);
 
+  // 300ms 디바운스 후 /api/simulate 호출 — 파라미터 변경마다 서버 수식으로 재계산
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await apiClient.post<SimulateApiResponse>('/api/simulate', {
+          rsi, rvol, macd_status: macdStatus,
+          adx, di_positive: diPositive,
+          is_extended: isExtended, is_penny: isPenny,
+          win_rate: winRate, profit_ratio: profitRatio, atr_pct: atrPct,
+          entry_price: entryPrice, highest_pct: highestPct,
+        });
+        setServerResult(res);
+        setApiOnline(true);
+      } catch {
+        setServerResult(null);
+        setApiOnline(false);
+      }
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [rsi, rvol, macdStatus, adx, diPositive, isExtended, isPenny, winRate, profitRatio, atrPct, entryPrice, highestPct]);
+
+  // 로컬 폴백 수식 (백엔드 오프라인 시 사용)
   const dna       = useMemo(() => calcDna({ rsi, rvol, macdStatus, adx, diPositive, isExtended, isPenny }), [rsi, rvol, macdStatus, adx, diPositive, isExtended, isPenny]);
   const sizing    = useMemo(() => calcSizing({ winRate, profitRatio, atrPct }), [winRate, profitRatio, atrPct]);
   const highest   = entryPrice * (1 + highestPct / 100);
   const chandelier = useMemo(() => calcChandelier(highest, atrPct, isPenny, entryPrice), [highest, atrPct, isPenny, entryPrice]);
 
+  // 서버 결과가 있으면 우선 사용, 없으면 로컬 폴백
+  const activeDna: DnaResult = serverResult
+    ? { ...serverResult.dna, tierColor: serverResult.dna.tier_color }
+    : dna;
+
+  const activeSizing: SizingResult = serverResult
+    ? {
+        annVol: serverResult.sizing.ann_vol / 100,
+        volWeight: serverResult.sizing.vol_weight,
+        kellyF: serverResult.sizing.kelly_f,
+        optimalKelly: serverResult.sizing.optimal_kelly,
+        finalWeight: serverResult.sizing.final_weight,
+        buyBudgetPct: serverResult.sizing.buy_budget_pct,
+      }
+    : sizing;
+
+  const activeChandelier: ChandelierResult = serverResult
+    ? {
+        k: serverResult.chandelier.k,
+        floor: serverResult.chandelier.floor,
+        tsFixed: serverResult.chandelier.ts_fixed,
+        tsChandelier: serverResult.chandelier.ts_chandelier,
+        effective: serverResult.chandelier.effective,
+      }
+    : chandelier;
+
   // Scale-Out 조건 계산 (paper_engine.py process_signal 로직)
-  const profitPct        = highestPct / 100; // 최고가 = 현재 포지션 최고 수익률로 근사
-  const scaleOutTrigger  = isPenny
+  const profitPct = highestPct / 100;
+  const scaleOutTrigger = isPenny
     ? rsi > 70 || profitPct >= 0.20
     : rsi > 60;
-  const scaleOutProfitOk = profitPct > 0; // 손실 중 Scale-Out 방지 (paper_engine 가드)
-  const scaleOutFires    = scaleOutTrigger && scaleOutProfitOk;
-  const postScaleTsPct   = isPenny ? 0.93 : null; // 일반은 최고가+1% 본절 TS
-  const postScaleTs      = isPenny
-    ? highest * 0.93
-    : highest * 1.01; // 일반: 최고가 × 1.01 ≈ 본절+1%
+  // 서버 응답 우선, 로컬 폴백: >= 0.05 (5% 가드 — paper_engine 기준)
+  const scaleOutProfitOk = serverResult
+    ? serverResult.scale_out.profit_ok
+    : profitPct >= 0.05;
+  const scaleOutFires = serverResult
+    ? serverResult.scale_out.fires
+    : scaleOutTrigger && scaleOutProfitOk;
+  const postScaleTs = serverResult
+    ? serverResult.scale_out.post_scale_ts
+    : isPenny ? highest * 0.93 : highest * 1.01;
+  const postScaleTsLabel = serverResult
+    ? serverResult.scale_out.post_scale_ts_label
+    : isPenny ? '최고가 × 0.93 (-7%)' : '최고가 × 1.01 (본절+1%)';
 
   const macdOptions: { value: MacdStatus; label: string; score: number }[] = [
     { value: 'golden', label: '골든크로스', score: 20 },
@@ -329,7 +423,7 @@ export function DnaSimulatorPage() {
   }
 
   const buyBudgetDollar = buyingPower != null
-    ? Math.min(buyingPower * (sizing.finalWeight / 100), 1000)
+    ? Math.min(buyingPower * (activeSizing.finalWeight / 100), 1000)
     : null;
 
   return (
@@ -356,6 +450,22 @@ export function DnaSimulatorPage() {
               </h1>
               <p className="text-xs text-slate-700 uppercase tracking-widest">Fix A·B·C·D 반영 — 매수 전 리스크 사전 검증</p>
             </div>
+          </div>
+
+          {/* 서버 연동 상태 배지 */}
+          <div className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border ${
+            apiOnline === true  ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
+            apiOnline === false ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                                  'bg-slate-100 border-slate-200 text-slate-500'
+          }`}>
+            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              apiOnline === true  ? 'bg-emerald-500' :
+              apiOnline === false ? 'bg-amber-500' :
+                                    'bg-slate-400 animate-pulse'
+            }`} />
+            <span className="font-black uppercase tracking-widest">
+              {apiOnline === true ? '서버 연동' : apiOnline === false ? '로컬 폴백' : '연결 확인 중'}
+            </span>
           </div>
 
           {/* 계좌 잔고 표시 */}
@@ -515,26 +625,26 @@ export function DnaSimulatorPage() {
           <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-sm">
             <div className="flex flex-col sm:flex-row items-center gap-8">
               <div className="flex flex-col items-center">
-                <ScoreArc score={dna.score} />
+                <ScoreArc score={activeDna.score} />
                 <div className={`mt-1 px-4 py-1.5 rounded-full text-sm font-black uppercase tracking-widest border ${
-                  dna.tier === 'Tier-1' ? 'bg-emerald-100 border-emerald-200 text-emerald-700' :
-                  dna.tier === 'Tier-2' ? 'bg-teal-100 border-teal-200 text-teal-700' :
-                  dna.tier === 'Tier-Penny' ? 'bg-cyan-100 border-cyan-200 text-cyan-700' :
-                  dna.tier === 'SELL' ? 'bg-rose-100 border-rose-200 text-rose-700' :
+                  activeDna.tier === 'Tier-1' ? 'bg-emerald-100 border-emerald-200 text-emerald-700' :
+                  activeDna.tier === 'Tier-2' ? 'bg-teal-100 border-teal-200 text-teal-700' :
+                  activeDna.tier === 'Tier-Penny' ? 'bg-cyan-100 border-cyan-200 text-cyan-700' :
+                  activeDna.tier === 'SELL' ? 'bg-rose-100 border-rose-200 text-rose-700' :
                   'bg-slate-100 border-slate-300 text-slate-700'
-                }`}>{dna.tier} — {dna.signal}</div>
+                }`}>{activeDna.tier} — {activeDna.signal}</div>
               </div>
 
               {/* Breakdown bars */}
               <div className="flex-1 w-full space-y-2">
                 <DeltaBar label="Base" value={50} maxAbs={50} />
-                <DeltaBar label="RSI" value={dna.deltas.rsi} />
-                <DeltaBar label="MACD" value={dna.deltas.macd} />
-                <DeltaBar label="ADX" value={dna.deltas.adx} />
-                <DeltaBar label="RVOL" value={dna.deltas.rvol} />
-                <DeltaBar label="Extended" value={dna.deltas.ext} />
+                <DeltaBar label="RSI" value={activeDna.deltas.rsi} />
+                <DeltaBar label="MACD" value={activeDna.deltas.macd} />
+                <DeltaBar label="ADX" value={activeDna.deltas.adx} />
+                <DeltaBar label="RVOL" value={activeDna.deltas.rvol} />
+                <DeltaBar label="Extended" value={activeDna.deltas.ext} />
                 <div className="border-t border-slate-200 pt-2">
-                  <DeltaBar label="TOTAL" value={dna.score} maxAbs={100} />
+                  <DeltaBar label="TOTAL" value={activeDna.score} maxAbs={100} />
                 </div>
               </div>
             </div>
@@ -546,8 +656,8 @@ export function DnaSimulatorPage() {
                 { label: 'Tier-2',     gate: 82, cond: !isPenny && rvol > 2.0, activeCard: 'border-teal-200 bg-teal-50',     activeLbl: 'text-teal-700',    activeVal: 'text-teal-700' },
                 { label: 'Tier-Penny', gate: 70, cond: isPenny,               activeCard: 'border-cyan-200 bg-cyan-50',      activeLbl: 'text-cyan-700',    activeVal: 'text-cyan-700' },
               ] as const).map(t => {
-                const gap = dna.score - t.gate;
-                const active = t.cond && dna.score >= t.gate;
+                const gap = activeDna.score - t.gate;
+                const active = t.cond && activeDna.score >= t.gate;
                 return (
                   <div key={t.label} className={`rounded-xl border p-3 text-center transition-all ${active ? t.activeCard : 'border-slate-100 bg-slate-50'}`}>
                     <div className={`text-sm font-black uppercase tracking-widest ${active ? t.activeLbl : 'text-slate-700'}`}>{t.label}</div>
@@ -566,10 +676,10 @@ export function DnaSimulatorPage() {
             <h2 className="text-xs font-black uppercase tracking-widest text-slate-700 mb-4">포지션 사이징 결과</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
               {[
-                { label: '연환산 변동성', value: `${(sizing.annVol * 100).toFixed(1)}%`, desc: 'ATR × √252' },
-                { label: 'vol_weight', value: `${sizing.volWeight.toFixed(1)}%`, desc: '15% / ann_vol' },
-                { label: 'Kelly(f)', value: `${(sizing.optimalKelly).toFixed(1)}%`, desc: '하프켈리 × 0.25' },
-                { label: '최종 비중', value: `${sizing.finalWeight.toFixed(1)}%`, desc: '(vol+kelly)/2 ← Fix D' },
+                { label: '연환산 변동성', value: `${(activeSizing.annVol * 100).toFixed(1)}%`, desc: 'ATR × √252' },
+                { label: 'vol_weight', value: `${activeSizing.volWeight.toFixed(1)}%`, desc: '15% / ann_vol' },
+                { label: 'Kelly(f)', value: `${(activeSizing.optimalKelly).toFixed(1)}%`, desc: '하프켈리 × 0.25' },
+                { label: '최종 비중', value: `${activeSizing.finalWeight.toFixed(1)}%`, desc: '(vol+kelly)/2 ← Fix D' },
               ].map(item => (
                 <div key={item.label} className="bg-slate-50 rounded-xl border border-slate-100 p-3 text-center">
                   <div className="text-sm font-black uppercase tracking-widest text-slate-700">{item.label}</div>
@@ -584,8 +694,8 @@ export function DnaSimulatorPage() {
               <div className="text-sm font-black uppercase tracking-widest text-slate-700 mb-3">Fix D 효과 — min vs 가중평균</div>
               <div className="space-y-2">
                 {[
-                  { label: '기존 (min)', value: Math.min(sizing.volWeight, sizing.optimalKelly), color: 'bg-slate-600' },
-                  { label: '신규 (avg)', value: sizing.finalWeight, color: 'bg-indigo-500' },
+                  { label: '기존 (min)', value: Math.min(activeSizing.volWeight, activeSizing.optimalKelly), color: 'bg-slate-600' },
+                  { label: '신규 (avg)', value: activeSizing.finalWeight, color: 'bg-indigo-500' },
                 ].map(row => (
                   <div key={row.label} className="flex items-center gap-3">
                     <span className="text-xs text-slate-700 w-24 shrink-0">{row.label}</span>
@@ -600,7 +710,7 @@ export function DnaSimulatorPage() {
               {/* 실제 잔고 기반 달러 예산 */}
               <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between">
                 <p className="text-sm text-slate-700">
-                  buy_budget = min(잔고 × {sizing.finalWeight.toFixed(1)}%, $1,000)
+                  buy_budget = min(잔고 × {activeSizing.finalWeight.toFixed(1)}%, $1,000)
                 </p>
                 <p className="text-xs font-black font-mono">
                   {buyBudgetDollar != null
@@ -677,7 +787,7 @@ export function DnaSimulatorPage() {
                     <span className="font-black text-amber-700">
                       ${postScaleTs.toFixed(isPenny ? 3 : 2)}
                       <span className="text-slate-700 font-normal ml-1">
-                        ({isPenny ? `최고가 × ${postScaleTsPct}` : '최고가 × 1.01 (본절+1%)'})
+                        ({postScaleTsLabel})
                       </span>
                     </span>
                   </div>
@@ -699,14 +809,14 @@ export function DnaSimulatorPage() {
           {/* Chandelier Exit 결과 */}
           <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-sm">
             <h2 className="text-xs font-black uppercase tracking-widest text-slate-700 mb-4">
-              Chandelier Exit — TS = Highest − {chandelier.k}×ATR
+              Chandelier Exit — TS = Highest − {activeChandelier.k}×ATR
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
               {[
                 { label: '진입가', value: `$${entryPrice.toFixed(isPenny ? 3 : 2)}` },
                 { label: '최고가', value: `$${highest.toFixed(isPenny ? 3 : 2)}` },
-                { label: '고정 % TS', value: `$${chandelier.tsFixed.toFixed(isPenny ? 3 : 2)}`, sub: `${isPenny ? '-15%' : '-10%'} (기존)` },
-                { label: 'Chandelier TS', value: `$${chandelier.tsChandelier.toFixed(isPenny ? 3 : 2)}`, sub: `k=${chandelier.k}×ATR`, highlight: true },
+                { label: '고정 % TS', value: `$${activeChandelier.tsFixed.toFixed(isPenny ? 3 : 2)}`, sub: `${isPenny ? '-15%' : '-10%'} (기존)` },
+                { label: 'Chandelier TS', value: `$${activeChandelier.tsChandelier.toFixed(isPenny ? 3 : 2)}`, sub: `k=${activeChandelier.k}×ATR`, highlight: true },
               ].map(item => (
                 <div key={item.label} className={`rounded-xl border p-3 text-center ${item.highlight ? 'border-indigo-200 bg-indigo-50' : 'border-slate-100 bg-slate-50'}`}>
                   <div className="text-sm font-black uppercase tracking-widest text-slate-700">{item.label}</div>
@@ -720,8 +830,8 @@ export function DnaSimulatorPage() {
             <div className="bg-slate-50 rounded-xl border border-slate-100 p-4 space-y-3">
               <div className="text-sm font-black uppercase tracking-widest text-slate-700 mb-2">스탑 라인 위치 비교</div>
               {[
-                { label: '고정 % TS', price: chandelier.tsFixed, color: 'bg-slate-500' },
-                { label: 'Chandelier TS', price: chandelier.tsChandelier, color: 'bg-indigo-500' },
+                { label: '고정 % TS', price: activeChandelier.tsFixed, color: 'bg-slate-500' },
+                { label: 'Chandelier TS', price: activeChandelier.tsChandelier, color: 'bg-indigo-500' },
               ].map(row => {
                 const dropPct = ((highest - row.price) / highest) * 100;
                 return (
@@ -749,8 +859,11 @@ export function DnaSimulatorPage() {
           <div className="border border-amber-200 bg-amber-500/5 rounded-2xl px-5 py-4 flex gap-3">
             <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-700/80 leading-relaxed">
-              이 시뮬레이터는 백엔드 <code className="font-mono text-amber-700">paper_engine.py</code> · <code className="font-mono text-amber-700">main.py</code>의 수식과 동기화되어 있습니다.
-              Fix A·B·C·D 적용 버전 기준이며, 실제 매매 신호는 1분봉 데이터 기반 연산 결과와 다를 수 있습니다.
+              {apiOnline
+                ? <>백엔드 <code className="font-mono text-amber-700">/api/simulate</code>에서 계산 중입니다. <code className="font-mono text-amber-700">paper_engine.py</code> 상수 변경이 자동 반영됩니다.</>
+                : <>백엔드 미연결 — 로컬 TypeScript 폴백 수식으로 계산 중입니다. 백엔드 수식과 미세 차이가 있을 수 있습니다.</>
+              }
+              {' '}실제 매매 신호는 1분봉 데이터 기반 연산 결과와 다를 수 있습니다.
             </div>
           </div>
         </div>

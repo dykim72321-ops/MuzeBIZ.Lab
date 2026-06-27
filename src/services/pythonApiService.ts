@@ -1,9 +1,37 @@
-import { supabase } from '../lib/supabase';
+/**
+ * pythonApiService.ts — Python Engine API Service Layer (Refactored)
+ *
+ * 변경 사항:
+ *   1. 모든 `any` 타입을 `src/types/api.ts`의 엄격한 인터페이스로 대체
+ *   2. 기존 apiFetch / brokerApiFetch → `apiClient`로 통합 (Retry + Timeout 자동 적용)
+ *   3. adminApiFetch는 Supabase Edge Proxy를 사용하므로 별도 유지
+ *   4. 기존 export 시그니처는 100% 호환 유지 (breaking change 없음)
+ */
 
-// 로컬: Vite 프록시(/py-api → localhost:8001)
-const PY_API_BASE = import.meta.env.DEV
-  ? '/py-api'
-  : (import.meta.env.VITE_API_BASE_URL ?? '/py-api');
+import { supabase } from '../lib/supabase';
+import { apiClient } from './apiClient';
+import type {
+  BrokerAccountResponse,
+  BrokerStatusResponse,
+  BrokerArmResponse,
+  BrokerPositionRaw,
+  ClosedTradeRaw,
+  ClosePositionResponse,
+  ManualOrderRequest,
+  ManualOrderResponse,
+  AlpacaQuoteResponse,
+  AlpacaBatchQuotesResponse,
+  PennyScanStatusResponse,
+  WebhookUpdateResponse,
+  WebhookTestResponse,
+  PaperAccountResponse,
+  PaperPositionRaw,
+  PaperHistoryRaw,
+} from '../types/api';
+
+// ─── Re-export Types (하위 호환) ─────────────────────────────────────────────
+
+export type { PennyScanStatusResponse as PennyScanStatus } from '../types/api';
 
 export interface TechnicalIndicators {
   ticker: string;
@@ -53,336 +81,6 @@ export interface StrategyStats {
   recent_trades_count: number;
 }
 
-/**
- * 기술적 지표 분석 요청
- */
-export async function fetchTechnicalAnalysis(
-  ticker: string,
-  period: string = '1mo'
-): Promise<TechnicalIndicators | null> {
-  try {
-    return await apiFetch('/api/analyze', 'POST', { ticker, period });
-  } catch (error) {
-    console.error(`[PythonAPI] Analyze error for ${ticker}:`, error);
-    return null;
-  }
-}
-
-/**
- * 최근 발견 종목 조회
- */
-export async function fetchDiscoveries(
-  limit: number = 10,
-  sortBy: 'updated_at' | 'performance' = 'updated_at'
-): Promise<DiscoveryItem[]> {
-  try {
-    return await apiFetch(`/api/discoveries?limit=${limit}&sort_by=${sortBy}`);
-  } catch (error) {
-    console.error('[PythonAPI] Discoveries error:', error);
-    return [];
-  }
-}
-
-/**
- * 수동 수집 트리거 (관리자 전용 - Edge Proxy 사용)
- */
-export async function triggerHunt(): Promise<{ success: boolean; message: string }> {
-  try {
-    const data = await adminApiFetch('/api/penny/scan', 'POST');
-    return { success: true, message: data.message || 'Hunt triggered!' };
-  } catch (error: any) {
-    console.error('[PythonAPI] Hunt trigger error:', error);
-    return { success: false, message: error.message || 'Network error' };
-  }
-}
-
-/**
- * Broker API Direct Fetch — Vite 프록시(/py-api)를 통해 FastAPI에 직접 호출.
- * X-Admin-Key 헤더를 포함하여 인증을 처리합니다.
- */
-export async function brokerApiFetch(
-  endpoint: string,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
-  body: any = null
-): Promise<any> {
-  const adminKey = import.meta.env.VITE_ADMIN_SECRET_KEY;
-  const options: RequestInit = {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(adminKey ? { 'X-Admin-Key': adminKey } : {}),
-    },
-  };
-  if (body && (method === 'POST' || method === 'PUT')) {
-    options.body = JSON.stringify(body);
-  }
-  const response = await fetch(`${PY_API_BASE}${endpoint}`, options);
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `HTTP Error: ${response.status}`);
-  }
-  return await response.json();
-}
-
-/**
- * 브로커 계좌 현황 조회
- */
-export async function fetchBrokerAccount(): Promise<any> {
-  return brokerApiFetch('/api/broker/account');
-}
-
-/**
- * 모든 포지션 청산 (Panic Sell)
- */
-export async function liquidateAllPositions(confirm: boolean = true): Promise<any> {
-  return brokerApiFetch('/api/broker/liquidate-all', 'POST', { confirm });
-}
-
-/**
- * 브로커 및 시스템 상태 조회
- */
-export async function fetchBrokerStatus(): Promise<any> {
-  return brokerApiFetch('/api/broker/status');
-}
-
-/**
- * 페이퍼 트레이딩 계좌 현황 조회
- */
-export async function fetchPaperAccount(): Promise<any> {
-  return brokerApiFetch('/api/broker/paper/account');
-}
-
-/**
- * 페이퍼 트레이딩 현재 포지션 조회
- */
-export async function fetchPaperPositions(): Promise<any[]> {
-  try {
-    const data = await brokerApiFetch('/api/broker/paper/positions');
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Paper positions fetch error:', error);
-    return [];
-  }
-}
-
-/**
- * 페이퍼 트레이딩 매매 이력 조회
- */
-export async function fetchPaperHistory(): Promise<any[]> {
-  try {
-    const data = await brokerApiFetch('/api/broker/paper/history');
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Paper history fetch error:', error);
-    return [];
-  }
-}
-
-/**
- * 브로커 오픈 포지션 조회
- */
-export async function fetchBrokerPositions(): Promise<any[]> {
-  try {
-    const data = await brokerApiFetch('/api/broker/positions');
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Positions fetch error:', error);
-    return [];
-  }
-}
-
-/**
- * 브로커 최근 주문 내역 조회
- */
-export async function fetchBrokerOrders(limit: number = 50): Promise<any[]> {
-  try {
-    const data = await brokerApiFetch(`/api/broker/orders?limit=${limit}`);
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Orders fetch error:', error);
-    return [];
-  }
-}
-
-/**
- * 시스템 자동 매매 무장/해제
- */
-export async function toggleSystemArm(arm: boolean): Promise<any> {
-  return brokerApiFetch('/api/broker/arm', 'POST', { arm });
-}
-
-/**
- * 수동 주문 실행
- */
-export async function executeManualOrder(orderData: {
-  ticker: string;
-  side: 'buy' | 'sell';
-  quantity: number;
-  type?: 'market' | 'limit';
-  price?: number;
-}): Promise<any> {
-  return brokerApiFetch('/api/broker/order', 'POST', orderData);
-}
-
-/**
- * 특정 포지션 청산
- */
-export async function closePosition(ticker: string): Promise<any> {
-  return brokerApiFetch('/api/broker/close-position', 'POST', { ticker });
-}
-
-/**
- * Alpaca 실시간 단일 시세 및 거래 정보 조회
- */
-export async function fetchAlpacaQuote(ticker: string): Promise<any> {
-  return brokerApiFetch(`/api/broker/quote/${ticker.toUpperCase()}`);
-}
-
-/**
- * Alpaca 실시간 다중 시세 및 거래 정보 조회 (Batch)
- */
-export async function fetchAlpacaQuotes(tickers: string[]): Promise<any> {
-  return brokerApiFetch('/api/broker/quotes', 'POST', { tickers: tickers.map(t => t.toUpperCase()) });
-}
-
-/**
- * 페이퍼 트레이딩 포지션 수동 청산 (사령관 매도)
- */
-export async function sellPaperPosition(ticker: string): Promise<any> {
-  return brokerApiFetch('/api/broker/paper/sell', 'POST', { ticker });
-}
-
-/**
- * 청산 이력 단건 삭제
- */
-export async function deletePaperHistory(historyId: string): Promise<any> {
-  return brokerApiFetch(`/api/broker/paper/history/${historyId}`, 'DELETE');
-}
-
-/**
- * Alpaca 실계좌 체결 이력 조회 (FIFO PnL 매칭)
- */
-export async function fetchClosedTrades(limit: number = 30): Promise<any[]> {
-  try {
-    const data = await brokerApiFetch(`/api/broker/closed-trades?limit=${limit}`);
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Closed trades fetch error:', error);
-    return [];
-  }
-}
-
-/**
- * Discord Webhook URL 저장 및 백엔드 메모리 즉시 반영
- */
-export async function updateWebhookUrl(webhookUrl: string): Promise<any> {
-  return brokerApiFetch('/api/settings/webhook', 'POST', { webhook_url: webhookUrl });
-}
-
-/**
- * 저장된 Discord Webhook URL로 테스트 메시지 전송
- */
-export async function testWebhook(): Promise<any> {
-  return brokerApiFetch('/api/settings/webhook/test', 'POST');
-}
-
-/**
- * RSI 역추세 전략 백테스팅 실행
- */
-export async function fetchBacktestData(
-  ticker: string,
-  period: string = '1y'
-): Promise<any | null> {
-  try {
-    return await apiFetch('/api/backtest', 'POST', { ticker, period });
-  } catch (error) {
-    console.error(`[PythonAPI] Backtest error for ${ticker}:`, error);
-    return null;
-  }
-}
-
-/**
- * 전략 통계 데이터 조회
- */
-export async function fetchStrategyStats(): Promise<StrategyStats | null> {
-  try {
-    return await apiFetch('/api/strategy/stats');
-  } catch (error) {
-    console.error('[PythonAPI] Strategy stats error:', error);
-    return null;
-  }
-}
-
-export interface PennyScanStatus {
-  last_scan_at: string | null;
-  cached_results: number;
-  next_scan_in_seconds: number | null;
-  auto_scan_active: boolean;
-}
-
-export async function fetchPennyScanStatus(): Promise<PennyScanStatus | null> {
-  try {
-    return await apiFetch('/api/penny/scan/status');
-  } catch (error) {
-    console.error('[PythonAPI] Penny scan status error:', error);
-    return null;
-  }
-}
-
-/**
- * [NEW] Admin API Fetch Utility
- * Supabase Edge Function Proxy를 통해 Python Engine 호출
- */
-export async function adminApiFetch(
-  endpoint: string,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
-  body: any = null
-): Promise<any> {
-  const { data, error } = await supabase.functions.invoke(`admin-proxy${endpoint}`, {
-    method,
-    body,
-  });
-
-  if (error) {
-    console.error(`[PythonAPI] adminApiFetch Error (${endpoint}):`, error);
-    throw new Error(error.message || `Edge Function Error: ${error}`);
-  }
-
-  return data;
-}
-
-/**
- * Generic API Fetch Utility (Public/Non-Admin)
- */
-export async function apiFetch(
-  endpoint: string, 
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', 
-  body: any = null
-): Promise<any> {
-  const options: RequestInit = {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  };
-
-  if (body && (method === 'POST' || method === 'PUT')) {
-    options.body = JSON.stringify(body);
-  }
-
-  try {
-    const response = await fetch(`${PY_API_BASE}${endpoint}`, options);
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP Error: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error(`[PythonAPI] apiFetch Error (${endpoint}):`, error);
-    throw error;
-  }
-}
-
 export interface BacktestRunParams {
   tickers?: string[];
   start_date?: string;
@@ -409,7 +107,360 @@ export interface BacktestResult {
   is_empty?: boolean;
 }
 
+export type MacdStatus = 'golden' | 'dead' | 'rising' | 'falling';
+
+export interface SimulateRequest {
+  rsi: number;
+  rvol: number;
+  macd_status: MacdStatus;
+  adx: number;
+  di_positive: boolean;
+  is_extended: boolean;
+  is_penny: boolean;
+  win_rate?: number;
+  profit_ratio?: number;
+  atr_pct?: number;
+  entry_price?: number;
+  highest_pct?: number;
+}
+
+export interface SimulateResponse {
+  dna: {
+    score: number;
+    deltas: { base: number; rsi: number; macd: number; adx: number; rvol: number; ext: number };
+    tier: string;
+    tier_color: string;
+    signal: string;
+  };
+  sizing: {
+    ann_vol: number;
+    vol_weight: number;
+    kelly_f: number;
+    optimal_kelly: number;
+    final_weight: number;
+    buy_budget_pct: number;
+  };
+  chandelier: {
+    k: number;
+    floor: number;
+    ts_fixed: number;
+    ts_chandelier: number;
+    effective: number;
+  };
+  scale_out: {
+    fires: boolean;
+    rsi_trigger: boolean;
+    profit_trigger: boolean;
+    profit_ok: boolean;
+    post_scale_ts: number;
+    post_scale_ts_label: string;
+  };
+  constants: Record<string, number>;
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * 기술적 지표 분석 요청
+ */
+export async function fetchTechnicalAnalysis(
+  ticker: string,
+  period: string = '1mo',
+): Promise<TechnicalIndicators | null> {
+  try {
+    return await apiClient.post<TechnicalIndicators>('/api/analyze', { ticker, period });
+  } catch (error) {
+    console.error(`[PythonAPI] Analyze error for ${ticker}:`, error);
+    return null;
+  }
+}
+
+/**
+ * 최근 발견 종목 조회
+ */
+export async function fetchDiscoveries(
+  limit: number = 10,
+  sortBy: 'updated_at' | 'performance' = 'updated_at',
+): Promise<DiscoveryItem[]> {
+  try {
+    return await apiClient.get<DiscoveryItem[]>(`/api/discoveries?limit=${limit}&sort_by=${sortBy}`);
+  } catch (error) {
+    console.error('[PythonAPI] Discoveries error:', error);
+    return [];
+  }
+}
+
+/**
+ * 수동 수집 트리거 (관리자 전용 - Edge Proxy 사용)
+ */
+export async function triggerHunt(): Promise<{ success: boolean; message: string }> {
+  try {
+    const data = await adminApiFetch('/api/quant/scan', 'POST');
+    return { success: true, message: data.message || 'Hunt triggered!' };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Network error';
+    console.error('[PythonAPI] Hunt trigger error:', error);
+    return { success: false, message: msg };
+  }
+}
+
+// ─── Broker API (X-Admin-Key 인증) ──────────────────────────────────────────
+
+/**
+ * 브로커 계좌 현황 조회
+ */
+export async function fetchBrokerAccount(): Promise<BrokerAccountResponse> {
+  return apiClient.broker.get<BrokerAccountResponse>('/api/broker/account');
+}
+
+/**
+ * 모든 포지션 청산 (Panic Sell)
+ */
+export async function liquidateAllPositions(confirm: boolean = true): Promise<ClosePositionResponse> {
+  return apiClient.broker.post<ClosePositionResponse>('/api/broker/liquidate-all', { confirm });
+}
+
+/**
+ * 브로커 및 시스템 상태 조회
+ */
+export async function fetchBrokerStatus(): Promise<BrokerStatusResponse> {
+  return apiClient.broker.get<BrokerStatusResponse>('/api/broker/status');
+}
+
+/**
+ * 페이퍼 트레이딩 계좌 현황 조회
+ */
+export async function fetchPaperAccount(): Promise<PaperAccountResponse> {
+  return apiClient.broker.get<PaperAccountResponse>('/api/broker/paper/account');
+}
+
+/**
+ * 페이퍼 트레이딩 현재 포지션 조회
+ */
+export async function fetchPaperPositions(): Promise<PaperPositionRaw[]> {
+  try {
+    const data = await apiClient.broker.get<PaperPositionRaw[]>('/api/broker/paper/positions');
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Paper positions fetch error:', error);
+    return [];
+  }
+}
+
+/**
+ * 페이퍼 트레이딩 매매 이력 조회
+ */
+export async function fetchPaperHistory(): Promise<PaperHistoryRaw[]> {
+  try {
+    const data = await apiClient.broker.get<PaperHistoryRaw[]>('/api/broker/paper/history');
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Paper history fetch error:', error);
+    return [];
+  }
+}
+
+/**
+ * 브로커 오픈 포지션 조회
+ */
+export async function fetchBrokerPositions(): Promise<BrokerPositionRaw[]> {
+  try {
+    const data = await apiClient.broker.get<BrokerPositionRaw[]>('/api/broker/positions');
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Positions fetch error:', error);
+    return [];
+  }
+}
+
+/**
+ * 브로커 최근 주문 내역 조회
+ */
+export async function fetchBrokerOrders(limit: number = 50): Promise<ManualOrderResponse[]> {
+  try {
+    const data = await apiClient.broker.get<ManualOrderResponse[]>(`/api/broker/orders?limit=${limit}`);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Orders fetch error:', error);
+    return [];
+  }
+}
+
+/**
+ * 시스템 자동 매매 무장/해제
+ */
+export async function toggleSystemArm(arm: boolean): Promise<BrokerArmResponse> {
+  return apiClient.broker.post<BrokerArmResponse>('/api/broker/arm', { arm });
+}
+
+/**
+ * 수동 주문 실행
+ */
+export async function executeManualOrder(orderData: ManualOrderRequest): Promise<ManualOrderResponse> {
+  return apiClient.broker.post<ManualOrderResponse>('/api/broker/order', orderData);
+}
+
+/**
+ * 특정 포지션 청산
+ */
+export async function closePosition(ticker: string): Promise<ClosePositionResponse> {
+  return apiClient.broker.post<ClosePositionResponse>('/api/broker/close-position', { ticker });
+}
+
+/**
+ * Alpaca 실시간 단일 시세 조회
+ */
+export async function fetchAlpacaQuote(ticker: string): Promise<AlpacaQuoteResponse> {
+  return apiClient.broker.get<AlpacaQuoteResponse>(`/api/broker/quote/${ticker.toUpperCase()}`);
+}
+
+/**
+ * Alpaca 실시간 다중 시세 조회 (Batch)
+ */
+export async function fetchAlpacaQuotes(tickers: string[]): Promise<AlpacaBatchQuotesResponse> {
+  return apiClient.broker.post<AlpacaBatchQuotesResponse>('/api/broker/quotes', {
+    tickers: tickers.map((t) => t.toUpperCase()),
+  });
+}
+
+/**
+ * 페이퍼 트레이딩 포지션 수동 청산
+ */
+export async function sellPaperPosition(ticker: string): Promise<ClosePositionResponse> {
+  return apiClient.broker.post<ClosePositionResponse>('/api/broker/paper/sell', { ticker });
+}
+
+/**
+ * 청산 이력 단건 삭제
+ */
+export async function deletePaperHistory(historyId: string): Promise<{ status: string }> {
+  return apiClient.broker.delete<{ status: string }>(`/api/broker/paper/history/${historyId}`);
+}
+
+/**
+ * Alpaca 실계좌 체결 이력 조회 (FIFO PnL 매칭)
+ */
+export async function fetchClosedTrades(limit: number = 30): Promise<ClosedTradeRaw[]> {
+  try {
+    const data = await apiClient.broker.get<ClosedTradeRaw[]>(`/api/broker/closed-trades?limit=${limit}`);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Closed trades fetch error:', error);
+    return [];
+  }
+}
+
+/**
+ * Discord Webhook URL 저장 및 백엔드 메모리 즉시 반영
+ */
+export async function updateWebhookUrl(webhookUrl: string): Promise<WebhookUpdateResponse> {
+  return apiClient.broker.post<WebhookUpdateResponse>('/api/settings/webhook', { webhook_url: webhookUrl });
+}
+
+/**
+ * 저장된 Discord Webhook URL로 테스트 메시지 전송
+ */
+export async function testWebhook(): Promise<WebhookTestResponse> {
+  return apiClient.broker.post<WebhookTestResponse>('/api/settings/webhook/test');
+}
+
+/**
+ * RSI 역추세 전략 백테스팅 실행
+ */
+export async function fetchBacktestData(
+  ticker: string,
+  period: string = '1y',
+): Promise<BacktestResult | null> {
+  try {
+    return await apiClient.post<BacktestResult>('/api/backtest', { ticker, period });
+  } catch (error) {
+    console.error(`[PythonAPI] Backtest error for ${ticker}:`, error);
+    return null;
+  }
+}
+
+/**
+ * 전략 통계 데이터 조회
+ */
+export async function fetchStrategyStats(): Promise<StrategyStats | null> {
+  try {
+    return await apiClient.get<StrategyStats>('/api/strategy/stats');
+  } catch (error) {
+    console.error('[PythonAPI] Strategy stats error:', error);
+    return null;
+  }
+}
+
+export async function fetchPennyScanStatus(): Promise<PennyScanStatusResponse | null> {
+  try {
+    return await apiClient.get<PennyScanStatusResponse>('/api/quant/scan/status');
+  } catch (error) {
+    console.error('[PythonAPI] Penny scan status error:', error);
+    return null;
+  }
+}
+
 export async function runBacktest(params: BacktestRunParams): Promise<BacktestResult> {
-  const res = await brokerApiFetch('/api/backtest/run', 'POST', params);
-  return res as BacktestResult;
+  return apiClient.broker.post<BacktestResult>('/api/backtest/run', params);
+}
+
+export async function fetchSimulate(params: SimulateRequest): Promise<SimulateResponse | null> {
+  try {
+    return await apiClient.post<SimulateResponse>('/api/simulate', params);
+  } catch (error) {
+    console.error('[PythonAPI] Simulate error:', error);
+    return null;
+  }
+}
+
+// ─── Legacy Compatibility Exports ────────────────────────────────────────────
+// 기존 코드에서 직접 import하던 함수들을 유지. 신규 코드에서는 apiClient를 직접 사용 권장.
+
+/**
+ * Admin API Fetch (Supabase Edge Function Proxy)
+ */
+export async function adminApiFetch(
+  endpoint: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  body: unknown = null,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase.functions.invoke(`admin-proxy${endpoint}`, {
+    method,
+    body: body as Record<string, unknown>,
+  });
+
+  if (error) {
+    console.error(`[PythonAPI] adminApiFetch Error (${endpoint}):`, error);
+    throw new Error(error.message || `Edge Function Error: ${error}`);
+  }
+
+  return data as Record<string, unknown>;
+}
+
+/**
+ * @deprecated — 하위 호환을 위해 남겨둠. 신규 코드에서는 `apiClient.get/post`를 사용하세요.
+ */
+export async function apiFetch<T = unknown>(
+  endpoint: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  body: unknown = null,
+): Promise<T> {
+  if (method === 'GET') return apiClient.get<T>(endpoint);
+  if (method === 'POST') return apiClient.post<T>(endpoint, body);
+  if (method === 'PUT') return apiClient.put<T>(endpoint, body);
+  return apiClient.delete<T>(endpoint);
+}
+
+/**
+ * @deprecated — 하위 호환을 위해 남겨둠. 신규 코드에서는 `apiClient.broker.get/post`를 사용하세요.
+ */
+export async function brokerApiFetch<T = unknown>(
+  endpoint: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  body: unknown = null,
+): Promise<T> {
+  if (method === 'GET') return apiClient.broker.get<T>(endpoint);
+  if (method === 'POST') return apiClient.broker.post<T>(endpoint, body);
+  if (method === 'PUT') return apiClient.broker.put<T>(endpoint, body);
+  return apiClient.broker.delete<T>(endpoint);
 }

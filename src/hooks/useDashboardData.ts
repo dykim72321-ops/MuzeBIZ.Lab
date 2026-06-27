@@ -1,0 +1,505 @@
+/**
+ * useDashboardData.ts — Dashboard Data Hook
+ *
+ * 대시보드에 필요한 모든 파생 데이터(Derived State)와 주기적 데이터 로딩 로직을 캡슐화.
+ * Zustand 스토어에서 원본 데이터를 읽고, 뷰에 필요한 형태로 가공하여 반환한다.
+ */
+
+import { useEffect, useMemo, useCallback, useRef } from 'react';
+import { toast } from 'sonner';
+import { useTradingStore } from '../store/useTradingStore';
+import { useMarketEngine } from './useMarketEngine';
+import { processSignal } from '../utils/signalProcessor';
+import { addToWatchlist, getWatchlist } from '../services/watchlistService';
+import type { WatchlistItem } from '../services/watchlistService';
+import type { DiscoveryStock, PaperPosition, PaperHistory, TerminalData } from '../types/dashboard';
+import {
+  closePosition,
+  toggleSystemArm,
+} from '../services/pythonApiService';
+import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface DashboardWatchlistItem extends WatchlistItem {
+  currentPrice: number;
+  changePercent: number;
+  isPenny: boolean;
+}
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const POLL_INTERVAL_MS = 30_000;
+
+// ─── Hook ────────────────────────────────────────────────────────────────────
+
+export function useDashboardData() {
+  const navigate = useNavigate();
+  const { isHunting, triggerHunt } = useMarketEngine();
+
+  // Zustand Store — Selector 기반 구독으로 최소한의 리렌더링
+  const loading = useTradingStore((s) => s.loading);
+  const isArmed = useTradingStore((s) => s.isArmed);
+  const isMarketOpen = useTradingStore((s) => s.isMarketOpen);
+  const isSettingsOpen = useTradingStore((s) => s.isSettingsOpen);
+  const lastFetchedTime = useTradingStore((s) => s.lastFetchedTime);
+  const watchlistRaw = useTradingStore((s) => s.watchlistRaw);
+  const discoveryStocks = useTradingStore((s) => s.discoveryStocks);
+  const livePositions = useTradingStore((s) => s.livePositions);
+  const liveHistory = useTradingStore((s) => s.liveHistory);
+  const alpacaAccount = useTradingStore((s) => s.alpacaAccount);
+  const pennyScanStatus = useTradingStore((s) => s.pennyScanStatus);
+  const edgeAlert = useTradingStore((s) => s.edgeAlert);
+  const terminalData = useTradingStore((s) => s.terminalData);
+  const chartRange = useTradingStore((s) => s.chartRange);
+
+  // Actions
+  const setIsSettingsOpen = useTradingStore((s) => s.setIsSettingsOpen);
+  const setChartRange = useTradingStore((s) => s.setChartRange);
+  const setTerminalData = useTradingStore((s) => s.setTerminalData);
+  const setEdgeAlert = useTradingStore((s) => s.setEdgeAlert);
+  const setWatchlistRaw = useTradingStore((s) => s.setWatchlistRaw);
+  const loadDashboardData = useTradingStore((s) => s.loadDashboardData);
+  const loadArmStatus = useTradingStore((s) => s.loadArmStatus);
+
+  // Local addingTickers guard
+  const addingTickersRef = useRef<Set<string>>(new Set());
+  const [addingTickers, setAddingTickers] = useState<Set<string>>(new Set());
+
+  // ── Market Open Check ──
+  useEffect(() => {
+    const checkMarket = () => {
+      const now = new Date();
+      const etParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+      }).formatToParts(now);
+      const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(
+        etParts.find((p) => p.type === 'weekday')?.value ?? 'Sun',
+      );
+      const hours = parseInt(etParts.find((p) => p.type === 'hour')?.value ?? '0', 10);
+      const minutes = parseInt(etParts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+      const timeInMin = hours * 60 + minutes;
+      const open = day >= 1 && day <= 5 && timeInMin >= 570 && timeInMin < 960;
+      useTradingStore.getState().setIsMarketOpen(open);
+    };
+    checkMarket();
+    const id = setInterval(checkMarket, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── Periodic Data Loading ──
+  useEffect(() => {
+    loadDashboardData();
+    loadArmStatus();
+    const interval = setInterval(() => {
+      loadDashboardData();
+      loadArmStatus();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [loadDashboardData, loadArmStatus]);
+
+  // ── Derived: Displayed Account ──
+  const displayedAccount = useMemo(
+    () => ({
+      total_assets: alpacaAccount?.equity ?? 0,
+      cash_available: alpacaAccount?.buying_power ?? 0,
+      today_pnl: alpacaAccount?.today_pnl ?? 0,
+      today_pnl_pct: alpacaAccount?.today_pnl_pct ?? 0,
+    }),
+    [alpacaAccount],
+  );
+
+  // ── Derived: Win Rate & Total Trades ──
+  const displayedWinRate = useMemo(() => {
+    if (!liveHistory || liveHistory.length === 0) return 0;
+    const wins = liveHistory.filter((t) => (t.pnl_pct ?? 0) > 0).length;
+    return (wins / liveHistory.length) * 100;
+  }, [liveHistory]);
+
+  const displayedTotalTrades = useMemo(() => liveHistory.length, [liveHistory]);
+
+  // ── Derived: Watchlist Items ──
+  const watchlistItems = useMemo(() => {
+    const unifiedMap = new Map<string, DashboardWatchlistItem>();
+
+    watchlistRaw.forEach((item) => {
+      unifiedMap.set(item.ticker, { ...item } as DashboardWatchlistItem);
+    });
+
+    livePositions.forEach((pos: PaperPosition) => {
+      if (unifiedMap.has(pos.ticker)) {
+        const existing = unifiedMap.get(pos.ticker)!;
+        existing.status = 'HOLDING';
+        existing.buyPrice = existing.buyPrice || Number(pos.entry_price);
+      } else {
+        unifiedMap.set(pos.ticker, {
+          ticker: pos.ticker,
+          status: 'HOLDING',
+          buyPrice: Number(pos.entry_price),
+          addedAt: pos.created_at || new Date().toISOString(),
+        } as DashboardWatchlistItem);
+      }
+    });
+
+    liveHistory.forEach((hist: PaperHistory) => {
+      if (!livePositions.some((p: PaperPosition) => p.ticker === hist.ticker)) {
+        if (unifiedMap.has(hist.ticker)) {
+          const existing = unifiedMap.get(hist.ticker)!;
+          if (existing.status !== 'WATCHING') {
+            existing.status = 'EXITED';
+          }
+        } else {
+          unifiedMap.set(hist.ticker, {
+            ticker: hist.ticker,
+            status: 'EXITED',
+            addedAt: hist.created_at || new Date().toISOString(),
+          } as DashboardWatchlistItem);
+        }
+      }
+    });
+
+    return Array.from(unifiedMap.values());
+  }, [watchlistRaw, livePositions, liveHistory]);
+
+  // ── Derived: Total PnL ──
+  const totalPnl = useMemo(
+    () =>
+      livePositions.reduce(
+        (sum, p) => sum + (((p.current_price ?? p.entry_price) - p.entry_price) * p.units || 0),
+        0,
+      ),
+    [livePositions],
+  );
+
+  // ── Derived: Portfolio Concentration ──
+  const investedCapital = useMemo(
+    () =>
+      livePositions.reduce(
+        (sum, p) => sum + ((p.current_price ?? 0) * (p.units ?? 0)),
+        0,
+      ),
+    [livePositions],
+  );
+
+  const concentrationPct = useMemo(() => {
+    const cash = displayedAccount.cash_available ?? 100000;
+    const equity = cash + investedCapital;
+    if (equity === 0) return 0;
+    return (investedCapital / equity) * 100;
+  }, [investedCapital, displayedAccount]);
+
+  // ── Derived: Chart Data ──
+  const chartData = useMemo(() => {
+    const BASE = 100000;
+    const now = Date.now();
+    const cutoffMs =
+      chartRange === '7d'
+        ? 7 * 86_400_000
+        : chartRange === '30d'
+          ? 30 * 86_400_000
+          : Infinity;
+
+    let startLabel = 'Start';
+    if (chartRange === '7d') {
+      const d = new Date(now - 7 * 86_400_000);
+      startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+    } else if (chartRange === '30d') {
+      const d = new Date(now - 30 * 86_400_000);
+      startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+    }
+
+    const currentActualValue =
+      displayedAccount.total_assets != null ? Math.round(displayedAccount.total_assets) : null;
+
+    if (!liveHistory || liveHistory.length === 0) {
+      if (currentActualValue != null) {
+        return [
+          { name: startLabel, value: BASE, ts: 0, ma: BASE },
+          { name: '현재', value: currentActualValue, ts: now, ma: currentActualValue },
+        ];
+      }
+      return [];
+    }
+
+    const sorted = [...liveHistory].sort(
+      (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime(),
+    );
+
+    let running = BASE;
+    const allPoints = sorted.map((item) => {
+      running += Number(item.profit_amt ?? 0);
+      let name = '?';
+      if (item.created_at) {
+        const d = new Date(item.created_at);
+        name = `${d.getMonth() + 1}/${d.getDate()}`;
+      }
+      return { name, value: Math.round(running), ts: new Date(item.created_at ?? 0).getTime() };
+    });
+
+    if (chartRange === 'all' && allPoints.length > 0) {
+      const d = new Date(allPoints[0].ts);
+      startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+    }
+
+    const inRange =
+      cutoffMs === Infinity ? allPoints : allPoints.filter((p) => now - p.ts <= cutoffMs);
+
+    let startValue = BASE;
+    if (inRange.length > 0) {
+      const firstIdx = allPoints.indexOf(inRange[0]);
+      startValue = firstIdx > 0 ? allPoints[firstIdx - 1].value : BASE;
+    } else {
+      startValue = allPoints.length > 0 ? allPoints[allPoints.length - 1].value : BASE;
+    }
+
+    const maPoints = inRange.map((p, i, arr) => {
+      const window = arr.slice(Math.max(0, i - 4), i + 1);
+      const ma = window.reduce((s, w) => s + w.value, 0) / window.length;
+      return { ...p, ma: Math.round(ma) };
+    });
+
+    const series: { name: string; value: number; ts: number; ma: number }[] = [
+      { name: startLabel, value: startValue, ts: 0, ma: startValue },
+      ...maPoints,
+    ];
+
+    const lastTs = maPoints.length > 0 ? maPoints[maPoints.length - 1].ts : 0;
+    if (now - lastTs > 60_000) {
+      const currentVal =
+        currentActualValue != null
+          ? currentActualValue
+          : maPoints.length > 0
+            ? maPoints[maPoints.length - 1].value
+            : startValue;
+      series.push({ name: '현재', value: currentVal, ts: now, ma: currentVal });
+    }
+
+    return series;
+  }, [liveHistory, chartRange, displayedAccount]);
+
+  // ── Watchlisted Tickers (for discovery add button) ──
+  const watchlistedTickers = useMemo(
+    () => new Set(watchlistItems.filter((i) => i.status !== 'EXITED').map((i) => i.ticker)),
+    [watchlistItems],
+  );
+
+  // ── Handlers ──
+
+  const handleDeepDive = useCallback(
+    async (stock: DiscoveryStock) => {
+      const displaySignal = processSignal(stock);
+      const rawSummary = stock.rawAiSummary || '';
+
+      let quantData: Record<string, unknown> | null = null;
+      if (rawSummary && rawSummary.trim().startsWith('{')) {
+        try {
+          quantData = JSON.parse(rawSummary);
+        } catch (e) {
+          console.warn(`Failed to parse raw summary for ${stock.ticker}:`, e);
+        }
+      } else if (stock.quant_metadata) {
+        quantData = stock.quant_metadata;
+      }
+
+      const initialData: TerminalData = {
+        ticker: stock.ticker,
+        dnaScore: stock.dna_score || 0,
+        bullPoints: displaySignal.bullPoints,
+        bearPoints: displaySignal.bearPoints,
+        riskLevel:
+          (stock.dna_score || 0) >= 70 ? 'Low' : (stock.dna_score || 0) >= 50 ? 'Medium' : 'High',
+        formulaVerdict: displaySignal.reasoning,
+        price: stock.price || 0,
+        change: `${(stock.change_percent || stock.changePercent || 0).toFixed(2)}%`,
+        efficiencyRatio: stock.efficiency_ratio || stock.efficiencyRatio || 0,
+        kellyWeight: stock.kelly_weight || stock.kellyWeight || 0,
+        quantData,
+        rsi: stock.rsi,
+        macdDiff: stock.macdDiff,
+        adx: stock.adx,
+        rvol: stock.rvol,
+        history: stock.history || [],
+      };
+
+      setTerminalData(initialData);
+
+      // Background enrichment
+      try {
+        const { fetchStockQuote, fetchStockOHLC } = await import('../services/stockService');
+        const [enrichedStock, ohlc] = await Promise.all([
+          fetchStockQuote(stock.ticker, '1mo'),
+          fetchStockOHLC(stock.ticker, '1mo'),
+        ]);
+        if (enrichedStock) {
+          setTerminalData((prev: TerminalData | null) => {
+            if (!prev || prev.ticker !== stock.ticker) return prev;
+            return {
+              ...prev,
+              price: enrichedStock.price,
+              change: `${enrichedStock.changePercent.toFixed(2)}%`,
+              changePercent: enrichedStock.changePercent,
+              dayHigh: enrichedStock.currentHigh,
+              volume: enrichedStock.volume,
+              rsi: enrichedStock.rsi,
+              macdDiff: enrichedStock.macdDiff,
+              adx: enrichedStock.adx,
+              rvol: enrichedStock.rvol,
+              history:
+                enrichedStock.history?.map((h: { price: number; date: string }) => ({
+                  price: h.price,
+                  date: h.date,
+                })) || [],
+              ohlcData: ohlc.length > 0 ? ohlc : undefined,
+            };
+          });
+        } else if (ohlc.length > 0) {
+          setTerminalData((prev: TerminalData | null) =>
+            prev?.ticker === stock.ticker ? { ...prev, ohlcData: ohlc } : prev,
+          );
+        }
+      } catch (err) {
+        console.warn(`Failed to fetch enriched quote for ${stock.ticker}:`, err);
+      }
+    },
+    [setTerminalData],
+  );
+
+  const handleLiveHuntingTrigger = useCallback(async () => {
+    const toastId = toast.loading('🛰️ 실시간 퀀트 라이브 헌팅 구동 중...');
+    try {
+      await triggerHunt();
+      toast.success('라이브 헌팅 트리거 성공', { id: toastId });
+      await loadDashboardData();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '알 수 없는 에러';
+      toast.error('헌팅 트리거 실패', { id: toastId, description: msg });
+    }
+  }, [triggerHunt, loadDashboardData]);
+
+  const handleToggleArm = useCallback(async () => {
+    const currentIsArmed = useTradingStore.getState().isArmed;
+    const nextState = !currentIsArmed;
+    const toastId = toast.loading(nextState ? 'SYSTEM ARMING...' : 'SYSTEM DISARMING...');
+    try {
+      const result = await toggleSystemArm(nextState);
+      if (result.status === 'success') {
+        useTradingStore.getState().setIsArmed(result.is_armed);
+        toast.success(nextState ? 'SYSTEM ARMED' : 'SYSTEM DISARMED', {
+          id: toastId,
+          description: nextState
+            ? '자동 매매가 활성화되었습니다.'
+            : '시스템이 안전 관제 모드로 전환되었습니다.',
+        });
+      }
+    } catch {
+      toast.error('ARM 상태 변경 실패', { id: toastId });
+    }
+  }, []);
+
+  const handleClosePosition = useCallback(
+    async (ticker: string) => {
+      toast(`🛑 ${ticker} 청산 확인`, {
+        description: '이 포지션을 시장가로 즉시 청산하시겠습니까?',
+        action: {
+          label: '청산 실행',
+          onClick: async () => {
+            const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
+            try {
+              const result = await closePosition(ticker);
+              if (result?.status === 'success' || result?.symbol || result?.id) {
+                toast.success(`${ticker} 청산 성공`, { id: toastId });
+                loadDashboardData();
+              } else {
+                toast.error(result?.error || '청산 실패', { id: toastId });
+              }
+            } catch {
+              toast.error('청산 에러', { id: toastId });
+            }
+          },
+        },
+      });
+    },
+    [loadDashboardData],
+  );
+
+  const handleAddDiscoveryToWatchlist = useCallback(
+    async (e: React.MouseEvent, stock: DiscoveryStock) => {
+      e.stopPropagation();
+      const ticker: string = stock.ticker;
+      if (addingTickersRef.current.has(ticker)) return;
+      addingTickersRef.current.add(ticker);
+      setAddingTickers(new Set(addingTickersRef.current));
+      try {
+        await addToWatchlist(
+          ticker,
+          undefined,
+          'WATCHING',
+          undefined,
+          undefined,
+          undefined,
+          stock.dna_score ?? undefined,
+        );
+        toast.success(`${ticker} 관심종목 등록`);
+        const wl = await getWatchlist();
+        setWatchlistRaw(wl);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '알 수 없는 에러';
+        toast.error(`${ticker} 등록 실패`, { description: msg });
+      } finally {
+        addingTickersRef.current.delete(ticker);
+        setAddingTickers(new Set(addingTickersRef.current));
+      }
+    },
+    [setWatchlistRaw],
+  );
+
+  return {
+    // State
+    loading,
+    isArmed,
+    isMarketOpen,
+    isSettingsOpen,
+    lastFetchedTime,
+    discoveryStocks,
+    livePositions,
+    liveHistory,
+    pennyScanStatus,
+    edgeAlert,
+    terminalData,
+    chartRange,
+    addingTickers,
+
+    // Derived
+    displayedAccount,
+    displayedWinRate,
+    displayedTotalTrades,
+    watchlistItems,
+    watchlistedTickers,
+    totalPnl,
+    investedCapital,
+    concentrationPct,
+    chartData,
+
+    // Actions
+    setIsSettingsOpen,
+    setChartRange,
+    setTerminalData,
+    setEdgeAlert,
+    setWatchlistRaw,
+    loadDashboardData,
+
+    // Handlers
+    handleDeepDive,
+    handleLiveHuntingTrigger,
+    handleToggleArm,
+    handleClosePosition,
+    handleAddDiscoveryToWatchlist,
+    isHunting,
+    navigate,
+  };
+}
