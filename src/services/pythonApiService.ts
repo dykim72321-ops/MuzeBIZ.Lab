@@ -17,6 +17,7 @@ import type {
   BrokerPositionRaw,
   ClosedTradeRaw,
   ClosePositionResponse,
+  PaperSellResponse,
   ManualOrderRequest,
   ManualOrderResponse,
   AlpacaQuoteResponse,
@@ -196,7 +197,7 @@ export async function fetchDiscoveries(
 export async function triggerHunt(): Promise<{ success: boolean; message: string }> {
   try {
     const data = await adminApiFetch('/api/quant/scan', 'POST');
-    return { success: true, message: data.message || 'Hunt triggered!' };
+    return { success: true, message: (data.message as string) || 'Hunt triggered!' };
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Network error';
     console.error('[PythonAPI] Hunt trigger error:', error);
@@ -326,8 +327,8 @@ export async function fetchAlpacaQuotes(tickers: string[]): Promise<AlpacaBatchQ
 /**
  * 페이퍼 트레이딩 포지션 수동 청산
  */
-export async function sellPaperPosition(ticker: string): Promise<ClosePositionResponse> {
-  return apiClient.broker.post<ClosePositionResponse>('/api/broker/paper/sell', { ticker });
+export async function sellPaperPosition(ticker: string): Promise<PaperSellResponse> {
+  return apiClient.broker.post<PaperSellResponse>('/api/broker/paper/sell', { ticker });
 }
 
 /**

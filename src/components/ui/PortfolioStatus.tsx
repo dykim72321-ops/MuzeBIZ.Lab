@@ -53,8 +53,8 @@ export const PortfolioStatus = () => {
         fetchPaperHistory(),
       ]);
       if (acc) setAccount(acc);
-      setPositions(Array.isArray(pos) ? pos : []);
-      setHistory(Array.isArray(hist) ? hist : []);
+      setPositions(Array.isArray(pos) ? (pos as any[]) : []);
+      setHistory(Array.isArray(hist) ? (hist as any[]) : []);
     } catch (err) {
       console.error('Portfolio fetch error:', err);
     } finally {

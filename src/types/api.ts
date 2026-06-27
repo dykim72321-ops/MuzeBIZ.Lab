@@ -73,6 +73,16 @@ export interface ClosePositionResponse {
   error?: string;
 }
 
+/** POST /api/broker/paper/sell */
+export interface PaperSellResponse {
+  status: 'success' | 'error';
+  ticker: string;
+  exit_price: number;
+  pnl_pct: number;
+  profit_amt: number;
+  error?: string;
+}
+
 /** POST /api/broker/order */
 export interface ManualOrderRequest {
   ticker: string;

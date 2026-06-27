@@ -125,7 +125,7 @@ function mapClosedTrades(raw: ClosedTradeRaw[]): PaperHistory[] {
 
 // ─── Store ───────────────────────────────────────────────────────────────────
 
-export const useTradingStore = create<TradingState>((set, get) => ({
+export const useTradingStore = create<TradingState>((set) => ({
   // ── Initial State ──
   isArmed: false,
   isMarketOpen: false,

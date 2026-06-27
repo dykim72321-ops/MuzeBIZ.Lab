@@ -68,16 +68,21 @@ export const LiveExecutionCenter = () => {
       ]);
       setSignals(s || []);
 
-      const transformedPaperPos = pp.map(pos => ({
-        ...pos,
-        quantity: pos.units,
-        unrealized_pl: (pos.current_price - pos.entry_price) * pos.units,
-        unrealized_plpc: ((pos.current_price / pos.entry_price) - 1) * 100,
-        is_paper: true
-      }));
+      const transformedPaperPos = pp.map(pos => {
+        const cp = Number(pos.current_price ?? pos.entry_price);
+        const ep = Number(pos.entry_price);
+        const u = Number(pos.units);
+        return {
+          ...pos,
+          quantity: u,
+          unrealized_pl: (cp - ep) * u,
+          unrealized_plpc: ((cp / ep) - 1) * 100,
+          is_paper: true
+        };
+      });
 
-      setPositions([...transformedPaperPos, ...(brokerPositions || [])]);
-      setHistory([...(ph || []), ...(brokerOrders || [])]);
+      setPositions([...transformedPaperPos, ...(brokerPositions || [])] as any[]);
+      setHistory([...(ph || []), ...(brokerOrders || [])] as any[]);
     } catch (err) {
       console.error('Failed to load terminal data:', err);
     } finally {
@@ -88,8 +93,8 @@ export const LiveExecutionCenter = () => {
   const fetchAccount = async () => {
     try {
       const paperAcc = await fetchPaperAccount();
-      if (paperAcc && !paperAcc.error) {
-        setAccount(paperAcc);
+      if (paperAcc) {
+        setAccount(paperAcc as any);
         setBrokerConnected(true);
         return;
       }
@@ -97,12 +102,12 @@ export const LiveExecutionCenter = () => {
       const data = await fetchBrokerAccount();
       if (data && !data.error) {
         setAccount({
-          cash_available: data.cash_available ?? data.buying_power ?? 0,
-          total_assets: data.total_assets ?? data.equity ?? 0,
+          cash_available: data.buying_power ?? 0,
+          total_assets: data.equity ?? 0,
           today_pnl: data.today_pnl ?? 0,
           today_pnl_pct: data.today_pnl_pct ?? 0,
           current_drawdown: data.current_drawdown ?? 0,
-        });
+        } as any);
         setBrokerConnected(true);
       } else if (data?.error) {
         setBrokerConnected(false);

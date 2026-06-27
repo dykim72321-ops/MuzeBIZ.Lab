@@ -206,14 +206,14 @@ function formatMarketCap(value: number): string {
 async function fetchAlpacaQuoteEnriched(ticker: string): Promise<Stock | null> {
   try {
     const alpacaData = await fetchAlpacaQuote(ticker);
-    if (!alpacaData || alpacaData.error || !alpacaData.price) {
+    if (!alpacaData || !alpacaData.last_price) {
       return null;
     }
 
-    const price = alpacaData.price;
+    const price = alpacaData.last_price;
     let changePercent = 0;
     let prevClose = 0;
-    let volume = alpacaData.size;
+    let volume = alpacaData.volume;
 
     // Fast client-side yfinance query to get previous close for changePercent calculation
     try {
@@ -255,8 +255,8 @@ async function fetchAlpacaQuoteEnriched(ticker: string): Promise<Stock | null> {
         institutionalOwnership: 0,
         bidPrice: alpacaData.bid_price,
         askPrice: alpacaData.ask_price,
-        bidSize: alpacaData.bid_size,
-        askSize: alpacaData.ask_size,
+        bidSize: 0,
+        askSize: 0,
       }
     };
 
@@ -292,19 +292,19 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
   if (tickers.length === 0) return [];
   try {
     const alpacaMap = await fetchAlpacaQuotes(tickers);
-    if (!alpacaMap || alpacaMap.error) {
+    if (!alpacaMap || Object.keys(alpacaMap).length === 0) {
       return [];
     }
 
     // We can fetch details for each ticker in parallel
     const promises = tickers.map(async (ticker) => {
       const alpacaData = alpacaMap[ticker];
-      if (!alpacaData || !alpacaData.price) return null;
+      if (!alpacaData || !alpacaData.last_price) return null;
 
-      const price = alpacaData.price;
+      const price = alpacaData.last_price;
       let changePercent = 0;
       let prevClose = 0;
-      let volume = alpacaData.size;
+      let volume = alpacaData.volume;
 
       // Fast client-side yfinance query to get previous close for changePercent calculation
       try {
@@ -346,8 +346,8 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
           institutionalOwnership: 0,
           bidPrice: alpacaData.bid_price,
           askPrice: alpacaData.ask_price,
-          bidSize: alpacaData.bid_size,
-          askSize: alpacaData.ask_size,
+          bidSize: 0,
+          askSize: 0,
         }
       };
       
