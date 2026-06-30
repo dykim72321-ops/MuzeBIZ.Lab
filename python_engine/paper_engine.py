@@ -2,20 +2,23 @@ from supabase import Client
 from webhook_manager import WebhookManager
 import asyncio
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_NY_TZ = ZoneInfo(
+    "America/New_York"
+)  # 모듈 레벨 캐시 — ZoneInfo는 호출마다 재생성 불필요
 
 INITIAL_CAPITAL = 100000.0
 
 # ── 포지션 사이징 / 리스크 상수 ──────────────────────────────────────────────
 KELLY_FRACTION = 0.15  # 가용 현금 대비 진입 비중 (3/4 Kelly ≈ 15%)
 MIN_BUY_BUDGET = 10.0  # 최소 주문 금액 (달러)
-MAX_BUY_BUDGET = (
-    500.0  # 종목당 최대 매수 금액 (달러) — 단일 종목 집중 리스크 완화 ($1000→$500)
-)
-MAX_CONCURRENT_POSITIONS = 10  # 동시 보유 최대 종목 수
-MAX_CONCENTRATION_PCT = (
-    0.50  # 총 자산 대비 투입 비중 상한 (50% 초과 시 신규 진입 차단, 80%→50%)
-)
-TS_INIT_PCT = 0.95  # 초기 트레일링 스탑: 진입가 × 95% (-5%)
+MAX_BUY_BUDGET = 5000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_BUDGET × MAX_CONCURRENT = 총 배포 상한
+# Kelly 15% × $100k = $15k → MAX_BUY_BUDGET $5k 캡으로 실질 포지션당 $5k 고정
+# $5k × 15 = $75k = MAX_CONCENTRATION 75% → 내부 수학 완결
+MAX_CONCURRENT_POSITIONS = 15  # 동시 보유 최대 종목 수 (실질 도달 가능 상한)
+MAX_CONCENTRATION_PCT = 0.75  # 총 자산 대비 투입 비중 상한 (75% = 15종목 × $5k / $100k)
+TS_INIT_PCT = 0.93  # 초기 트레일링 스탑: 진입가 × 93% (-7%, ATR 스탑에 여유 공간 제공)
 TS_TRAIL_PCT = 0.95  # 최고가 갱신 시 TS 추적 비율: highest × 95%
 SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
 SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
@@ -194,25 +197,34 @@ class PaperTradingManager:
         except Exception as e:
             print(f"⚠️ [Watchlist Sync SL] {ticker}: {e}")
 
-    REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간 (빈번한 매매용 단축)
+    REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간
+    # PDT Rule은 마진 계좌 $25k 미만에만 적용 — $100k 가상 계좌에서는 불필요
+    ENFORCE_PDT_SAFEGUARD = False
 
     async def _is_in_cooldown(self, ticker: str) -> bool:
-        """최근 청산 이후 REENTRY_COOLDOWN_MINUTES 이내이면 True 반환."""
+        """최근 청산 이후 쿨다운 여부 반환 (REENTRY_COOLDOWN_MINUTES 기준)."""
         try:
             res = await asyncio.to_thread(
                 self.supabase.table("paper_history")
-                .select("created_at")
+                .select("closed_at")
                 .eq("ticker", ticker)
-                .order("created_at", desc=True)
+                .order("closed_at", desc=True)
                 .limit(1)
                 .execute
             )
             if not res.data:
                 return False
-            closed_at_str = res.data[0].get("created_at")
+            closed_at_str = res.data[0].get("closed_at")
             if not closed_at_str:
                 return False
             closed_at = datetime.fromisoformat(closed_at_str.replace("Z", "+00:00"))
+
+            if self.ENFORCE_PDT_SAFEGUARD:
+                closed_at_est = closed_at.astimezone(_NY_TZ)
+                now_est = datetime.now(_NY_TZ)
+                if closed_at_est.date() == now_est.date():
+                    return True
+
             elapsed = (datetime.now(timezone.utc) - closed_at).total_seconds()
             return elapsed < self.REENTRY_COOLDOWN_MINUTES * 60
         except Exception as e:
@@ -437,6 +449,90 @@ class PaperTradingManager:
                 )
                 await self._sync_watchlist_exit(ticker)
                 return
+
+            # A-1. Time-Decay Exit
+            # 조건: Scale-Out 미완료 & 진입 후 일정 시간 경과 & ±2% 횡보 구간
+            # Scale-Out 완료 포지션은 이미 수익 확보 단계이므로 TS가 단독 관리 — Time-Decay 스킵
+            if not is_scaled_out and pos.get("created_at"):
+                try:
+                    now_utc = datetime.now(timezone.utc)
+                    created_at_dt = datetime.fromisoformat(
+                        pos["created_at"].replace("Z", "+00:00")
+                    )
+
+                    # 오버나이트 홀딩: 진입 시각 기준이 아닌 오늘 장 시작(09:30 ET) 기준으로 리셋
+                    # → 전날 +5% 수익으로 홀딩한 포지션이 장 시작 즉시 Time-Decay 발동하는 것 방지
+                    created_at_et = created_at_dt.astimezone(_NY_TZ)
+                    now_et = now_utc.astimezone(_NY_TZ)
+                    if created_at_et.date() < now_et.date():
+                        market_open_et = now_et.replace(
+                            hour=9, minute=30, second=0, microsecond=0
+                        )
+                        effective_start_utc = market_open_et.astimezone(timezone.utc)
+                    else:
+                        effective_start_utc = created_at_dt
+
+                    elapsed_minutes = (
+                        now_utc - effective_start_utc
+                    ).total_seconds() / 60
+                    unrealized_pnl_pct = (price / entry_price - 1) * 100
+
+                    # 페니 종목: 90분 (변동성 높아 방향 형성에 더 오래 걸림)
+                    # 일반 종목: 60분
+                    decay_threshold = 90 if is_penny else 60
+
+                    if (
+                        elapsed_minutes > decay_threshold
+                        and -2.0 <= unrealized_pnl_pct <= 2.0
+                    ):
+                        fill_exit_price = _apply_slippage(
+                            price, is_buy=False, is_penny=is_penny
+                        )
+                        profit_cash = units * fill_exit_price
+                        pnl_pct = (fill_exit_price / entry_price - 1) * 100
+                        profit_amt = (fill_exit_price - entry_price) * units
+
+                        new_cash = acc["cash_available"] + profit_cash
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_account")
+                            .update({"cash_available": new_cash})
+                            .eq("id", acc["id"])
+                            .execute
+                        )
+                        history_data = {
+                            "ticker": ticker,
+                            "entry_price": entry_price,
+                            "exit_price": fill_exit_price,
+                            "signal_price": price,
+                            "slippage_pct": (fill_exit_price / price - 1) * 100,
+                            "pnl_pct": pnl_pct,
+                            "profit_amt": profit_amt,
+                            "exit_reason": "Time-Decay Exit",
+                        }
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_history")
+                            .insert(history_data)
+                            .execute
+                        )
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_positions")
+                            .delete()
+                            .eq("ticker", ticker)
+                            .execute
+                        )
+                        await self.webhook.send_alert(
+                            title=f"⏳ [PAPER TIME-DECAY] {ticker}",
+                            description=(
+                                f"청산가: ${fill_exit_price:.4f} | 수익률: {pnl_pct:.2f}%\n"
+                                f"보유 시간: {int(elapsed_minutes)}분 (기준: {decay_threshold}분)\n"
+                                f"사유: 방향성 상실 (횡보 ±2%) — 슬롯 반납"
+                            ),
+                            color=0x7F8C8D,
+                        )
+                        await self._sync_watchlist_exit(ticker)
+                        return
+                except Exception as e:
+                    print(f"⚠️ [Time-Decay] {ticker}: {e}")
 
             # A. TS 업데이트 (최고가 갱신 시 Chandelier Exit 또는 % 방식으로 상향)
             # ATR이 공급된 경우: Highest - k×ATR (변동성 적응형, 스탑헌팅 내성)

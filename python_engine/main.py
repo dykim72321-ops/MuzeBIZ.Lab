@@ -262,7 +262,7 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
             res = (
                 app_state.supabase.table("paper_history")
                 .select("pnl_pct")
-                .order("created_at", desc=True)
+                .order("closed_at", desc=True)
                 .limit(50)
                 .execute()
             )
@@ -895,23 +895,55 @@ async def on_minute_bar_closed(bar):
         if len(df_hist) < 35:
             return
 
-        # ── avg_daily_volume 지연 초기화 ─────────────────────────────────────
-        # warm_up 대상이 아니었던 종목은 avg_daily_volume=0 → RVOL=1.0 고정 버그 방지.
-        # 첫 35번째 봉 시점에 한 번만 yfinance로 조회하여 캐시에 저장.
+        # ── avg_daily_volume + volume_multiplier 지연 초기화 ─────────────────
+        # warm_up 대상이 아닌 cold ticker가 스트림에 유입되면:
+        #   avg_daily_volume=0  → RVOL=1.0 고정
+        #   volume_multiplier=1.0 → IEX 거래량(실제의 ~15%) 그대로 사용
+        # → RVOL ≈ 0.15x 실제값 → MomentumValidator RVOL≥1.5 체크에서 전량 차단됨
+        # 첫 35번째 봉 도달 시 한 번만 보정 (yfinance 1m + 30d 동시 조회)
         if ticker_symbol not in _candle_state.avg_daily_volume:
             try:
                 tk = yf.Ticker(ticker_symbol)
-                daily = await asyncio.to_thread(tk.history, period="30d", interval="1d")
+                daily, yf_1m = await asyncio.gather(
+                    asyncio.to_thread(tk.history, period="30d", interval="1d"),
+                    asyncio.to_thread(tk.history, period="1d", interval="1m"),
+                )
+
+                # 1) avg_daily_volume 설정
                 if not daily.empty:
                     _candle_state.avg_daily_volume[ticker_symbol] = float(
                         daily["Volume"].mean()
                     )
-                    print(
-                        f"📈 [AvgVol-lazy] {ticker_symbol}: "
-                        f"{_candle_state.avg_daily_volume[ticker_symbol]:,.0f} avg daily shares"
-                    )
                 else:
                     _candle_state.avg_daily_volume[ticker_symbol] = 0.0
+
+                # 2) volume_multiplier 보정 — Alpaca IEX 스트림 종목 한정
+                # _raw_iex_volume 컬럼은 update()가 IEX 바를 추가할 때만 생성됨
+                # (yfinance fallback warm_up 종목에는 없음 → multiplier 이미 정확)
+                if (
+                    _candle_state.volume_multiplier.get(ticker_symbol, 1.0) == 1.0
+                    and "_raw_iex_volume" in df_hist.columns
+                    and not yf_1m.empty
+                ):
+                    iex_total = float(df_hist["_raw_iex_volume"].sum())
+                    yf_total = float(yf_1m["Volume"].sum())
+                    if iex_total > 0 and yf_total > iex_total:
+                        multiplier = min(yf_total / iex_total, 20.0)
+                        _candle_state.volume_multiplier[ticker_symbol] = multiplier
+                        # 누적된 히스토리 거래량 소급 보정 (df_hist는 history[ticker]의 참조)
+                        _candle_state.history[ticker_symbol]["Volume"] = (
+                            _candle_state.history[ticker_symbol]["_raw_iex_volume"]
+                            * multiplier
+                        )
+                        print(
+                            f"📊 [VolMul-lazy] {ticker_symbol}: {multiplier:.1f}x "
+                            f"(IEX→Full Market, 소급 보정 {len(df_hist)}봉)"
+                        )
+
+                print(
+                    f"📈 [AvgVol-lazy] {ticker_symbol}: "
+                    f"{_candle_state.avg_daily_volume[ticker_symbol]:,.0f} avg daily shares"
+                )
             except Exception as avg_err:
                 _candle_state.avg_daily_volume[ticker_symbol] = 0.0
                 print(f"⚠️ [AvgVol-lazy] {ticker_symbol}: {avg_err}")

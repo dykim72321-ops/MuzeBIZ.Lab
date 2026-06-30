@@ -68,20 +68,23 @@ export const WatchlistItemCard = ({
   } = dna;
 
   const currentPrice = stock?.price || 0;
-  const buyPrice = item.buyPrice || stock?.price || 0;
-  
+  const hasEntryPrice = item.buyPrice != null && item.buyPrice > 0;
+  const buyPrice = hasEntryPrice ? item.buyPrice! : 0;
+
   const chartData = useMemo(() => {
-    if (!stock?.history) return [];
-    const data = stock.history.map(h => ({ value: h.price, date: h.date }));
+    const history = stock?.history;
+    const data = history ? history.map(h => ({ value: h.price, date: h.date })) : [];
     if (currentPrice > 0 && (data.length === 0 || currentPrice !== data[data.length - 1].value)) {
       data.push({ value: currentPrice, date: new Date().toISOString() });
     }
     return data;
   }, [stock?.history, currentPrice]);
 
-  const currentReturnPct = buyPrice > 0 ? ((currentPrice - buyPrice) / buyPrice) * 100 : 0;
-  const isProfit = currentReturnPct > 0.01;
-  const isLoss = currentReturnPct < -0.01;
+  const currentReturnPct = hasEntryPrice && buyPrice > 0
+    ? ((currentPrice - buyPrice) / buyPrice) * 100
+    : null;
+  const isProfit = currentReturnPct !== null && currentReturnPct > 0.01;
+  const isLoss = currentReturnPct !== null && currentReturnPct < -0.01;
 
   if (isLoading) {
     return (
@@ -227,7 +230,11 @@ export const WatchlistItemCard = ({
                     "font-mono text-2xl font-bold tracking-tight tabular-nums leading-none",
                     isProfit ? "text-emerald-500" : isLoss ? "text-rose-500" : "text-slate-900"
                   )}>
-                    <span>{isProfit ? '+' : ''}{currentReturnPct.toFixed(1)}%</span>
+                    <span>
+                      {currentReturnPct !== null
+                        ? `${isProfit ? '+' : ''}${currentReturnPct.toFixed(1)}%`
+                        : '—'}
+                    </span>
                   </div>
                 </div>
                 <div>
@@ -341,7 +348,9 @@ export const WatchlistItemCard = ({
                         "text-lg font-bold font-mono tracking-tight leading-none mb-1",
                         isProfit ? "text-emerald-500" : isLoss ? "text-rose-500" : "text-slate-900"
                       )}>
-                        {isProfit ? '+' : ''}{currentReturnPct.toFixed(1)}%
+                        {currentReturnPct !== null
+                          ? `${isProfit ? '+' : ''}${currentReturnPct.toFixed(1)}%`
+                          : '—'}
                       </div>
                     </div>
 

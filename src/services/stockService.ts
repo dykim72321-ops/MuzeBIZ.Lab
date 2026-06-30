@@ -13,6 +13,10 @@ export const WATCHLIST_TICKERS = [
 ];
 
 const cache = new Map<string, { data: Stock; timestamp: number }>();
+// 🆕 장기 보존 히스토리 캐시 (세션 유지 동안 영구 캐시)
+const historyCache = new Map<string, { date: string; price: number }[]>();
+// 🆕 전일 종가 캐시 (세션 유지 동안 영구 캐시 - 하루 한 번만 변동)
+const prevCloseCache = new Map<string, number>();
 
 function getCacheDuration(): number {
   const now = new Date();
@@ -22,6 +26,21 @@ function getCacheDuration(): number {
   // EST Market Hours are roughly 14:30 to 21:00 UTC
   const isMarketHours = !isWeekend && (hour > 14 || (hour === 14 && now.getUTCMinutes() >= 30)) && hour < 21;
   return isMarketHours ? 2 * 60 * 1000 : 15 * 60 * 1000;
+}
+
+// 🆕 Helper to prevent infinite hanging of Vite proxy / external APIs
+async function fetchWithTimeout(url: string, options: RequestInit & { timeout?: number } = {}): Promise<Response> {
+  const { timeout = 3000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...fetchOptions, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
 }
 
 // Finnhub API Key
@@ -36,8 +55,9 @@ async function fetchFromFinnhub(ticker: string): Promise<Stock | null> {
   }
 
   try {
-    const response = await fetch(
-      `https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_API_KEY}`
+    const response = await fetchWithTimeout(
+      `https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_API_KEY}`,
+      { timeout: 3000 }
     );
 
     if (!response.ok) {
@@ -89,7 +109,7 @@ async function fetchFromFinnhub(ticker: string): Promise<Stock | null> {
 async function fetchFromYahooDirect(ticker: string): Promise<Stock | null> {
   try {
     const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, { timeout: 3000 });
     if (!res.ok) return null;
     const json = await res.json();
     const result = json?.chart?.result?.[0];
@@ -218,7 +238,7 @@ async function fetchAlpacaQuoteEnriched(ticker: string): Promise<Stock | null> {
     // Fast client-side yfinance query to get previous close for changePercent calculation
     try {
       const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
-      const res = await fetch(url);
+      const res = await fetchWithTimeout(url, { timeout: 3000 });
       if (res.ok) {
         const json = await res.json();
         const meta = json?.chart?.result?.[0]?.meta;
@@ -296,66 +316,83 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
       return [];
     }
 
-    // We can fetch details for each ticker in parallel
-    const promises = tickers.map(async (ticker) => {
-      const alpacaData = alpacaMap[ticker];
-      if (!alpacaData || !alpacaData.last_price) return null;
+    // 🆕 Chunk Yahoo Finance requests to prevent rate limit and connection queueing
+    const validStocks: Stock[] = [];
+    const CHUNK_SIZE = 5;
 
-      const price = alpacaData.last_price;
-      let changePercent = 0;
-      let prevClose = 0;
-      let volume = alpacaData.volume;
+    for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
+      const chunk = tickers.slice(i, i + CHUNK_SIZE);
+      const chunkPromises = chunk.map(async (ticker) => {
+        const alpacaData = alpacaMap[ticker];
+        if (!alpacaData || !alpacaData.last_price) return null;
 
-      // Fast client-side yfinance query to get previous close for changePercent calculation
-      try {
-        const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const json = await res.json();
-          const meta = json?.chart?.result?.[0]?.meta;
-          if (meta) {
-            prevClose = meta.chartPreviousClose ?? meta.previousClose ?? 0;
-            if (prevClose > 0) {
-              changePercent = ((price - prevClose) / prevClose) * 100;
+        const price = alpacaData.last_price;
+        let changePercent = 0;
+        let prevClose = prevCloseCache.get(ticker) || 0;
+        let volume = alpacaData.volume;
+
+        // Fetch prevClose from Yahoo only if we don't have it cached
+        if (prevClose === 0) {
+          try {
+            const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
+            const res = await fetchWithTimeout(url, { timeout: 3000 });
+            if (res.ok) {
+              const json = await res.json();
+              const meta = json?.chart?.result?.[0]?.meta;
+              if (meta) {
+                prevClose = meta.chartPreviousClose ?? meta.previousClose ?? 0;
+                if (prevClose > 0) {
+                  prevCloseCache.set(ticker, prevClose);
+                }
+                volume = meta.regularMarketVolume ?? volume;
+              }
             }
-            volume = meta.regularMarketVolume ?? volume;
+          } catch (yErr) {
+            // ignore
           }
         }
-      } catch (yErr) {
-        // ignore
-      }
 
-      const dnaScore = calculateDnaScore(price, changePercent, volume, 0);
-
-      const stock: Stock = {
-        id: ticker,
-        ticker: ticker,
-        name: getCompanyName(ticker),
-        price: price,
-        changePercent: changePercent,
-        volume: volume,
-        marketCap: 'N/A',
-        dnaScore: dnaScore,
-        currentHigh: price,
-        sector: getSector(ticker),
-        description: '',
-        relevantMetrics: {
-          debtToEquity: 0,
-          rndRatio: 0,
-          sentimentScore: 0,
-          institutionalOwnership: 0,
-          bidPrice: alpacaData.bid_price,
-          askPrice: alpacaData.ask_price,
-          bidSize: 0,
-          askSize: 0,
+        if (prevClose > 0) {
+          changePercent = ((price - prevClose) / prevClose) * 100;
         }
-      };
-      
-      return stock;
-    });
 
-    const parsed = await Promise.all(promises);
-    const validStocks = parsed.filter((s): s is Stock => s !== null);
+        const dnaScore = calculateDnaScore(price, changePercent, volume, 0);
+
+        const stock: Stock = {
+          id: ticker,
+          ticker: ticker,
+          name: getCompanyName(ticker),
+          price: price,
+          changePercent: changePercent,
+          volume: volume,
+          marketCap: 'N/A',
+          dnaScore: dnaScore,
+          currentHigh: price,
+          sector: getSector(ticker),
+          description: '',
+          relevantMetrics: {
+            debtToEquity: 0,
+            rndRatio: 0,
+            sentimentScore: 0,
+            institutionalOwnership: 0,
+            bidPrice: alpacaData.bid_price,
+            askPrice: alpacaData.ask_price,
+            bidSize: 0,
+            askSize: 0,
+          }
+        };
+        
+        return stock;
+      });
+
+      const parsed = await Promise.all(chunkPromises);
+      validStocks.push(...parsed.filter((s): s is Stock => s !== null));
+
+      // Wait between chunks to avoid Yahoo rate limits and browser queueing
+      if (i + CHUNK_SIZE < tickers.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
 
     // Batch fetch realtime signals for technical indicators
     if (validStocks.length > 0) {
@@ -539,6 +576,31 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
   const fetchedTickers = new Set(alpacaStocks.map(s => s.ticker));
   const missingTickers = uniqueTickers.filter(t => !fetchedTickers.has(t));
 
+  // Alpaca batch does not include price history — fetch it separately if requested
+  if (historyRange && alpacaStocks.length > 0) {
+    const rangeMap: Record<string, number> = { '5d': 5, '1mo': 30, '3mo': 90, '6mo': 180, '1y': 365 };
+    const days = rangeMap[historyRange] ?? 30;
+    
+    // 🆕 Chunk history fetching to avoid overwhelming API rate limits and browser queues
+    const HISTORY_CHUNK_SIZE = 5;
+    for (let i = 0; i < alpacaStocks.length; i += HISTORY_CHUNK_SIZE) {
+      const chunk = alpacaStocks.slice(i, i + HISTORY_CHUNK_SIZE);
+      await Promise.all(
+        chunk.map(async stock => {
+          try {
+            stock.history = await fetchStockHistory(stock.ticker, 'D', days);
+          } catch {
+            stock.history = [];
+          }
+        })
+      );
+      // Wait shortly between chunks to avoid rate limit spikes
+      if (i + HISTORY_CHUNK_SIZE < alpacaStocks.length) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    }
+  }
+
   const results: Stock[] = [...alpacaStocks];
 
   // Dynamically adjust chunk size based on API provider limits
@@ -632,16 +694,20 @@ export async function fetchMultipleStocks(tickers: string[]): Promise<Stock[]> {
 async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3): Promise<Response> {
   let delay = 2000; // Start with 2s for Yahoo stability
   for (let i = 0; i < maxRetries; i++) {
-    const res = await fetch(url, options);
-    if (res.status === 429 && i < maxRetries - 1) {
-      console.warn(`[Retry] Rate limited (429) on ${url}. Retrying in ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      delay *= 2; // Exponential backoff
-      continue;
+    try {
+      const res = await fetchWithTimeout(url, { ...options, timeout: 5000 });
+      if (res.status === 429 && i < maxRetries - 1) {
+        console.warn(`[Retry] Rate limited (429) on ${url}. Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2; // Exponential backoff
+        continue;
+      }
+      return res;
+    } catch (e) {
+      if (i === maxRetries - 1) throw e;
     }
-    return res;
   }
-  return fetch(url, options); // Final attempt
+  return fetchWithTimeout(url, { ...options, timeout: 5000 }); // Final attempt
 }
 
 // Final fallback: Generate realistic-looking wavy data if all APIs fail
@@ -682,9 +748,10 @@ function generateSimulatedHistory(_ticker: string, currentPrice: number, changeP
 
 export async function fetchStockHistory(ticker: string, resolution: string = 'D', days: number = 30): Promise<{ date: string; price: number }[]> {
   try {
-    const cached = cache.get(ticker);
-    if (cached && cached.data.history && cached.data.history.length > 5) {
-      return cached.data.history;
+    // 🆕 Check long-term history cache first
+    const cachedHistory = historyCache.get(`${ticker}-${days}`);
+    if (cachedHistory && cachedHistory.length > 5) {
+      return cachedHistory;
     }
 
     let history: { date: string; price: number }[] = [];
@@ -694,8 +761,9 @@ export async function fetchStockHistory(ticker: string, resolution: string = 'D'
       const to = Math.floor(Date.now() / 1000);
       const from = to - (days * 24 * 60 * 60);
       try {
-        const finnhubRes = await fetch(
-          `https://finnhub.io/api/v1/stock/candle?symbol=${ticker}&resolution=${resolution}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`
+        const finnhubRes = await fetchWithTimeout(
+          `https://finnhub.io/api/v1/stock/candle?symbol=${ticker}&resolution=${resolution}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`,
+          { timeout: 4000 }
         );
 
         if (finnhubRes.ok) {
@@ -740,14 +808,15 @@ export async function fetchStockHistory(ticker: string, resolution: string = 'D'
     }
 
     // 3. ULTIMATE FALLBACK: Simulated realistic wavy data
-    // This ensures a premium UI experience even when APIs are down/limited.
-    if (history.length === 0 && cached) {
-       console.log(`✨ [Simulated History] Generating wavy fallback data for ${ticker}`);
-       history = generateSimulatedHistory(ticker, cached.data.price, cached.data.changePercent);
+    if (history.length === 0) {
+      console.log(`✨ [Simulated History] Generating wavy fallback data for ${ticker}`);
+      const liveCache = cache.get(ticker);
+      history = generateSimulatedHistory(ticker, liveCache?.data.price ?? 10, liveCache?.data.changePercent ?? 0);
     }
 
-    if (cached && history.length > 0) {
-      cached.data.history = history;
+    // 🆕 Save to long-term history cache if we got valid data
+    if (history.length > 5) {
+      historyCache.set(`${ticker}-${days}`, history);
     }
 
     return history;
