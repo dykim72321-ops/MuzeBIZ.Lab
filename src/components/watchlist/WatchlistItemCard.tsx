@@ -83,7 +83,7 @@ export const WatchlistItemCard = ({
   const isProfit = currentReturnPct > 0.01;
   const isLoss = currentReturnPct < -0.01;
 
-  if (isLoading || !stock) {
+  if (isLoading) {
     return (
       <div className="cursor-wait animate-pulse">
         <div className="border-b border-slate-100 py-12">
@@ -102,6 +102,23 @@ export const WatchlistItemCard = ({
             <div className="h-24 bg-slate-50" />
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (!stock) {
+    return (
+      <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-slate-900 font-mono uppercase">{item.ticker}</h3>
+          <p className="text-xs font-mono text-slate-400 mt-1">시세 데이터 수신 불가</p>
+        </div>
+        <button
+          onClick={() => onRemove(item.ticker)}
+          className="text-slate-300 hover:text-rose-500 transition-colors cursor-pointer"
+        >
+          <Trash2 className="w-5 h-5" />
+        </button>
       </div>
     );
   }

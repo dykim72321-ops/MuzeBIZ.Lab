@@ -3,9 +3,10 @@ import { AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Zap } from 'lucide-react';
 import { getWatchlist, removeFromWatchlist, addToWatchlist, type WatchlistItem } from '../services/watchlistService';
-import { 
+import {
   fetchMultipleStocksOptimized
 } from '../services/stockService';
+import { supabase } from '../lib/supabase';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { WatchlistItemCard } from '../components/watchlist/WatchlistItemCard';
 import { WatchlistHeader } from '../components/watchlist/WatchlistHeader';
@@ -57,13 +58,42 @@ export const WatchlistPage = () => {
 
   useEffect(() => {
     loadData();
-    
-    // 🆕 Auto-refresh every 30 seconds
+
     const interval = setInterval(() => {
       loadData(true);
     }, 30000);
-    
-    return () => clearInterval(interval);
+
+    // Realtime: EXITED 전환 즉시 제거
+    const channel = supabase
+      .channel('watchlist-orbit')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'watchlist' },
+        (payload) => {
+          const updated = payload.new as { ticker: string; status: string };
+          if (updated.status === 'EXITED') {
+            setWatchlistItems(prev => prev.filter(i => i.ticker !== updated.ticker));
+            setStocks(prev => prev.filter(s => s.ticker !== updated.ticker));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'watchlist' },
+        (payload) => {
+          const deleted = payload.old as { ticker: string };
+          if (deleted?.ticker) {
+            setWatchlistItems(prev => prev.filter(i => i.ticker !== deleted.ticker));
+            setStocks(prev => prev.filter(s => s.ticker !== deleted.ticker));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [loadData]);
 
   const filteredItems = watchlistItems.filter(item => 

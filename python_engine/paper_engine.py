@@ -15,28 +15,28 @@ MAX_CONCURRENT_POSITIONS = 10  # 동시 보유 최대 종목 수
 MAX_CONCENTRATION_PCT = (
     0.50  # 총 자산 대비 투입 비중 상한 (50% 초과 시 신규 진입 차단, 80%→50%)
 )
-TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%)
-TS_TRAIL_PCT = 0.90  # 최고가 갱신 시 TS 추적 비율: highest × 90%
+TS_INIT_PCT = 0.95  # 초기 트레일링 스탑: 진입가 × 95% (-5%)
+TS_TRAIL_PCT = 0.95  # 최고가 갱신 시 TS 추적 비율: highest × 95%
 SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
 SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
 POS_WEIGHT = 0.15  # paper_positions.weight 기록값
 
 # ── Penny Lab 전용 파라미터 ($1 이하 종목 동적 적용) ─────────────────────────
 PENNY_MAX_PRICE = 1.0  # 진입가 ≤ 이 값이면 페니 파라미터 자동 전환
-PENNY_TS_INIT_PCT = 0.85  # 초기 TS: 진입가 × 85% (-15%)
-PENNY_TS_TRAIL_PCT = 0.85  # 최고가 추종 TS: highest × 85%
+PENNY_TS_INIT_PCT = 0.90  # 초기 TS: 진입가 × 90% (-10%)
+PENNY_TS_TRAIL_PCT = 0.90  # 최고가 추종 TS: highest × 90%
 PENNY_BREAKEVEN_TRIGGER = 1.10  # 수익 +10% 달성 시 TS 하한을 진입가(본전)로 락인
-PENNY_SCALE_OUT_RSI = 70  # 1차 매도 RSI 기준 (일반 60 → 페니 70)
-PENNY_SCALE_OUT_PROFIT = 0.20  # 1차 매도 수익률 기준 (+20% OR RSI>70)
-PENNY_TIGHT_TS_PCT = 0.93  # Scale-Out 후 잔여 물량 TS: highest × 93% (-7%)
+PENNY_SCALE_OUT_RSI = 65  # 1차 매도 RSI 기준 (일반 55 → 페니 65)
+PENNY_SCALE_OUT_PROFIT = 0.10  # 1차 매도 수익률 기준 (+10% OR RSI>65)
+PENNY_TIGHT_TS_PCT = 0.95  # Scale-Out 후 잔여 물량 TS: highest × 95% (-5%)
 SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 유예
 
 # ── Chandelier Exit 파라미터 ──────────────────────────────────────────────────
 # 고정 % TS 대신 ATR 기반으로 스탑 라인을 설정 → 변동성 높은 1분봉 스탑헌팅 내성 강화
 # 공식: TS = Highest - k × ATR(14)
 # ATR이 클수록 스탑이 내려가(더 여유롭게) 마켓메이커 노이즈를 필터링
-CHANDELIER_K_NORMAL = 3.0  # 일반 종목: 표준 Chandelier k
-CHANDELIER_K_PENNY = 6.5  # 페니 종목: 승률 개선을 위해 확대 (5.0→6.5, 조기 TS 방지)
+CHANDELIER_K_NORMAL = 2.0  # 일반 종목: 타이트한 Chandelier k (빈번한 매매용)
+CHANDELIER_K_PENNY = 4.0  # 페니 종목: 타이트한 Chandelier k (빈번한 매매용)
 
 # ── [Guide-3] 슬리피지 보정 (보수적 시뮬레이션) ─────────────────────────────
 # 페니 종목은 호가 스프레드가 커서 더 높은 슬리피지 적용
@@ -194,7 +194,7 @@ class PaperTradingManager:
         except Exception as e:
             print(f"⚠️ [Watchlist Sync SL] {ticker}: {e}")
 
-    REENTRY_COOLDOWN_MINUTES = 60  # 청산 후 재진입 금지 시간
+    REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간 (빈번한 매매용 단축)
 
     async def _is_in_cooldown(self, ticker: str) -> bool:
         """최근 청산 이후 REENTRY_COOLDOWN_MINUTES 이내이면 True 반환."""
@@ -249,7 +249,7 @@ class PaperTradingManager:
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
         is_penny_signal = price <= PENNY_MAX_PRICE
-        dna_gate = 70 if is_penny_signal else 80
+        dna_gate = 60 if is_penny_signal else 75
         if (
             signal_type == "BUY"
             and strength == "STRONG"
@@ -380,7 +380,9 @@ class PaperTradingManager:
             # 수익 포지션(현재가 > 진입가)은 익일 홀딩 — 승자를 일찍 자르지 않음
             if signal_type == "SELL" and strength == "EOD_FORCE":
                 unrealized_pnl_pct = (price / entry_price - 1) * 100
-                if unrealized_pnl_pct > 0:
+                if (
+                    unrealized_pnl_pct > 5.0
+                ):  # +5% 이상 수익일 때만 홀딩 (빈번한 매매용)
                     # 수익 중인 포지션: EOD 청산 건너뛰고 익일까지 홀딩
                     await self.webhook.send_alert(
                         title=f"🌙 [PAPER EOD HOLD] {ticker}",
@@ -481,7 +483,7 @@ class PaperTradingManager:
                     rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
                 ) or profit_pct >= PENNY_SCALE_OUT_PROFIT
             else:
-                scale_trigger = rsi > 60
+                scale_trigger = rsi > 55
             sell_slip = SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL
             if (
                 scale_trigger

@@ -439,7 +439,7 @@ export function useDashboardData() {
           ticker,
           undefined,
           'WATCHING',
-          undefined,
+          stock.price ?? undefined,
           undefined,
           undefined,
           stock.dna_score ?? undefined,

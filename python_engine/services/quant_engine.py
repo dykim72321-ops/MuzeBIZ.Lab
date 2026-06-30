@@ -99,7 +99,7 @@ def calculate_advanced_signals(
     score += np.where(
         is_golden,
         20,
-        np.where(is_dead, -20, np.where(macd_diff > macd_diff_prev, 15, -8)),
+        np.where(is_dead, -20, np.where(macd_diff > macd_diff_prev, 18, -8)),
     )
 
     adx_is_bearish = df["-DI"] > df["+DI"]
@@ -133,9 +133,9 @@ def calculate_advanced_signals(
     df["DNA_Score"] = score.clip(0.0, 100.0).round(1)
 
     is_penny = df["Close"] <= 1.0
-    tier1 = (~is_penny) & (df["DNA_Score"] >= 85.0)
-    tier2 = (~is_penny) & (df["DNA_Score"] >= 82.0) & (df["RVOL"] > 2.0)
-    tier_penny = is_penny & (df["DNA_Score"] >= 70.0)
+    tier1 = (~is_penny) & (df["DNA_Score"] >= 80.0)
+    tier2 = (~is_penny) & (df["DNA_Score"] >= 75.0) & (df["RVOL"] > 1.5)
+    tier_penny = is_penny & (df["DNA_Score"] >= 65.0)
     df["Strong_Buy"] = tier1 | tier2 | tier_penny
     df["Strong_Sell"] = df["DNA_Score"] <= 40.0
 
@@ -179,7 +179,7 @@ def calculate_dna_score(
     elif macd_diff < 0 and macd_diff_prev >= 0:
         d_macd = -20
     elif macd_diff > macd_diff_prev:
-        d_macd = 15
+        d_macd = 18
     else:
         d_macd = -8
     score += d_macd

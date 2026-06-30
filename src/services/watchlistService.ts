@@ -16,11 +16,17 @@ export interface WatchlistItem {
 /**
  * Get all watchlist items from Supabase
  */
-export async function getWatchlist(): Promise<WatchlistItem[]> {
-  const { data, error } = await supabase
+export async function getWatchlist(includeExited = false): Promise<WatchlistItem[]> {
+  let query = supabase
     .from('watchlist')
     .select('*')
     .order('created_at', { ascending: false });
+
+  if (!includeExited) {
+    query = query.neq('status', 'EXITED');
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching watchlist:', error);

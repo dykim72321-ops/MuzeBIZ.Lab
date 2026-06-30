@@ -122,7 +122,7 @@ _candle_state = TickerDataState(max_bars=100)
 _db = DBManager()
 _webhook = WebhookManager()
 _mtf_cache = MTFCache()
-_momentum_validator = MomentumValidator(mtf_cache=_mtf_cache, rvol_threshold=3.0)
+_momentum_validator = MomentumValidator(mtf_cache=_mtf_cache, rvol_threshold=1.5)
 
 # AppState에 주입
 app_state.manager = _manager
@@ -410,17 +410,17 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
 # Paper Engine 자체의 페니 파라미터(PENNY_*)는 paper_engine.py에 유지됨
 SCAN_MAX_PRICE = 100.0
 SCAN_DATA_LOOKBACK = "2mo"
-SCAN_TOP_N = 5
+SCAN_TOP_N = 10
 
 # 하위 호환 — Paper Engine 내부 페니 상태머신 파라미터 (변경 금지)
 PENNY_DATA_LOOKBACK = "2mo"
-PENNY_TS_INIT_PCT = 0.85
+PENNY_TS_INIT_PCT = 0.90
 PENNY_BREAKEVEN_TRIGGER = 1.10
-PENNY_SCALE_OUT_RSI = 70
-PENNY_SCALE_OUT_PROFIT = 0.20
+PENNY_SCALE_OUT_RSI = 65
+PENNY_SCALE_OUT_PROFIT = 0.10
 PENNY_SCALE_OUT_RATIO = 0.50
-PENNY_TIGHT_TS_PCT = 0.93
-PENNY_RVOL_MIN = 3.0
+PENNY_TIGHT_TS_PCT = 0.95
+PENNY_RVOL_MIN = 1.5
 
 
 async def run_quant_scan_internal(
@@ -519,7 +519,7 @@ async def run_quant_scan_internal(
                                     last_vol = float(volume_col.iloc[-1])
                                     if (
                                         0.01 < last_price <= max_price
-                                        and (last_price * last_vol) > 500000
+                                        and (last_price * last_vol) > 200000
                                     ):
                                         scan_tickers.append(batch[0])
                             else:
@@ -536,7 +536,7 @@ async def run_quant_scan_internal(
                                             p_val, v_val = float(p), float(v)
                                             if (
                                                 0.01 < p_val <= max_price
-                                                and (p_val * v_val) > 500000
+                                                and (p_val * v_val) > 200000
                                             ):
                                                 scan_tickers.append(sym)
                 except Exception as e:
@@ -973,6 +973,7 @@ async def on_minute_bar_closed(bar):
                 ticker=ticker_symbol,
                 current_price=payload.get("price", 0.0),
                 rvol=payload.get("rvol", 1.0),
+                dna_score=float(payload.get("dna_score", 0.0)),
             )
             if not is_valid:
                 print(f"🛡️ [Interceptor] {ticker_symbol} 매수 차단: {reject_reason}")
@@ -1098,7 +1099,7 @@ async def on_minute_bar_closed(bar):
                         payload.get("signal") == "BUY"
                         and payload.get("strength") == "STRONG"
                         and app_state.SYSTEM_ARMED
-                        and dna_val >= (70 if current_price <= 1.0 else 80)
+                        and dna_val >= (60 if current_price <= 1.0 else 75)
                     ):
                         app_state._held_tickers.add(ticker_symbol)
 
@@ -1130,7 +1131,7 @@ async def start_rest_polling(tickers: Optional[List[str]] = None):
 
     active_tickers = tickers
     if not active_tickers:
-        active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=15)
+        active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=30)
 
     if not active_tickers:
         print("⚠️ [REST Polling] No active tickers. Standby.")
@@ -1200,7 +1201,7 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
 
     try:
         if not active_tickers:
-            active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=15)
+            active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=30)
 
         if not active_tickers:
             print("⚠️ No active tickers to monitor. Pulse engine standby.")
@@ -1327,7 +1328,7 @@ async def auto_quant_scan_scheduler():
         except Exception as e:
             print(f"⚠️ [Auto-Scan] 스캔 중 오류: {e}")
 
-        await asyncio.sleep(4 * 3600)
+        await asyncio.sleep(2 * 3600)
 
 
 async def auto_cleanup_scheduler():

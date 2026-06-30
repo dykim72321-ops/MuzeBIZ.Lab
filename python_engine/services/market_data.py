@@ -245,7 +245,7 @@ class MomentumValidator:
         self.rvol_threshold = rvol_threshold
 
     def validate(
-        self, ticker: str, current_price: float, rvol: float
+        self, ticker: str, current_price: float, rvol: float, dna_score: float = 0.0
     ) -> tuple[bool, str]:
         # 1. RVOL 검증
         if rvol < self.rvol_threshold:
@@ -254,7 +254,13 @@ class MomentumValidator:
                 f"RVOL 부족 (현재: {rvol:.1f}x < 기준: {self.rvol_threshold}x)",
             )
 
-        # 2. MTF (15분봉 20 EMA) 검증
+        # 2. MTF (15분봉 20 EMA) 검증 — DNA ≥ 80이면 강한 시그널이므로 EMA 검증 스킵
+        if dna_score >= 80.0:
+            print(
+                f"🚀 [Interceptor] {ticker} DNA {dna_score:.0f} ≥ 80 — EMA 검증 스킵 (고확신 시그널)"
+            )
+            return True, f"DNA {dna_score:.0f} 고확신 (EMA 스킵)"
+
         ema_15m = self.mtf_cache.get_15m_ema(ticker)
         if ema_15m is not None:
             if current_price < ema_15m:

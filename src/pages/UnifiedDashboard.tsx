@@ -168,8 +168,8 @@ export const UnifiedDashboard = () => {
             </span>
           </div>
           <div className="text-sm font-semibold text-slate-550 md:text-right shrink-0 font-sans">
-            * $100 이하 전 종목 스캔 · 진입가 $1 이하 자동 페니 파라미터 (-15% TS) · $1 초과 일반 파라미터
-            (-10% TS)
+            * $100 이하 전 종목 스캔 · 진입가 $1 이하 자동 페니 파라미터 (-10% TS) · $1 초과 일반 파라미터
+            (-5% TS)
           </div>
         </div>
 
@@ -335,7 +335,7 @@ export const UnifiedDashboard = () => {
                   </p>
                 </div>
                 <span className="text-xs font-black text-indigo-700 border-b-2 border-indigo-500 pb-0.5 shrink-0 self-start sm:self-auto font-sans">
-                  DNA 80점 이상 엄선
+                  DNA 70점 이상 엄선
                 </span>
               </div>
 

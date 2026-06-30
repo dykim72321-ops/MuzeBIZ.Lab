@@ -88,7 +88,7 @@ function mapBrokerPositions(raw: BrokerPositionRaw[]): PaperPosition[] {
     const units = Number(bp.quantity);
     const isPenny = entry <= PENNY_THRESHOLD;
     const highestPrice = Math.max(entry, current);
-    const tsInitPct = isPenny ? 0.85 : 0.90;
+    const tsInitPct = isPenny ? 0.90 : 0.95;
     const estimatedTsThreshold = highestPrice * tsInitPct;
 
     return {
