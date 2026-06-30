@@ -236,7 +236,12 @@ export function useDashboardData() {
       let name = '?';
       if (item.created_at) {
         const d = new Date(item.created_at);
-        name = `${d.getMonth() + 1}/${d.getDate()}`;
+        const isToday = d.toDateString() === new Date().toDateString();
+        if (isToday) {
+          name = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        } else {
+          name = `${d.getMonth() + 1}/${d.getDate()}`;
+        }
       }
       return { name, value: Math.round(running), ts: new Date(item.created_at ?? 0).getTime() };
     });

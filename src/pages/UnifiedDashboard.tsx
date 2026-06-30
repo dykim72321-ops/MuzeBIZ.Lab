@@ -287,6 +287,8 @@ export const UnifiedDashboard = () => {
                         tickLine={false}
                         axisLine={false}
                         dy={8}
+                        minTickGap={30}
+                        interval="preserveStartEnd"
                       />
                       <YAxis
                         stroke="#64748b"
