@@ -1706,7 +1706,6 @@ async def run_startup_sequence():
     asyncio.create_task(system_heartbeat())
     asyncio.create_task(stream_scheduler())
     asyncio.create_task(auto_quant_scan_scheduler())
-    asyncio.create_task(auto_cleanup_scheduler())
 
     # MTF 캐시 주기적 갱신 스케줄러 시작 (프리워밍은 1-2 단계에서 완료)
     asyncio.create_task(mtf_cache_scheduler())
