@@ -148,15 +148,18 @@ class TickerDataState:
                                         iex_total_vol > 0
                                         and yf_window_vol > iex_total_vol
                                     ):
+                                        # 봉 수가 적으면 노이즈가 크므로 상한을 낮게 제한
+                                        bar_count = len(df)
+                                        max_mul = 50.0 if bar_count >= 10 else 20.0
                                         multiplier = min(
-                                            yf_window_vol / iex_total_vol, 20.0
+                                            yf_window_vol / iex_total_vol, max_mul
                                         )
                                         self.volume_multiplier[ticker] = multiplier
                                         df["Volume"] = df["Volume"] * multiplier
                                         calibrated = True
                                         print(
                                             f"📊 [VolMul] {ticker}: {multiplier:.1f}x calibrated "
-                                            f"(IEX {iex_total_vol:,.0f} → Full {yf_window_vol:,.0f}, {len(df)}봉)"
+                                            f"(IEX {iex_total_vol:,.0f} → Full {yf_window_vol:,.0f}, {bar_count}봉)"
                                         )
                                     else:
                                         self.volume_multiplier[ticker] = 1.0
@@ -190,7 +193,11 @@ class TickerDataState:
                             df["_raw_iex_volume"] = raw_vol
                             self.history[ticker] = df
                             if calibrated:
+                                # yfinance 덮어쓰기 차단 (봉 수 관계없이)
                                 self._iex_calibrated.add(ticker)
+                                # 봉이 적으면 비율 노이즈가 크므로 lazy 재보정도 예약
+                                if len(df) < 10:
+                                    self.needs_iex_calibration.add(ticker)
                             print(
                                 f"✅ [Alpaca/IEX] {ticker} warmed up ({len(df)} bars, calibrated={calibrated})"
                             )
