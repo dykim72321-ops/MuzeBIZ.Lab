@@ -122,7 +122,7 @@ _candle_state = TickerDataState(max_bars=100)
 _db = DBManager()
 _webhook = WebhookManager()
 _mtf_cache = MTFCache()
-_momentum_validator = MomentumValidator(mtf_cache=_mtf_cache, rvol_threshold=1.5)
+_momentum_validator = MomentumValidator(mtf_cache=_mtf_cache, rvol_threshold=1.2)
 
 # AppState에 주입
 app_state.manager = _manager
@@ -420,7 +420,10 @@ PENNY_SCALE_OUT_RSI = 65
 PENNY_SCALE_OUT_PROFIT = 0.10
 PENNY_SCALE_OUT_RATIO = 0.50
 PENNY_TIGHT_TS_PCT = 0.95
-PENNY_RVOL_MIN = 1.5
+PENNY_RVOL_MIN = 1.2
+
+# 세션 내 데이터 없음(상장폐지/OTC) 종목 캐시 — 매 스캔마다 재시도 방지
+_yf_no_data_cache: set[str] = set()
 
 
 async def run_quant_scan_internal(
@@ -600,12 +603,15 @@ async def run_quant_scan_internal(
 
     results = []
     for ticker in scan_tickers[:80]:
+        if ticker in _yf_no_data_cache:
+            continue
         try:
             tk = yf.Ticker(ticker)
             df = await asyncio.to_thread(
                 tk.history, period=PENNY_DATA_LOOKBACK, interval="1d"
             )
             if df is None or df.empty or len(df) < 30:
+                _yf_no_data_cache.add(ticker)
                 continue
 
             df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
@@ -893,7 +899,10 @@ async def on_minute_bar_closed(bar):
             return
 
         # ── avg_daily_volume 지연 초기화 (cold ticker — warm_up을 거치지 않은 신규 유입 종목) ──
-        if ticker_symbol not in _candle_state.avg_daily_volume:
+        if (
+            ticker_symbol not in _candle_state.avg_daily_volume
+            and ticker_symbol not in _yf_no_data_cache
+        ):
             try:
                 tk = yf.Ticker(ticker_symbol)
                 daily, yf_1m = await asyncio.gather(
@@ -906,6 +915,7 @@ async def on_minute_bar_closed(bar):
                         daily["Volume"].mean()
                     )
                 else:
+                    _yf_no_data_cache.add(ticker_symbol)
                     _candle_state.avg_daily_volume[ticker_symbol] = 0.0
 
                 # cold ticker의 IEX 보정 (처음 유입된 종목)

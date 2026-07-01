@@ -16,9 +16,9 @@ MIN_BUY_BUDGET = 10.0  # 최소 주문 금액 (달러)
 MAX_BUY_BUDGET = 5000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_BUDGET × MAX_CONCURRENT = 총 배포 상한
 # Kelly 15% × $100k = $15k → MAX_BUY_BUDGET $5k 캡으로 실질 포지션당 $5k 고정
 # $5k × 15 = $75k = MAX_CONCENTRATION 75% → 내부 수학 완결
-MAX_CONCURRENT_POSITIONS = 15  # 동시 보유 최대 종목 수 (실질 도달 가능 상한)
-MAX_CONCENTRATION_PCT = 0.75  # 총 자산 대비 투입 비중 상한 (75% = 15종목 × $5k / $100k)
-TS_INIT_PCT = 0.93  # 초기 트레일링 스탑: 진입가 × 93% (-7%, ATR 스탑에 여유 공간 제공)
+MAX_CONCURRENT_POSITIONS = 20  # 동시 보유 최대 종목 수 (실질 도달 가능 상한)
+MAX_CONCENTRATION_PCT = 0.75  # 총 자산 대비 투입 비중 상한 (75%)
+TS_INIT_PCT = 0.95  # 초기 트레일링 스탑: 진입가 × 95% (-5%, 손실 포지션 빠른 탈출)
 TS_TRAIL_PCT = 0.95  # 최고가 갱신 시 TS 추적 비율: highest × 95%
 SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
 SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
@@ -29,7 +29,7 @@ PENNY_MAX_PRICE = 1.0  # 진입가 ≤ 이 값이면 페니 파라미터 자동 
 PENNY_TS_INIT_PCT = 0.90  # 초기 TS: 진입가 × 90% (-10%)
 PENNY_TS_TRAIL_PCT = 0.90  # 최고가 추종 TS: highest × 90%
 PENNY_BREAKEVEN_TRIGGER = 1.10  # 수익 +10% 달성 시 TS 하한을 진입가(본전)로 락인
-PENNY_SCALE_OUT_RSI = 65  # 1차 매도 RSI 기준 (일반 55 → 페니 65)
+PENNY_SCALE_OUT_RSI = 60  # 1차 매도 RSI 기준 (일반 52 → 페니 60)
 PENNY_SCALE_OUT_PROFIT = 0.10  # 1차 매도 수익률 기준 (+10% OR RSI>65)
 PENNY_TIGHT_TS_PCT = 0.95  # Scale-Out 후 잔여 물량 TS: highest × 95% (-5%)
 SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 유예
@@ -261,7 +261,7 @@ class PaperTradingManager:
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
         is_penny_signal = price <= PENNY_MAX_PRICE
-        dna_gate = 60 if is_penny_signal else 75
+        dna_gate = 55 if is_penny_signal else 70
         if (
             signal_type == "BUY"
             and strength == "STRONG"
@@ -577,7 +577,7 @@ class PaperTradingManager:
                     rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
                 ) or profit_pct >= PENNY_SCALE_OUT_PROFIT
             else:
-                scale_trigger = rsi > 55
+                scale_trigger = rsi > 52
             sell_slip = SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL
             if (
                 scale_trigger
