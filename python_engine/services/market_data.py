@@ -40,6 +40,8 @@ class TickerDataState:
         # warm_up 시 IEX 보정에 실패한 종목 (yfinance fallback으로 채워진 경우)
         # → on_minute_bar_closed()에서 IEX 바 35개 이상 쌓이면 재보정 트리거
         self.needs_iex_calibration: set = set()
+        # yfinance 데이터 없음(상장폐지/OTC) 종목 — warm_up 재시도 차단
+        self.no_data_tickers: set = set()
 
     def update(self, ticker: str, bar) -> pd.DataFrame:
         raw_vol = float(bar.volume)
@@ -206,6 +208,8 @@ class TickerDataState:
 
         print("🌐 [Warm-up] Falling back to yfinance (1m interval)...")
         for ticker in tickers:
+            if ticker in self.no_data_tickers:
+                continue
             # IEX 보정이 완료된 종목은 봉 수가 적어도 yfinance로 덮어쓰지 않음
             if ticker in self._iex_calibrated:
                 continue
@@ -225,12 +229,14 @@ class TickerDataState:
                     self.volume_multiplier[ticker] = 1.0
                     self.needs_iex_calibration.add(ticker)
                     print(f"✅ [yfinance] {ticker} warmed up → lazy IEX 재보정 예약")
+                else:
+                    self.no_data_tickers.add(ticker)
             except Exception as e:
                 print(f"⚠️ {ticker} yfinance warm-up failed: {e}")
 
         print("📊 [Warm-up] Fetching 30d avg daily volume for RVOL correction...")
         for ticker in tickers:
-            if ticker in self.avg_daily_volume:
+            if ticker in self.avg_daily_volume or ticker in self.no_data_tickers:
                 continue
             try:
                 tk = yf.Ticker(ticker)
@@ -240,6 +246,8 @@ class TickerDataState:
                     print(
                         f"📈 [AvgVol] {ticker}: {self.avg_daily_volume[ticker]:,.0f} avg daily shares"
                     )
+                else:
+                    self.no_data_tickers.add(ticker)
             except Exception as e:
                 print(f"⚠️ [AvgVol] {ticker}: {e}")
 

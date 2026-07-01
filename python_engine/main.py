@@ -916,6 +916,7 @@ async def on_minute_bar_closed(bar):
                     )
                 else:
                     _yf_no_data_cache.add(ticker_symbol)
+                    _candle_state.no_data_tickers.add(ticker_symbol)
                     _candle_state.avg_daily_volume[ticker_symbol] = 0.0
 
                 # cold ticker의 IEX 보정 (처음 유입된 종목)
