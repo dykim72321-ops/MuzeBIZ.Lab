@@ -7,14 +7,14 @@ import {
   Bell,
   Menu,
   X,
-  Target,
+
   FlaskConical
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const NAVIGATION = [
   { name: '통합 지휘소', icon: LayoutDashboard, path: '/stock/dashboard' },
-  { name: '모니터링 오빗', icon: Target, path: '/watchlist' },
+
   { name: 'DNA 시뮬레이터', icon: FlaskConical, path: '/dna-simulator' },
   { name: '제품 검색', icon: Search, path: '/parts-search' }
 ];

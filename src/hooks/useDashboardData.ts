@@ -5,28 +5,21 @@
  * Zustand 스토어에서 원본 데이터를 읽고, 뷰에 필요한 형태로 가공하여 반환한다.
  */
 
-import { useEffect, useMemo, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { useTradingStore } from '../store/useTradingStore';
 import { useMarketEngine } from './useMarketEngine';
 import { processSignal } from '../utils/signalProcessor';
-import { addToWatchlist, getWatchlist } from '../services/watchlistService';
-import type { WatchlistItem } from '../services/watchlistService';
-import type { DiscoveryStock, PaperPosition, PaperHistory, TerminalData } from '../types/dashboard';
+
+import type { DiscoveryStock, TerminalData } from '../types/dashboard';
 import {
   closePosition,
   toggleSystemArm,
 } from '../services/pythonApiService';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface DashboardWatchlistItem extends WatchlistItem {
-  currentPrice: number;
-  changePercent: number;
-  isPenny: boolean;
-}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -44,7 +37,6 @@ export function useDashboardData() {
   const isMarketOpen = useTradingStore((s) => s.isMarketOpen);
   const isSettingsOpen = useTradingStore((s) => s.isSettingsOpen);
   const lastFetchedTime = useTradingStore((s) => s.lastFetchedTime);
-  const watchlistRaw = useTradingStore((s) => s.watchlistRaw);
   const discoveryStocks = useTradingStore((s) => s.discoveryStocks);
   const livePositions = useTradingStore((s) => s.livePositions);
   const liveHistory = useTradingStore((s) => s.liveHistory);
@@ -59,13 +51,8 @@ export function useDashboardData() {
   const setChartRange = useTradingStore((s) => s.setChartRange);
   const setTerminalData = useTradingStore((s) => s.setTerminalData);
   const setEdgeAlert = useTradingStore((s) => s.setEdgeAlert);
-  const setWatchlistRaw = useTradingStore((s) => s.setWatchlistRaw);
   const loadDashboardData = useTradingStore((s) => s.loadDashboardData);
   const loadArmStatus = useTradingStore((s) => s.loadArmStatus);
-
-  // Local addingTickers guard
-  const addingTickersRef = useRef<Set<string>>(new Set());
-  const [addingTickers, setAddingTickers] = useState<Set<string>>(new Set());
 
   // ── Market Open Check ──
   useEffect(() => {
@@ -122,49 +109,6 @@ export function useDashboardData() {
   }, [liveHistory]);
 
   const displayedTotalTrades = useMemo(() => liveHistory.length, [liveHistory]);
-
-  // ── Derived: Watchlist Items ──
-  const watchlistItems = useMemo(() => {
-    const unifiedMap = new Map<string, DashboardWatchlistItem>();
-
-    watchlistRaw.forEach((item) => {
-      unifiedMap.set(item.ticker, { ...item } as DashboardWatchlistItem);
-    });
-
-    livePositions.forEach((pos: PaperPosition) => {
-      if (unifiedMap.has(pos.ticker)) {
-        const existing = unifiedMap.get(pos.ticker)!;
-        existing.status = 'HOLDING';
-        existing.buyPrice = existing.buyPrice || Number(pos.entry_price);
-      } else {
-        unifiedMap.set(pos.ticker, {
-          ticker: pos.ticker,
-          status: 'HOLDING',
-          buyPrice: Number(pos.entry_price),
-          addedAt: pos.created_at || new Date().toISOString(),
-        } as DashboardWatchlistItem);
-      }
-    });
-
-    liveHistory.forEach((hist: PaperHistory) => {
-      if (!livePositions.some((p: PaperPosition) => p.ticker === hist.ticker)) {
-        if (unifiedMap.has(hist.ticker)) {
-          const existing = unifiedMap.get(hist.ticker)!;
-          if (existing.status !== 'WATCHING') {
-            existing.status = 'EXITED';
-          }
-        } else {
-          unifiedMap.set(hist.ticker, {
-            ticker: hist.ticker,
-            status: 'EXITED',
-            addedAt: hist.created_at || new Date().toISOString(),
-          } as DashboardWatchlistItem);
-        }
-      }
-    });
-
-    return Array.from(unifiedMap.values());
-  }, [watchlistRaw, livePositions, liveHistory]);
 
   // ── Derived: Total PnL ──
   const totalPnl = useMemo(
@@ -286,12 +230,6 @@ export function useDashboardData() {
 
     return series;
   }, [liveHistory, chartRange, displayedAccount]);
-
-  // ── Watchlisted Tickers (for discovery add button) ──
-  const watchlistedTickers = useMemo(
-    () => new Set(watchlistItems.filter((i) => i.status !== 'EXITED').map((i) => i.ticker)),
-    [watchlistItems],
-  );
 
   // ── Handlers ──
 
@@ -432,37 +370,6 @@ export function useDashboardData() {
     [loadDashboardData],
   );
 
-  const handleAddDiscoveryToWatchlist = useCallback(
-    async (e: React.MouseEvent, stock: DiscoveryStock) => {
-      e.stopPropagation();
-      const ticker: string = stock.ticker;
-      if (addingTickersRef.current.has(ticker)) return;
-      addingTickersRef.current.add(ticker);
-      setAddingTickers(new Set(addingTickersRef.current));
-      try {
-        await addToWatchlist(
-          ticker,
-          undefined,
-          'WATCHING',
-          stock.price ?? undefined,
-          undefined,
-          undefined,
-          stock.dna_score ?? undefined,
-        );
-        toast.success(`${ticker} 관심종목 등록`);
-        const wl = await getWatchlist();
-        setWatchlistRaw(wl);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : '알 수 없는 에러';
-        toast.error(`${ticker} 등록 실패`, { description: msg });
-      } finally {
-        addingTickersRef.current.delete(ticker);
-        setAddingTickers(new Set(addingTickersRef.current));
-      }
-    },
-    [setWatchlistRaw],
-  );
-
   return {
     // State
     loading,
@@ -477,14 +384,11 @@ export function useDashboardData() {
     edgeAlert,
     terminalData,
     chartRange,
-    addingTickers,
 
     // Derived
     displayedAccount,
     displayedWinRate,
     displayedTotalTrades,
-    watchlistItems,
-    watchlistedTickers,
     totalPnl,
     investedCapital,
     concentrationPct,
@@ -495,7 +399,6 @@ export function useDashboardData() {
     setChartRange,
     setTerminalData,
     setEdgeAlert,
-    setWatchlistRaw,
     loadDashboardData,
 
     // Handlers
@@ -503,7 +406,6 @@ export function useDashboardData() {
     handleLiveHuntingTrigger,
     handleToggleArm,
     handleClosePosition,
-    handleAddDiscoveryToWatchlist,
     isHunting,
     navigate,
   };

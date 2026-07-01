@@ -1,6 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { TopNav } from './TopNav';
-import { LayoutDashboard, List, Settings, Zap, Search } from 'lucide-react';
+import { LayoutDashboard, Settings, Zap, Search } from 'lucide-react';
 import clsx from 'clsx';
 import { useMarketPulse } from '../../hooks/useMarketPulse';
 import { Toaster } from 'sonner';
@@ -50,10 +50,7 @@ export const Layout = () => {
           <Search className="w-5 h-5" />
           <span className="text-[10px] font-bold">부품검색</span>
         </NavLink>
-        <NavLink to="/watchlist" className={({ isActive }) => clsx("flex flex-col items-center gap-1 px-3 py-1 rounded-lg transition-colors relative z-10", isActive ? "text-blue-600 bg-blue-50" : "text-slate-500 hover:text-slate-800")}>
-          <List className="w-5 h-5" />
-          <span className="text-[10px] font-bold">관심종목</span>
-        </NavLink>
+
         <NavLink to="/settings" className={({ isActive }) => clsx("flex flex-col items-center gap-1 px-3 py-1 rounded-lg transition-colors relative z-10", isActive ? "text-blue-600 bg-blue-50" : "text-slate-500 hover:text-slate-800")}>
           <Settings className="w-5 h-5" />
           <span className="text-[10px] font-bold">설정</span>

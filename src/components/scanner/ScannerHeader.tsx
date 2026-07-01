@@ -1,13 +1,12 @@
-import { Zap, ArrowUpRight, RefreshCw } from 'lucide-react';
+import { Zap, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 
 interface ScannerHeaderProps {
   loading: boolean;
   onRefresh: () => void;
-  onNavigateWatchlist: () => void;
 }
 
-export const ScannerHeader = ({ loading, onRefresh, onNavigateWatchlist }: ScannerHeaderProps) => {
+export const ScannerHeader = ({ loading, onRefresh }: ScannerHeaderProps) => {
   return (
     <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0b101a]/80 backdrop-blur-xl p-6 rounded-[1.5rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
       <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
@@ -29,13 +28,6 @@ export const ScannerHeader = ({ loading, onRefresh, onNavigateWatchlist }: Scann
           <span className="font-black text-white uppercase tracking-widest">Optimized Signal Stream</span>
         </div>
         
-        <button
-          onClick={onNavigateWatchlist}
-          className="flex items-center gap-2 px-5 py-3 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl font-black text-[10px] uppercase tracking-widest border border-slate-700 transition-all active:scale-95"
-        >
-          My Monitoring Orbit
-          <ArrowUpRight className="w-4 h-4 text-indigo-400" />
-        </button>
 
         <button
           onClick={onRefresh}

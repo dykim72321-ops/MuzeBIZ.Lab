@@ -1,17 +1,16 @@
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, Activity, Star } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { PennyQuantScoreBar } from './PennyQuantScoreBar';
 import type { PennyScanResult } from '../../services/pennyService';
 
 interface PennyStockCardProps {
   stock: PennyScanResult;
-  onAddToWatchlist?: (ticker: string) => void;
 }
 
 const RANK_MEDALS = ['🥇', '🥈', '🥉'];
 
-export const PennyStockCard = ({ stock, onAddToWatchlist }: PennyStockCardProps) => {
+export const PennyStockCard = ({ stock }: PennyStockCardProps) => {
   const isPositive = stock.change_pct >= 0;
   const isStrong = stock.strength === 'STRONG';
   const isBuy = stock.signal === 'BUY';
@@ -59,11 +58,7 @@ export const PennyStockCard = ({ stock, onAddToWatchlist }: PennyStockCardProps)
             </div>
             <div className="text-[10px] font-bold text-slate-500 mt-0.5 flex items-center gap-2">
               <span>Rank #{stock.rank}</span>
-              {stock.is_watchlisted && (
-                <span className="text-cyan-400 flex items-center gap-0.5">
-                  <Star className="w-2.5 h-2.5 fill-cyan-400" /> Watchlisted
-                </span>
-              )}
+
             </div>
           </div>
         </div>
@@ -121,14 +116,7 @@ export const PennyStockCard = ({ stock, onAddToWatchlist }: PennyStockCardProps)
           <span className="font-bold tabular-nums">{stock.volume.toLocaleString()} vol</span>
         </div>
 
-        {onAddToWatchlist && !stock.is_watchlisted && (
-          <button
-            onClick={() => onAddToWatchlist(stock.ticker)}
-            className="px-3 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-[9px] font-black rounded-lg border border-cyan-500/20 transition-all uppercase tracking-widest"
-          >
-            + Watch
-          </button>
-        )}
+
       </div>
     </motion.div>
   );

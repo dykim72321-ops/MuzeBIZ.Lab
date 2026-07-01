@@ -447,7 +447,6 @@ class PaperTradingManager:
                     ),
                     color=0x95A5A6,
                 )
-                await self._sync_watchlist_exit(ticker)
                 return
 
             # A-1. Time-Decay Exit
@@ -529,7 +528,6 @@ class PaperTradingManager:
                             ),
                             color=0x7F8C8D,
                         )
-                        await self._sync_watchlist_exit(ticker)
                         return
                 except Exception as e:
                     print(f"⚠️ [Time-Decay] {ticker}: {e}")
@@ -665,7 +663,6 @@ class PaperTradingManager:
                     .execute
                 )
                 # 관심종목 stop_loss 동기화 (TS 이동)
-                await self._sync_watchlist_stop_loss(ticker, new_ts_val)
                 # 같은 봉에서 Scale-Out과 Trailing Stop이 동시에 발동하는 것을 방지
                 return
 
@@ -740,7 +737,6 @@ class PaperTradingManager:
                     color=0x34495E,
                 )
                 # 관심종목 상태 → EXITED
-                await self._sync_watchlist_exit(ticker)
             else:
                 # 일반 업데이트
                 await asyncio.to_thread(

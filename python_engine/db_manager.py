@@ -84,94 +84,30 @@ class DBManager:
     def get_active_tickers(self, limit=5):
         """
         모니터링 유니버스 구성:
-        1순위 — watchlist HOLDING 종목 (포지션 보유 — 트레일링 스탑 감시 필수)
-        2순위 — watchlist WATCHING 종목 (최신 등록 순 — 페니 스캔 신규 발굴 우선)
-        3순위 — daily_discovery 최근 발굴 종목으로 잔여 슬롯 채움
+        daily_discovery 최근 발굴 종목(DNA Score 최상위)으로 슬롯 채움
         """
         if not self.supabase:
             print("⚠️ Warning: DB Client not available. Using fallback tickers.")
             return ["TSLA", "AAPL"]
 
-        # 0순위: 오래된 WATCHING 종목 만료 처리 (7일 경과 시 EXITED로 전환하여 백엔드 감시 대상에서 자동 제외)
-        try:
-            from datetime import datetime, timedelta, timezone
-
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-            res = (
-                self.supabase.table("watchlist")
-                .update({"status": "EXITED"})
-                .eq("status", "WATCHING")
-                .lt("created_at", cutoff)
-                .execute()
-            )
-            if res.data:
-                expired_cnt = len(res.data)
-                if expired_cnt > 0:
-                    expired_tickers = [row.get("ticker") for row in res.data]
-                    print(
-                        f"🧹 [Watchlist Cleanup] Expired {expired_cnt} WATCHING tickers (older than 7 days): {expired_tickers}"
-                    )
-        except Exception as e:
-            print(f"⚠️ Watchlist expiry cleanup error: {e}")
-
         tickers = []
 
-        # 1순위: HOLDING 종목 — 전량 포함 (포지션 보유 = 트레일링 스탑 감시 필수)
         try:
-            holding_res = (
-                self.supabase.table("watchlist")
+            discovery_res = (
+                self.supabase.table("daily_discovery")
                 .select("ticker")
-                .eq("status", "HOLDING")
+                .order("dna_score", desc=True)
+                .limit(limit)
                 .execute()
             )
-            for item in holding_res.data or []:
+            for item in discovery_res.data or []:
                 ticker = item.get("ticker")
                 if ticker and ticker not in tickers:
                     tickers.append(ticker)
         except Exception as e:
-            print(f"⚠️ HOLDING tickers fetch error: {e}")
+            print(f"⚠️ daily_discovery fetch error: {e}")
 
-        # 2순위: WATCHING 종목 — 최신 등록 순 (페니 스캔 신규 발굴 종목 우선)
-        remaining = limit - len(tickers)
-        if remaining > 0:
-            try:
-                watching_res = (
-                    self.supabase.table("watchlist")
-                    .select("ticker")
-                    .eq("status", "WATCHING")
-                    .order("created_at", desc=True)
-                    .limit(remaining)
-                    .execute()
-                )
-                for item in watching_res.data or []:
-                    ticker = item.get("ticker")
-                    if ticker and ticker not in tickers:
-                        tickers.append(ticker)
-            except Exception as e:
-                print(f"⚠️ Watchlist WATCHING fetch error: {e}")
-
-        # 3순위: daily_discovery로 잔여 슬롯 채움
-        if len(tickers) < limit:
-            try:
-                dd_res = (
-                    self.supabase.table("daily_discovery")
-                    .select("ticker")
-                    .order("updated_at", desc=True)
-                    .limit((limit - len(tickers)) * 2)
-                    .execute()
-                )
-                for item in dd_res.data or []:
-                    ticker = item.get("ticker")
-                    if ticker and ticker not in tickers:
-                        tickers.append(ticker)
-                    if len(tickers) >= limit:
-                        break
-            except Exception as e:
-                print(f"❌ DB Fetch Error (Active Tickers): {e}")
-
-        if tickers:
-            print(f"📋 [ActiveTickers] {tickers} (watchlist-first)")
-            return tickers[:limit]
+        return tickers[:limit]
 
         return ["TSLA", "AAPL"]
 

@@ -35,6 +35,11 @@ class TickerDataState:
         self.history: Dict[str, pd.DataFrame] = {}
         self.volume_multiplier: Dict[str, float] = {}
         self.avg_daily_volume: Dict[str, float] = {}
+        # IEX 보정이 성공적으로 완료된 종목 — yfinance fallback이 덮어쓰지 않도록 보호
+        self._iex_calibrated: set = set()
+        # warm_up 시 IEX 보정에 실패한 종목 (yfinance fallback으로 채워진 경우)
+        # → on_minute_bar_closed()에서 IEX 바 35개 이상 쌓이면 재보정 트리거
+        self.needs_iex_calibration: set = set()
 
     def update(self, ticker: str, bar) -> pd.DataFrame:
         raw_vol = float(bar.volume)
@@ -72,75 +77,131 @@ class TickerDataState:
         api_secret = os.getenv("APCA_API_SECRET_KEY")
 
         if api_key and api_secret:
+            from alpaca.data.requests import StockBarsRequest
+
             try:
-                from alpaca.data.requests import StockBarsRequest
-
                 client = StockHistoricalDataClient(api_key, api_secret)
-                for ticker in tickers:
-                    request_params = StockBarsRequest(
-                        symbol_or_symbols=ticker,
-                        timeframe=TimeFrame.Minute,
-                        limit=self.max_bars,
-                        feed=DataFeed.IEX,
-                    )
-                    bars = await asyncio.to_thread(
-                        client.get_stock_bars, request_params
-                    )
-                    df = bars.df
-                    if not df.empty:
-                        if isinstance(df.index, pd.MultiIndex):
-                            df = df.xs(ticker, level=0)
-                        df = df[["open", "high", "low", "close", "volume"]].rename(
-                            columns={
-                                "open": "Open",
-                                "high": "High",
-                                "low": "Low",
-                                "close": "Close",
-                                "volume": "Volume",
-                            }
-                        )
-
-                        try:
-                            iex_total_vol = df["Volume"].sum()
-                            tk = yf.Ticker(ticker)
-                            yf_hist = await asyncio.to_thread(
-                                tk.history, period="1d", interval="1m"
-                            )
-                            yf_total_vol = (
-                                yf_hist["Volume"].sum() if not yf_hist.empty else 0
-                            )
-                            if iex_total_vol > 0 and yf_total_vol > 0:
-                                multiplier = min(yf_total_vol / iex_total_vol, 20.0)
-                                self.volume_multiplier[ticker] = multiplier
-                                df["Volume"] = df["Volume"] * multiplier
-                                print(
-                                    f"📊 [VolMul] {ticker}: {multiplier:.1f}x calibrated (IEX→Full Market)"
-                                )
-                            else:
-                                self.volume_multiplier[ticker] = 1.0
-                                print(
-                                    f"⚠️ [VolMul] {ticker}: calibration skipped (vol=0), using 1.0x"
-                                )
-                        except Exception as e:
-                            self.volume_multiplier[ticker] = 1.0
-                            print(f"⚠️ [VolMul] {ticker}: calibration error: {e}")
-
-                        if isinstance(df.index, pd.DatetimeIndex):
-                            if df.index.tz is not None:
-                                df.index = df.index.tz_convert("UTC")
-                            else:
-                                df.index = df.index.tz_localize("UTC")
-                        self.history[ticker] = df
-                        print(
-                            f"✅ [Alpaca/IEX] {ticker} warmed up ({len(df)} bars, data_source=alpaca_iex)."
-                        )
-                if len(self.history) >= len(tickers):
-                    pass
             except Exception as e:
-                print(f"⚠️ Alpaca warm-up interrupted: {e}")
+                print(f"⚠️ Alpaca client init failed: {e}")
+                client = None
+
+            if client:
+                for ticker in tickers:
+                    try:
+                        request_params = StockBarsRequest(
+                            symbol_or_symbols=ticker,
+                            timeframe=TimeFrame.Minute,
+                            limit=self.max_bars,
+                            feed=DataFeed.IEX,
+                        )
+                        bars = await asyncio.to_thread(
+                            client.get_stock_bars, request_params
+                        )
+                        df = bars.df
+                        if not df.empty:
+                            if isinstance(df.index, pd.MultiIndex):
+                                df = df.xs(ticker, level=0)
+                            df = df[["open", "high", "low", "close", "volume"]].rename(
+                                columns={
+                                    "open": "Open",
+                                    "high": "High",
+                                    "low": "Low",
+                                    "close": "Close",
+                                    "volume": "Volume",
+                                }
+                            )
+
+                            calibrated = False
+                            try:
+                                # UTC 정규화
+                                if isinstance(df.index, pd.DatetimeIndex):
+                                    if df.index.tz is not None:
+                                        df.index = df.index.tz_convert("UTC")
+                                    else:
+                                        df.index = df.index.tz_localize("UTC")
+
+                                tk = yf.Ticker(ticker)
+                                yf_hist = await asyncio.to_thread(
+                                    tk.history, period="1d", interval="1m"
+                                )
+                                if not yf_hist.empty:
+                                    if yf_hist.index.tz is None:
+                                        yf_hist.index = yf_hist.index.tz_localize("UTC")
+                                    else:
+                                        yf_hist.index = yf_hist.index.tz_convert("UTC")
+
+                                    # IEX 바와 동일한 시간창의 yfinance 거래량만 비교
+                                    t_start = df.index[0]
+                                    t_end = df.index[-1]
+                                    yf_window = yf_hist[
+                                        (yf_hist.index >= t_start)
+                                        & (yf_hist.index <= t_end)
+                                    ]
+                                    iex_total_vol = float(df["Volume"].sum())
+                                    yf_window_vol = (
+                                        float(yf_window["Volume"].sum())
+                                        if not yf_window.empty
+                                        else 0
+                                    )
+
+                                    if (
+                                        iex_total_vol > 0
+                                        and yf_window_vol > iex_total_vol
+                                    ):
+                                        multiplier = min(
+                                            yf_window_vol / iex_total_vol, 20.0
+                                        )
+                                        self.volume_multiplier[ticker] = multiplier
+                                        df["Volume"] = df["Volume"] * multiplier
+                                        calibrated = True
+                                        print(
+                                            f"📊 [VolMul] {ticker}: {multiplier:.1f}x calibrated "
+                                            f"(IEX {iex_total_vol:,.0f} → Full {yf_window_vol:,.0f}, {len(df)}봉)"
+                                        )
+                                    else:
+                                        self.volume_multiplier[ticker] = 1.0
+                                        self.needs_iex_calibration.add(ticker)
+                                        print(
+                                            f"⏳ [VolMul] {ticker}: 보정 데이터 부족 → lazy 재보정 예약"
+                                        )
+                                else:
+                                    self.volume_multiplier[ticker] = 1.0
+                                    self.needs_iex_calibration.add(ticker)
+                                    print(
+                                        f"⏳ [VolMul] {ticker}: yfinance 1d 비어있음 → lazy 재보정 예약"
+                                    )
+                            except Exception as e:
+                                self.volume_multiplier[ticker] = 1.0
+                                self.needs_iex_calibration.add(ticker)
+                                print(f"⚠️ [VolMul] {ticker}: calibration error: {e}")
+
+                            if (
+                                not isinstance(df.index, pd.DatetimeIndex)
+                                or df.index.tz is None
+                            ):
+                                if isinstance(df.index, pd.DatetimeIndex):
+                                    df.index = df.index.tz_localize("UTC")
+                            # _raw_iex_volume: 보정 전 원본 IEX 거래량 보존
+                            raw_vol = (
+                                df["Volume"] / self.volume_multiplier.get(ticker, 1.0)
+                                if calibrated
+                                else df["Volume"].copy()
+                            )
+                            df["_raw_iex_volume"] = raw_vol
+                            self.history[ticker] = df
+                            if calibrated:
+                                self._iex_calibrated.add(ticker)
+                            print(
+                                f"✅ [Alpaca/IEX] {ticker} warmed up ({len(df)} bars, calibrated={calibrated})"
+                            )
+                    except Exception as e:
+                        print(f"⚠️ [Alpaca warm-up] {ticker} failed: {e}")
 
         print("🌐 [Warm-up] Falling back to yfinance (1m interval)...")
         for ticker in tickers:
+            # IEX 보정이 완료된 종목은 봉 수가 적어도 yfinance로 덮어쓰지 않음
+            if ticker in self._iex_calibrated:
+                continue
             if ticker in self.history and len(self.history[ticker]) >= 35:
                 continue
             try:
@@ -155,9 +216,8 @@ class TickerDataState:
                             df.index = df.index.tz_localize("UTC")
                     self.history[ticker] = df
                     self.volume_multiplier[ticker] = 1.0
-                    print(
-                        f"✅ [yfinance] {ticker} warmed up (data_source=yfinance_1m)."
-                    )
+                    self.needs_iex_calibration.add(ticker)
+                    print(f"✅ [yfinance] {ticker} warmed up → lazy IEX 재보정 예약")
             except Exception as e:
                 print(f"⚠️ {ticker} yfinance warm-up failed: {e}")
 

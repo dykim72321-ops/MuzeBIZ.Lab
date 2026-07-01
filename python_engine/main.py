@@ -712,7 +712,6 @@ async def run_quant_scan_internal(
                     "signal": signal_type,
                     "strength": strength,
                     "is_extended": is_extended,
-                    "is_watchlisted": False,
                 }
             )
             if supabase:
@@ -772,9 +771,6 @@ async def run_quant_scan_internal(
                     )
                     auto_registered.append(item["ticker"])
                 item["is_watchlisted"] = True
-                print(
-                    f"⭐ [Scan] {item['ticker']} auto-registered to watchlist (DNA: {item['dna_score']})"
-                )
 
                 # [Option A Fix] daily_discovery에도 즉시 upsert하여 UI에 표시되도록 함
                 try:
@@ -821,6 +817,7 @@ async def run_quant_scan_internal(
             ]
         )
         await webhook.send_alert(
+            use_dev=True,
             title="📡 [QUANT SCAN] Top 퀀트 추천 종목 선정",
             description=f"스캔 종목: {len(results)}개 | $100 이하 일반주식\n\n{top_summary}",
             color=0x6366F1,
@@ -895,12 +892,7 @@ async def on_minute_bar_closed(bar):
         if len(df_hist) < 35:
             return
 
-        # ── avg_daily_volume + volume_multiplier 지연 초기화 ─────────────────
-        # warm_up 대상이 아닌 cold ticker가 스트림에 유입되면:
-        #   avg_daily_volume=0  → RVOL=1.0 고정
-        #   volume_multiplier=1.0 → IEX 거래량(실제의 ~15%) 그대로 사용
-        # → RVOL ≈ 0.15x 실제값 → MomentumValidator RVOL≥1.5 체크에서 전량 차단됨
-        # 첫 35번째 봉 도달 시 한 번만 보정 (yfinance 1m + 30d 동시 조회)
+        # ── avg_daily_volume 지연 초기화 (cold ticker — warm_up을 거치지 않은 신규 유입 종목) ──
         if ticker_symbol not in _candle_state.avg_daily_volume:
             try:
                 tk = yf.Ticker(ticker_symbol)
@@ -909,7 +901,6 @@ async def on_minute_bar_closed(bar):
                     asyncio.to_thread(tk.history, period="1d", interval="1m"),
                 )
 
-                # 1) avg_daily_volume 설정
                 if not daily.empty:
                     _candle_state.avg_daily_volume[ticker_symbol] = float(
                         daily["Volume"].mean()
@@ -917,27 +908,23 @@ async def on_minute_bar_closed(bar):
                 else:
                     _candle_state.avg_daily_volume[ticker_symbol] = 0.0
 
-                # 2) volume_multiplier 보정 — Alpaca IEX 스트림 종목 한정
-                # _raw_iex_volume 컬럼은 update()가 IEX 바를 추가할 때만 생성됨
-                # (yfinance fallback warm_up 종목에는 없음 → multiplier 이미 정확)
-                if (
-                    _candle_state.volume_multiplier.get(ticker_symbol, 1.0) == 1.0
-                    and "_raw_iex_volume" in df_hist.columns
-                    and not yf_1m.empty
-                ):
-                    iex_total = float(df_hist["_raw_iex_volume"].sum())
+                # cold ticker의 IEX 보정 (처음 유입된 종목)
+                if "_raw_iex_volume" in df_hist.columns and not yf_1m.empty:
+                    iex_total = float(df_hist["_raw_iex_volume"].fillna(0).sum())
                     yf_total = float(yf_1m["Volume"].sum())
                     if iex_total > 0 and yf_total > iex_total:
                         multiplier = min(yf_total / iex_total, 20.0)
                         _candle_state.volume_multiplier[ticker_symbol] = multiplier
-                        # 누적된 히스토리 거래량 소급 보정 (df_hist는 history[ticker]의 참조)
                         _candle_state.history[ticker_symbol]["Volume"] = (
-                            _candle_state.history[ticker_symbol]["_raw_iex_volume"]
+                            _candle_state.history[ticker_symbol][
+                                "_raw_iex_volume"
+                            ].fillna(0)
                             * multiplier
                         )
+                        _candle_state.needs_iex_calibration.discard(ticker_symbol)
                         print(
-                            f"📊 [VolMul-lazy] {ticker_symbol}: {multiplier:.1f}x "
-                            f"(IEX→Full Market, 소급 보정 {len(df_hist)}봉)"
+                            f"📊 [VolMul-cold] {ticker_symbol}: {multiplier:.1f}x "
+                            f"(IEX→Full Market, {len(df_hist)}봉 소급 보정)"
                         )
 
                 print(
@@ -947,6 +934,77 @@ async def on_minute_bar_closed(bar):
             except Exception as avg_err:
                 _candle_state.avg_daily_volume[ticker_symbol] = 0.0
                 print(f"⚠️ [AvgVol-lazy] {ticker_symbol}: {avg_err}")
+
+        # ── IEX 거래량 lazy 재보정 ─────────────────────────────────────────────
+        # warm_up 시 장 시작 전이거나 yfinance fallback으로 채워진 종목은
+        # needs_iex_calibration에 등록됨. IEX 바가 35개 이상 쌓이면 재보정 실행.
+        elif (
+            ticker_symbol in _candle_state.needs_iex_calibration
+            and "_raw_iex_volume" in df_hist.columns
+            and df_hist["_raw_iex_volume"].fillna(0).sum() > 0
+        ):
+            try:
+                tk = yf.Ticker(ticker_symbol)
+                yf_1m = await asyncio.to_thread(tk.history, period="1d", interval="1m")
+                if not yf_1m.empty:
+                    # IEX 바 구간의 timestamps만 추출해서 동일 시간대 yfinance 거래량 비교
+                    iex_mask = df_hist["_raw_iex_volume"].notna()
+                    iex_bars = df_hist[iex_mask]
+                    iex_total = float(iex_bars["_raw_iex_volume"].sum())
+
+                    if not iex_bars.empty and iex_total > 0:
+                        # 동일 시간대의 yfinance 데이터만 비교 (시간축 정합)
+                        yf_1m_utc = yf_1m.copy()
+                        if yf_1m_utc.index.tz is None:
+                            yf_1m_utc.index = yf_1m_utc.index.tz_localize("UTC")
+                        else:
+                            yf_1m_utc.index = yf_1m_utc.index.tz_convert("UTC")
+
+                        t_start = iex_bars.index[0]
+                        t_end = iex_bars.index[-1]
+                        yf_window = yf_1m_utc[
+                            (yf_1m_utc.index >= t_start) & (yf_1m_utc.index <= t_end)
+                        ]
+                        yf_window_total = (
+                            float(yf_window["Volume"].sum())
+                            if not yf_window.empty
+                            else 0
+                        )
+
+                        if yf_window_total > iex_total:
+                            multiplier = min(yf_window_total / iex_total, 20.0)
+                        else:
+                            # 시간대 매칭이 안 되면 전체 일봉 비율로 추정
+                            yf_total = float(yf_1m["Volume"].sum())
+                            multiplier = (
+                                min(yf_total / iex_total, 20.0)
+                                if yf_total > iex_total
+                                else 1.0
+                            )
+
+                        if multiplier > 1.05:
+                            _candle_state.volume_multiplier[ticker_symbol] = multiplier
+                            raw_col = _candle_state.history[ticker_symbol][
+                                "_raw_iex_volume"
+                            ].fillna(0)
+                            _candle_state.history[ticker_symbol]["Volume"] = (
+                                raw_col * multiplier
+                            )
+                            _candle_state.needs_iex_calibration.discard(ticker_symbol)
+                            print(
+                                f"📊 [VolMul-lazy] {ticker_symbol}: {multiplier:.1f}x 재보정 완료 "
+                                f"(IEX {iex_total:,.0f} → Full Market {yf_window_total or yf_1m['Volume'].sum():,.0f})"
+                            )
+                        else:
+                            # 보정값이 너무 낮으면 재시도 대신 제거 (이미 full market 데이터)
+                            _candle_state.needs_iex_calibration.discard(ticker_symbol)
+                            print(
+                                f"ℹ️ [VolMul-lazy] {ticker_symbol}: 보정 불필요 (multiplier={multiplier:.2f})"
+                            )
+            except Exception as cal_err:
+                # 실패 시 set에서 제거해 무한 재시도 방지
+                _candle_state.needs_iex_calibration.discard(ticker_symbol)
+                print(f"⚠️ [VolMul-lazy] {ticker_symbol}: {cal_err}")
 
         current_price = float(bar.close)
 
@@ -998,6 +1056,24 @@ async def on_minute_bar_closed(bar):
 
         # ── 전체 DNA 경로 (신규 발굴 / 미보유 종목) ────────────────────────
         payload = await asyncio.to_thread(run_pulse_engine, ticker_symbol, df_hist)
+
+        # ── 장 외 시간 BUY 차단 ───────────────────────────────────────────
+        if payload.get("signal") == "BUY" and not is_market_hours():
+            payload["signal"] = "HOLD"
+            payload["strength"] = "NORMAL"
+
+        # ── 미보유 종목 SELL 스킵 ─────────────────────────────────────────
+        # 포지션 없는 종목의 SELL 신호는 process_signal에 전달해도 아무 것도 안 되지만
+        # DB 조회 비용이 있으므로 여기서 차단
+        if (
+            payload.get("signal") == "SELL"
+            and ticker_symbol not in app_state._held_tickers
+        ):
+            await _manager.broadcast(payload)
+            print(
+                f"⚡ [Alpaca Stream] {ticker_symbol} processed: {payload.get('signal')} ({payload.get('strength')}) | vol_mul={payload.get('volume_multiplier', 1.0):.1f}x"
+            )
+            return
 
         # ── Momentum Interceptor ──────────────────────────────────────────
         if payload.get("signal") == "BUY" and payload.get("strength") == "STRONG":
@@ -1064,7 +1140,7 @@ async def on_minute_bar_closed(bar):
                         f"💡 {payload.get('ai_report', '')}"
                     )
                     await _webhook.send_alert(
-                        title=title, description=desc, color=color
+                        use_dev=True, title=title, description=desc, color=color
                     )
 
                 dna_val = float(payload.get("dna_score", 0.0))
@@ -1301,6 +1377,7 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
         print(error_msg)
         if _webhook:
             await _webhook.send_alert(
+                use_dev=True,
                 title="[CRITICAL] Pulse Engine Stream Offline",
                 description=f"스트림 엔진에 치명적 오류가 발생했습니다.\nError: {e}",
                 color=0xFF0000,
@@ -1350,61 +1427,13 @@ async def auto_quant_scan_scheduler():
 
     while True:
         try:
-            active = await asyncio.to_thread(_db.get_active_tickers, limit=15)
-            watching_count = len(active)
-            print(
-                f"📡 [Auto-Scan] 자동 퀀트 스캔 시작 (현재 watchlist: {watching_count}개)"
-            )
+            print(f"📡 [Auto-Scan] 자동 퀀트 스캔 시작 (자동 퀀트 스캔)")
             await run_quant_scan_internal()
             print("✅ [Auto-Scan] 퀀트 스캔 완료 — 다음 실행까지 4시간 대기")
         except Exception as e:
             print(f"⚠️ [Auto-Scan] 스캔 중 오류: {e}")
 
         await asyncio.sleep(2 * 3600)
-
-
-async def auto_cleanup_scheduler():
-    """모니터링 오빗(Watchlist) 데이터 누적 방지용 스케줄러. 하루에 한 번 실행."""
-    while True:
-        supabase = app_state.supabase
-        try:
-            if supabase:
-                now_utc = datetime.now(timezone.utc)
-                exited_threshold = (now_utc - timedelta(days=3)).isoformat()
-                watching_threshold = (now_utc - timedelta(days=7)).isoformat()
-
-                res_exited = await asyncio.to_thread(
-                    supabase.table("watchlist")
-                    .delete()
-                    .eq("status", "EXITED")
-                    .lt("created_at", exited_threshold)
-                    .is_("user_id", "null")
-                    .execute
-                )
-                exited_count = (
-                    len(res_exited.data) if res_exited and res_exited.data else 0
-                )
-
-                res_watching = await asyncio.to_thread(
-                    supabase.table("watchlist")
-                    .delete()
-                    .eq("status", "WATCHING")
-                    .lt("created_at", watching_threshold)
-                    .is_("user_id", "null")
-                    .execute
-                )
-                watching_count = (
-                    len(res_watching.data) if res_watching and res_watching.data else 0
-                )
-
-                if exited_count > 0 or watching_count > 0:
-                    print(
-                        f"🧹 [Auto-Cleanup] Watchlist 정리 완료: EXITED {exited_count}건, WATCHING {watching_count}건 삭제"
-                    )
-        except Exception as e:
-            print(f"⚠️ [Auto-Cleanup] 정리 중 오류 발생: {e}")
-
-        await asyncio.sleep(24 * 3600)
 
 
 async def _stop_current_stream():
@@ -1485,6 +1514,7 @@ async def system_heartbeat():
             await asyncio.sleep(600)
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             await _webhook.send_alert(
+                use_dev=True,
                 title="[HEARTBEAT] System Healthy",
                 description=(
                     f"시간: {now}\n상태: Active Monitoring\n"

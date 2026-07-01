@@ -16,7 +16,7 @@ import { queryClient } from './lib/queryClient';
 //   /backtesting→ 백테스팅 히스토리
 //   /settings   → 환경 설정
 const AlphaFundView = lazy(() => import('./pages/AlphaFundView').then(m => ({ default: m.AlphaFundView })));
-const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
+
 const MuzepartSearchPage = lazy(() => import('./pages/MuzepartSearchPage').then(m => ({ default: m.MuzepartSearchPage })));
 const UnifiedDashboard = lazy(() => import('./pages/UnifiedDashboard').then(m => ({ default: m.UnifiedDashboard })));
 
@@ -68,8 +68,7 @@ function App() {
                 {/* 알파 펀드 */}
                 <Route path="portfolio" element={<AlphaFundView />} />
 
-                {/* 관심 종목 */}
-                <Route path="watchlist" element={<WatchlistPage />} />
+
 
                 {/* DNA 시뮬레이터 */}
                 <Route path="dna-simulator" element={<DnaSimulatorPage />} />

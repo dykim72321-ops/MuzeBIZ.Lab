@@ -11,7 +11,7 @@
  */
 
 import clsx from 'clsx';
-import { toast } from 'sonner';
+
 import {
   ResponsiveContainer,
   AreaChart,
@@ -31,8 +31,6 @@ import {
   Clock,
   TrendingUp,
   TrendingDown,
-  Plus,
-  Loader2,
   ShieldCheck,
   FlaskConical,
 } from 'lucide-react';
@@ -50,7 +48,6 @@ import { RiskAnalyticsPanel } from '../components/dashboard/RiskAnalyticsPanel';
 import { PositionAnalyticsPanel } from '../components/dashboard/PositionAnalyticsPanel';
 import { BacktestPanel } from '../components/dashboard/BacktestPanel';
 
-import { addToWatchlist } from '../services/watchlistService';
 
 // Constants
 const PENNY_ENGINE_THRESHOLD = 1.0;
@@ -99,11 +96,11 @@ export const UnifiedDashboard = () => {
     edgeAlert,
     terminalData,
     chartRange,
-    addingTickers,
+
     displayedAccount,
     displayedWinRate,
     displayedTotalTrades,
-    watchlistedTickers,
+
     totalPnl,
     investedCapital,
     concentrationPct,
@@ -112,12 +109,12 @@ export const UnifiedDashboard = () => {
     setChartRange,
     setTerminalData,
     setEdgeAlert,
-    loadDashboardData,
+
     handleDeepDive,
     handleLiveHuntingTrigger,
     handleToggleArm,
     handleClosePosition,
-    handleAddDiscoveryToWatchlist,
+
     isHunting,
     navigate,
   } = useDashboardData();
@@ -445,20 +442,7 @@ export const UnifiedDashboard = () => {
                           >
                             <FlaskConical className="w-3.5 h-3.5" />
                           </button>
-                          {/* Watchlist Add Button */}
-                          {watchlistedTickers.has(stock.ticker) ? (
-                            <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] stroke-[2.5]" />
-                          ) : addingTickers.has(stock.ticker) ? (
-                            <Loader2 className="w-5 h-5 text-indigo-600 animate-spin shrink-0 drop-shadow-[0_0_8px_rgba(79,70,229,0.5)] stroke-[2.5]" />
-                          ) : (
-                            <button
-                              onClick={(e) => handleAddDiscoveryToWatchlist(e, stock)}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-300 text-slate-800 hover:text-indigo-600 transition-all shrink-0"
-                              title="관심종목 추가"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+
                         </div>
                       </div>
                     );
@@ -774,29 +758,7 @@ export const UnifiedDashboard = () => {
           isOpen={!!terminalData}
           onClose={() => setTerminalData(null)}
           data={terminalData}
-          onAddToWatchlist={async () => {
-            try {
-              await addToWatchlist(
-                terminalData.ticker,
-                undefined,
-                'WATCHING',
-                terminalData.price,
-                undefined,
-                undefined,
-                terminalData.dnaScore,
-              );
-              toast.success(`${terminalData.ticker} — 관심 종목에 추가되었습니다`, {
-                description: `DNA Score: ${terminalData.dnaScore}점`,
-                duration: 3000,
-              });
-              loadDashboardData();
-            } catch (error) {
-              console.error('Failed to add to watchlist:', error);
-              toast.error('관심 종목 추가에 실패했습니다', {
-                description: '잠시 후 다시 시도해 주세요.',
-              });
-            }
-          }}
+
         />
       )}
     </div>

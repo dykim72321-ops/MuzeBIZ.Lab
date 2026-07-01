@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Target, Zap } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { StockTerminalModal } from '../dashboard/StockTerminalModal';
-import { addToWatchlist } from '../../services/watchlistService';
-import { toast } from 'sonner';
+
 import clsx from 'clsx';
 
 interface AnalysisResultCardProps {
@@ -16,7 +15,6 @@ interface AnalysisResultCardProps {
     riskLevel: string;
     className?: string;
     quantSummary?: string;
-    price?: number;
 }
 
 export const AnalysisResultCard = ({
@@ -28,8 +26,7 @@ export const AnalysisResultCard = ({
     matchedLegend,
     riskLevel,
     className,
-    quantSummary,
-    price
+    quantSummary
 }: AnalysisResultCardProps) => {
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
@@ -141,20 +138,6 @@ export const AnalysisResultCard = ({
                     riskLevel,
                     formulaVerdict: quantSummary || `${ticker}는 현재 시스템 분석 점수 ${dnaScore}점으로 평가되고 있습니다.`,
                     quantSummary: quantSummary || `${ticker}는 현재 시스템 분석 점수 ${dnaScore}점으로 평가되고 있습니다.`
-                }}
-
-                onAddToWatchlist={async () => {
-                    try {
-                        await addToWatchlist(ticker, undefined, 'WATCHING', price, undefined, undefined, dnaScore);
-                        toast.success(`${ticker} — 관심 종목에 추가되었습니다`, {
-                            description: `DNA Score: ${dnaScore}점`,
-                            duration: 3000,
-                        });
-                    } catch (error) {
-                        toast.error('관심 종목 추가에 실패했습니다', {
-                            description: '잠시 후 다시 시도해 주세요.',
-                        });
-                    }
                 }}
             />
         </>

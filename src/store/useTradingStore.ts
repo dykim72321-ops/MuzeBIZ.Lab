@@ -18,7 +18,7 @@ import type {
   AlpacaAccount,
   TerminalData,
 } from '../types/dashboard';
-import type { WatchlistItem } from '../services/watchlistService';
+
 import type { BrokerPositionRaw, ClosedTradeRaw, PennyScanStatusResponse } from '../types/api';
 import {
   fetchBrokerAccount,
@@ -27,10 +27,7 @@ import {
   fetchClosedTrades,
   fetchPennyScanStatus,
 } from '../services/pythonApiService';
-import {
-  getWatchlist,
-  cleanupOldWatchlistItems,
-} from '../services/watchlistService';
+
 import { supabase as supabaseClient } from '../lib/supabase';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -53,7 +50,7 @@ interface TradingState {
   lastFetchedTime: string;
 
   // ── Data ──
-  watchlistRaw: WatchlistItem[];
+
   discoveryStocks: DiscoveryStock[];
   livePositions: PaperPosition[];
   liveHistory: PaperHistory[];
@@ -72,7 +69,6 @@ interface TradingState {
   setChartRange: (range: '7d' | '30d' | 'all') => void;
   setTerminalData: (data: TerminalData | null | ((prev: TerminalData | null) => TerminalData | null)) => void;
   setEdgeAlert: (alert: EdgeAlert) => void;
-  setWatchlistRaw: (items: WatchlistItem[]) => void;
 
   // ── Data Fetching ──
   loadDashboardData: () => Promise<void>;
@@ -133,7 +129,7 @@ export const useTradingStore = create<TradingState>((set) => ({
   loading: true,
   lastFetchedTime: '--:--:--',
 
-  watchlistRaw: [],
+
   discoveryStocks: [],
   livePositions: [],
   liveHistory: [],
@@ -157,7 +153,7 @@ export const useTradingStore = create<TradingState>((set) => ({
           : dataOrUpdater,
     })),
   setEdgeAlert: (alert) => set({ edgeAlert: alert }),
-  setWatchlistRaw: (items) => set({ watchlistRaw: items }),
+
 
   // ── loadArmStatus ──
   loadArmStatus: async () => {
@@ -174,18 +170,13 @@ export const useTradingStore = create<TradingState>((set) => ({
   // ── loadDashboardData ──
   loadDashboardData: async () => {
     try {
-      // Cleanup old items (non-blocking)
-      cleanupOldWatchlistItems(7).catch(console.error);
-
       const [
-        wl,
         alpaca,
         discoveryResult,
         scanStatus,
         brokerPositions,
         alpacaClosedTrades,
       ] = await Promise.all([
-        getWatchlist(),
         fetchBrokerAccount().catch(() => null),
         supabaseClient
           .from('daily_discovery')
@@ -204,7 +195,6 @@ export const useTradingStore = create<TradingState>((set) => ({
       const mappedHistory = mapClosedTrades(alpacaClosedTrades);
 
       const updates: Partial<TradingState> = {
-        watchlistRaw: wl,
         discoveryStocks: ((discoveryResult.data || []) as DiscoveryStock[]).filter(
           (s) => s.dna_score != null && s.price != null,
         ),

@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
     LayoutDashboard,
     FlaskConical,
-    List,
+
     Settings,
     Dna,
     LifeBuoy,
@@ -36,12 +36,6 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
         items: [
             { name: '알파 펀드 (Alpha Fund)', icon: Folder, path: '/portfolio' },
             { name: 'DNA 시뮬레이터', icon: FlaskConical, path: '/dna-simulator' },
-        ]
-    },
-    {
-        section: 'ASSETS',
-        items: [
-            { name: '관심 종목 (Watchlist)', icon: List, path: '/watchlist' },
         ]
     },
     {

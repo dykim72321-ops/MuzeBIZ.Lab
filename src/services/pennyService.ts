@@ -17,7 +17,7 @@ export interface PennyScanResult {
   is_extended: boolean;
   rank: number;
   is_top: boolean;
-  is_watchlisted?: boolean;
+
 }
 
 export interface PennyParams {
@@ -43,7 +43,7 @@ export interface PennyScanResponse {
 
 /**
  * $1 이하 페니 주식 퀀트 스캔 실행
- * 2개월 일봉 기반 RSI/MACD/ADX/RVOL → DNA 점수 → Top N 자동 watchlist 등록
+ * 2개월 일봉 기반 RSI/MACD/ADX/RVOL → DNA 점수 산출
  */
 export async function scanPennyStocks(
   maxPrice: number = 1.0,

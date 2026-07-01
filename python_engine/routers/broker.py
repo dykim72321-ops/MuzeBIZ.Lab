@@ -664,8 +664,6 @@ async def manual_paper_sell(
         supabase.table("paper_positions").delete().eq("ticker", ticker).execute
     )
 
-    await paper_engine._sync_watchlist_exit(ticker)
-
     status_emoji = "✅" if pnl_pct > 0 else "🛑"
     await paper_engine.webhook.send_alert(
         title=f"{status_emoji} [PAPER MANUAL EXIT] {ticker}",
@@ -740,7 +738,6 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
             await asyncio.to_thread(
                 supabase.table("paper_positions").delete().eq("ticker", ticker).execute
             )
-            await paper_engine._sync_watchlist_exit(ticker)
             closed_tickers.append(ticker)
             total_proceeds += proceeds
         except Exception as e:

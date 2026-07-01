@@ -11,6 +11,7 @@ from datetime import datetime
 class WebhookManager:
     def __init__(self):
         self.webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "")
+        self.dev_webhook_url = os.getenv("DEV_DISCORD_WEBHOOK_URL", "")
         self.supabase = None
         self.has_warned = False
 
@@ -20,7 +21,7 @@ class WebhookManager:
         # 클라이언트가 설정되면 경고 플래그 초기화
         self.has_warned = False
 
-    async def _post(self, payload: dict) -> None:
+    async def _post(self, payload: dict, use_dev: bool = False) -> None:
         """내부 공통 Webhook 전송 헬퍼"""
         # webhook_url이 비어있고 supabase 클라이언트가 설정되어 있으면 DB에서 동적으로 로드 시도
         if not self.webhook_url and self.supabase:
@@ -44,20 +45,24 @@ class WebhookManager:
                         f"⚠️ [Webhook] Failed to dynamic-load webhook from DB: {db_err}"
                     )
 
-        if not self.webhook_url:
+        target_url = self.dev_webhook_url if use_dev else self.webhook_url
+
+        if not target_url:
             if not self.has_warned:
                 print(
-                    "⚠️ DISCORD_WEBHOOK_URL이 설정되지 않았습니다. (알림 건너뜀 - 이후 알림 무시)"
+                    f"⚠️ {'DEV_' if use_dev else ''}DISCORD_WEBHOOK_URL이 설정되지 않았습니다. (알림 건너뜀 - 이후 알림 무시)"
                 )
                 self.has_warned = True
             return
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.webhook_url, json=payload) as resp:
+                async with session.post(target_url, json=payload) as resp:
                     if resp.status not in (200, 204):
                         print(f"❌ Webhook Error {resp.status}: {await resp.text()}")
                     else:
-                        print(f"📨 Discord 알림 전송 완료 (status: {resp.status})")
+                        print(
+                            f"📨 Discord 알림 전송 완료 (status: {resp.status}, dev: {use_dev})"
+                        )
         except Exception as e:
             print(f"❌ Webhook 전송 실패: {e}")
 
@@ -157,7 +162,7 @@ class WebhookManager:
             ]
         }
 
-        await self._post(payload)
+        await self._post(payload, use_dev=True)
 
     async def send_daily_summary(
         self, discovered: int, validated: int, super_oversold: int
@@ -192,10 +197,15 @@ class WebhookManager:
                 }
             ]
         }
-        await self._post(payload)
+        await self._post(payload, use_dev=True)
 
     async def send_alert(
-        self, title: str, description: str, color: int = 0x3498DB, fields: list = None
+        self,
+        title: str,
+        description: str,
+        color: int = 0x3498DB,
+        fields: list = None,
+        use_dev: bool = False,
     ):
         """범용 알림 (하위 호환 유지)"""
         payload = {
@@ -211,4 +221,4 @@ class WebhookManager:
         }
         if fields:
             payload["embeds"][0]["fields"] = fields
-        await self._post(payload)
+        await self._post(payload, use_dev=use_dev)

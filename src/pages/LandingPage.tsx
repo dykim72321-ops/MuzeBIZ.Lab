@@ -128,13 +128,7 @@ export default function LandingPage() {
               <LayoutGrid className="w-3.5 h-3.5" />
               <span className="text-[12px] font-bold">통합 지휘소</span>
             </button>
-            <button 
-              onClick={() => handleNavClick('/stock/watchlist')}
-              className="flex items-center gap-2 px-4 py-2 text-[#8d90a0] hover:text-white hover:bg-[#2a2f45] rounded-md transition-colors cursor-pointer"
-            >
-              <Activity className="w-3.5 h-3.5" />
-              <span className="text-[12px] font-bold">모니터링 오빗</span>
-            </button>
+
             <button 
               onClick={() => handleNavClick('/dna-simulator')}
               className="flex items-center gap-2 px-4 py-2 text-[#8d90a0] hover:text-white hover:bg-[#2a2f45] rounded-md transition-colors cursor-pointer"
