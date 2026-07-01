@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Zap } from 'lucide-react';
-import { getWatchlist, removeFromWatchlist, addToWatchlist, type WatchlistItem } from '../services/watchlistService';
+import { getWatchlist, removeFromWatchlist, addToWatchlist, cleanupExitedItems, type WatchlistItem } from '../services/watchlistService';
 import {
   fetchMultipleStocksOptimized
 } from '../services/stockService';
@@ -13,26 +13,47 @@ import { WatchlistHeader } from '../components/watchlist/WatchlistHeader';
 import { WatchlistEmptyState } from '../components/watchlist/WatchlistEmptyState';
 import type { Stock } from '../types';
 
+// WATCHING 상태 종목의 DNA 자동 제거 임계값
+const DNA_AUTO_REMOVE_THRESHOLD = 40;
+
 export const WatchlistPage = () => {
   const navigate = useNavigate();
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false); // 🆕 Silent refresh state
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  // DNA ≤ 40 자동 삭제 알림 (5초 표시 후 사라짐)
+  const [autoRemovedTickers, setAutoRemovedTickers] = useState<string[]>([]);
 
   // Terminal Modal State
   const [terminalData, setTerminalData] = useState<any | null>(null);
-  const [addLoading, setAddLoading] = useState(false); // 🆕 Ticker adding state
+  const [addLoading, setAddLoading] = useState(false);
+
+  // unmount 후 state 업데이트 방지용 ref
+  const isMountedRef = useRef(false);
+  // cleanup에서 guard 타이머를 정리할 수 있도록 ref로 보관
+  const guardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRemovedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setIsRefreshing(true);
+
+    // 20초 안에 완료되지 않으면 로딩 강제 종료 (Python 백엔드 네트워크 타임아웃 방어)
+    if (guardTimerRef.current) clearTimeout(guardTimerRef.current);
+    guardTimerRef.current = setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setLoading(false);
+      setIsRefreshing(false);
+    }, 20000);
+
     try {
       const items = await getWatchlist();
+      if (!isMountedRef.current) return;
       setWatchlistItems(items);
-      
+
       if (items.length > 0) {
         const tickers = items.map(i => i.ticker);
         const now = new Date();
@@ -40,23 +61,53 @@ export const WatchlistPage = () => {
           const itemDate = new Date(item.addedAt);
           return itemDate < earliest ? itemDate : earliest;
         }, now);
-        
+
         const diffDays = Math.ceil(Math.abs(now.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)) + 5;
         const historyRange = diffDays <= 5 ? '5d' : diffDays <= 30 ? '1mo' : diffDays <= 90 ? '3mo' : '1y';
-        
+
         const enrichedStocks = await fetchMultipleStocksOptimized(tickers, historyRange);
-        
-        setStocks(enrichedStocks);
+        if (!isMountedRef.current) return;
+
+        // WATCHING 종목 중 DNA ≤ 40인 항목 자동 삭제 (관심종목 누적 방지 + 로딩 단축)
+        const weakTickers = enrichedStocks
+          .filter(s => {
+            const item = items.find(i => i.ticker === s.ticker);
+            return item?.status === 'WATCHING' && typeof s.dnaScore === 'number' && s.dnaScore <= DNA_AUTO_REMOVE_THRESHOLD;
+          })
+          .map(s => s.ticker);
+
+        if (weakTickers.length > 0) {
+          await Promise.allSettled(weakTickers.map(t => removeFromWatchlist(t)));
+          if (!isMountedRef.current) return;
+          // 5초 알림 표시
+          if (autoRemovedTimerRef.current) clearTimeout(autoRemovedTimerRef.current);
+          setAutoRemovedTickers(weakTickers);
+          autoRemovedTimerRef.current = setTimeout(() => {
+            if (isMountedRef.current) setAutoRemovedTickers([]);
+          }, 5000);
+        }
+
+        setWatchlistItems(prev => prev.filter(i => !weakTickers.includes(i.ticker)));
+        setStocks(enrichedStocks.filter(s => !weakTickers.includes(s.ticker)));
       }
     } catch (err) {
       console.error('Failed to load watchlist:', err);
     } finally {
-      setLoading(false);
-      setIsRefreshing(false);
+      if (guardTimerRef.current) {
+        clearTimeout(guardTimerRef.current);
+        guardTimerRef.current = null;
+      }
+      if (isMountedRef.current) {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
+    // EXITED 누적 행 즉시 DB 삭제 (백엔드 3일 주기 정리보다 빠른 프론트 선제 정리)
+    cleanupExitedItems();
     loadData();
 
     const interval = setInterval(() => {
@@ -91,6 +142,15 @@ export const WatchlistPage = () => {
       .subscribe();
 
     return () => {
+      isMountedRef.current = false;
+      if (guardTimerRef.current) {
+        clearTimeout(guardTimerRef.current);
+        guardTimerRef.current = null;
+      }
+      if (autoRemovedTimerRef.current) {
+        clearTimeout(autoRemovedTimerRef.current);
+        autoRemovedTimerRef.current = null;
+      }
       clearInterval(interval);
       supabase.removeChannel(channel);
     };
@@ -150,11 +210,21 @@ export const WatchlistPage = () => {
       <div className="absolute inset-0 opacity-[0.015] pointer-events-none" 
            style={{ backgroundImage: 'linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
 
-      {/* 🆕 Global Refresh Indicator */}
+      {/* Global Refresh Indicator */}
       {isRefreshing && (
         <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-xl animate-in fade-in slide-in-from-top-4">
           <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
           <span className="text-xs font-bold text-slate-700 uppercase tracking-[0.2em] font-mono">오빗 감시 동기화 중...</span>
+        </div>
+      )}
+
+      {/* DNA ≤ 40 자동 삭제 알림 */}
+      {autoRemovedTickers.length > 0 && (
+        <div className="fixed top-24 right-8 z-[100] flex items-center gap-3 bg-amber-50 px-4 py-2.5 rounded-xl border border-amber-200 shadow-xl animate-in fade-in slide-in-from-top-4">
+          <div className="w-2 h-2 bg-amber-500 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.6)]" />
+          <span className="text-xs font-bold text-amber-700 font-mono">
+            DNA ≤ 40 자동 제거: {autoRemovedTickers.join(', ')}
+          </span>
         </div>
       )}
 

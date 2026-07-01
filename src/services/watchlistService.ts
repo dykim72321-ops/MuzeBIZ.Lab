@@ -2,6 +2,9 @@ import { supabase } from '../lib/supabase';
 
 export type WatchlistStatus = 'WATCHING' | 'HOLDING' | 'EXITED';
 
+// timeout 시 빈 배열로 호출자 상태를 덮어쓰지 않도록 마지막 성공 결과를 보존
+const watchlistStaleCache: Record<string, WatchlistItem[]> = {};
+
 export interface WatchlistItem {
   ticker: string;
   addedAt: string;
@@ -26,14 +29,26 @@ export async function getWatchlist(includeExited = false): Promise<WatchlistItem
     query = query.neq('status', 'EXITED');
   }
 
-  const { data, error } = await query;
+  // Supabase 프로젝트 pause 상태에서 무한 대기 방지 (10초 타임아웃)
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Watchlist query timeout')), 10000)
+  );
 
-  if (error) {
-    console.error('Error fetching watchlist:', error);
-    return [];
+  const { data, error } = await Promise.race([query, timeoutPromise]).catch((err) => {
+    console.error('Watchlist query timed out or failed:', err);
+    return { data: null, error: err };
+  });
+
+  if (error || !data) {
+    const isTimeout = error && String(error.message).includes('timeout');
+    if (!isTimeout) {
+      console.error('Error fetching watchlist:', error);
+    }
+    // timeout/오류 시 빈 배열 대신 stale cache 반환 — 호출자 상태 보존
+    return watchlistStaleCache[String(includeExited)] ?? [];
   }
 
-  return data.map(item => ({
+  const result = data.map((item: any) => ({
     ticker: item.ticker,
     addedAt: item.created_at,
     notes: item.notes,
@@ -43,6 +58,9 @@ export async function getWatchlist(includeExited = false): Promise<WatchlistItem
     stopLoss: item.stop_loss ? Number(item.stop_loss) : undefined,
     initialDnaScore: item.initial_dna_score ? Number(item.initial_dna_score) : undefined,
   }));
+
+  watchlistStaleCache[String(includeExited)] = result;
+  return result;
 }
 
 /**
@@ -187,6 +205,17 @@ export async function clearWatchlist(): Promise<void> {
   if (error) {
     console.error('Error clearing watchlist:', error);
   }
+}
+
+/**
+ * EXITED 상태 항목을 DB에서 즉시 삭제 — 누적된 행이 쿼리 부하를 높이는 것을 방지
+ */
+export async function cleanupExitedItems(): Promise<void> {
+  const { error } = await supabase
+    .from('watchlist')
+    .delete()
+    .eq('status', 'EXITED');
+  if (error) console.warn('[Watchlist] cleanupExitedItems failed:', error);
 }
 
 /**

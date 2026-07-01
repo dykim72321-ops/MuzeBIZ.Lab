@@ -15,8 +15,9 @@ export const WATCHLIST_TICKERS = [
 const cache = new Map<string, { data: Stock; timestamp: number }>();
 // 🆕 장기 보존 히스토리 캐시 (세션 유지 동안 영구 캐시)
 const historyCache = new Map<string, { date: string; price: number }[]>();
-// 🆕 전일 종가 캐시 (세션 유지 동안 영구 캐시 - 하루 한 번만 변동)
-const prevCloseCache = new Map<string, number>();
+// 🆕 전일 종가 캐시 — 장 마감 후 8시간(익일 02:00 ET) 이후 만료되어 cross-day 오염 방지
+const PREV_CLOSE_TTL_MS = 8 * 60 * 60 * 1000;
+const prevCloseCache = new Map<string, { value: number; expiresAt: number }>();
 
 function getCacheDuration(): number {
   const now = new Date();
@@ -41,6 +42,18 @@ async function fetchWithTimeout(url: string, options: RequestInit & { timeout?: 
     clearTimeout(id);
     throw error;
   }
+}
+
+// Promise에 타임아웃을 적용하는 모듈 범위 헬퍼 — clearTimeout을 보장해 timer leak 방지
+// PromiseLike<T>를 받아 Supabase PostgrestFilterBuilder 등 thenable도 지원
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, label = 'Operation'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    Promise.resolve(promise).then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }
 
 // Finnhub API Key
@@ -152,9 +165,12 @@ async function fetchFromYahooDirect(ticker: string): Promise<Stock | null> {
 // Yahoo Finance API fallback (via Edge Function) - provides richer data
 async function fetchFromYahoo(ticker: string): Promise<Stock | null> {
   try {
-    const { data, error } = await supabase.functions.invoke('get-yahoo-quote', {
-      body: { ticker }
-    });
+    // Supabase Edge Function 호출에 8초 타임아웃 적용 (cold start 포함)
+    const { data, error } = await withTimeout(
+      supabase.functions.invoke('get-yahoo-quote', { body: { ticker } }),
+      8000,
+      'Yahoo Edge Function'
+    );
 
     if (error || !data || data.error) {
       console.warn(`[Yahoo] Failed for ${ticker}:`, error || data?.error);
@@ -209,7 +225,12 @@ async function fetchFromYahoo(ticker: string): Promise<Stock | null> {
 
     return stock;
   } catch (err) {
-    console.error(`[Yahoo] Failed for ${ticker}:`, err);
+    const isTimeout = err instanceof Error && err.message.includes('timed out');
+    if (isTimeout) {
+      console.warn(`[Yahoo] Edge Function timed out for ${ticker} (8s)`);
+    } else {
+      console.error(`[Yahoo] Failed for ${ticker}:`, err);
+    }
     return null;
   }
 }
@@ -316,6 +337,46 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
       return [];
     }
 
+    // 🆕 Batch fetch prevClose + volume from Yahoo (TTL 8h로 cross-day 오염 방지)
+    const prevCloseMap: Record<string, number> = {};
+    const yahooVolumeMap: Record<string, number> = {};
+    const now = Date.now();
+    const uncachedTickers = tickers.filter(t => {
+      const entry = prevCloseCache.get(t);
+      return !entry || entry.expiresAt < now;
+    });
+
+    if (uncachedTickers.length > 0) {
+      try {
+        const url = `/yahoo-api/v7/finance/quote?symbols=${uncachedTickers.join(',')}`;
+        const res = await fetchWithTimeout(url, { timeout: 4000 });
+        if (res.ok) {
+          const json = await res.json();
+          const batchResults = json?.quoteResponse?.result || [];
+          batchResults.forEach((item: any) => {
+            if (!item.symbol) return;
+            if (item.regularMarketPreviousClose) {
+              prevCloseMap[item.symbol] = item.regularMarketPreviousClose;
+              prevCloseCache.set(item.symbol, {
+                value: item.regularMarketPreviousClose,
+                expiresAt: now + PREV_CLOSE_TTL_MS,
+              });
+            }
+            if (item.regularMarketVolume) {
+              yahooVolumeMap[item.symbol] = item.regularMarketVolume;
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('[AlpacaQuotes] Yahoo batch prevClose failed, using stale cache:', err);
+        // 단일 실패점 방어: 배치 실패 시 만료된 캐시라도 사용해 전 종목 0% 방지
+        uncachedTickers.forEach(t => {
+          const stale = prevCloseCache.get(t);
+          if (stale) prevCloseMap[t] = stale.value;
+        });
+      }
+    }
+
     // 🆕 Chunk Yahoo Finance requests to prevent rate limit and connection queueing
     const validStocks: Stock[] = [];
     const CHUNK_SIZE = 5;
@@ -328,29 +389,9 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
 
         const price = alpacaData.last_price;
         let changePercent = 0;
-        let prevClose = prevCloseCache.get(ticker) || 0;
-        let volume = alpacaData.volume;
-
-        // Fetch prevClose from Yahoo only if we don't have it cached
-        if (prevClose === 0) {
-          try {
-            const url = `/yahoo-api/v8/finance/chart/${ticker}?interval=1d&range=2d`;
-            const res = await fetchWithTimeout(url, { timeout: 3000 });
-            if (res.ok) {
-              const json = await res.json();
-              const meta = json?.chart?.result?.[0]?.meta;
-              if (meta) {
-                prevClose = meta.chartPreviousClose ?? meta.previousClose ?? 0;
-                if (prevClose > 0) {
-                  prevCloseCache.set(ticker, prevClose);
-                }
-                volume = meta.regularMarketVolume ?? volume;
-              }
-            }
-          } catch (yErr) {
-            // ignore
-          }
-        }
+        let prevClose = prevCloseCache.get(ticker)?.value ?? prevCloseMap[ticker] ?? 0;
+        // Yahoo 전체 시장 거래량(IEX 샘플보다 정확) → RVOL 계산 정확도 향상
+        let volume = yahooVolumeMap[ticker] ?? alpacaData.volume;
 
         if (prevClose > 0) {
           changePercent = ((price - prevClose) / prevClose) * 100;
@@ -394,17 +435,18 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
       }
     }
 
-    // Batch fetch realtime signals for technical indicators
+    // Batch fetch realtime signals (5초 타임아웃)
     if (validStocks.length > 0) {
       try {
-        const { data: signalData } = await supabase
-          .from('realtime_signals')
-          .select('ticker, rsi, macd_diff, adx, rvol, dna_score')
-          .in('ticker', validStocks.map(s => s.ticker));
-        
-        if (signalData) {
+        const sigResult = await withTimeout(
+          supabase.from('realtime_signals').select('ticker, rsi, macd_diff, adx, rvol, dna_score').in('ticker', validStocks.map(s => s.ticker)),
+          5000,
+          'realtime signals (batch)'
+        ).catch(() => ({ data: null }));
+
+        if (sigResult.data) {
           validStocks.forEach(stock => {
-            const match = signalData.find(sig => sig.ticker === stock.ticker);
+            const match = sigResult.data!.find((sig: any) => sig.ticker === stock.ticker);
             if (match) {
               stock.rsi = match.rsi ?? undefined;
               stock.macdDiff = match.macd_diff ?? undefined;
@@ -451,13 +493,6 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
   } catch (err) {
     console.warn(`[AlpacaQuote] Failed for ${ticker}, falling back:`, err);
   }
-
-  const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Timeout')), ms);
-      promise.then(resolve).catch(reject).finally(() => clearTimeout(timer));
-    });
-  };
 
   try {
     // Fast-fail: 4 second timeout for the primary smart-quote endpoint
@@ -588,7 +623,15 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
       await Promise.all(
         chunk.map(async stock => {
           try {
-            stock.history = await fetchStockHistory(stock.ticker, 'D', days);
+            const cached = cache.get(stock.ticker);
+            // Re-use history if we fetched it recently (within 4 hours)
+            if (cached && cached.data.history && cached.data.history.length > 0 && Date.now() - cached.timestamp < 14400000) {
+              stock.history = cached.data.history;
+            } else {
+              stock.history = await fetchStockHistory(stock.ticker, 'D', days);
+              // Update cache with the new history
+              cache.set(stock.ticker, { data: { ...stock }, timestamp: Date.now() });
+            }
           } catch {
             stock.history = [];
           }
@@ -596,7 +639,7 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
       );
       // Wait shortly between chunks to avoid rate limit spikes
       if (i + HISTORY_CHUNK_SIZE < alpacaStocks.length) {
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
   }
@@ -639,18 +682,19 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
     }
   }
   
-  // 🆕 Batch fetch analysis cache for similarity/pattern match
+  // Batch fetch analysis cache (5초 타임아웃, 없어도 무방한 보조 데이터)
   try {
-    const { data: analysisCache } = await supabase
-      .from('stock_analysis_cache')
-      .select('ticker, analysis')
-      .in('ticker', results.map(s => s.ticker));
-    
-    if (analysisCache) {
+    const analysisCacheResult = await withTimeout(
+      supabase.from('stock_analysis_cache').select('ticker, analysis').in('ticker', results.map(s => s.ticker)),
+      5000,
+      'analysis cache'
+    ).catch(() => ({ data: null }));
+
+    if (analysisCacheResult.data) {
       results.forEach(stock => {
-        const cache = analysisCache.filter(c => c.ticker === stock.ticker);
-        if (cache.length > 0) {
-          stock.stock_analysis_cache = cache;
+        const cacheEntries = analysisCacheResult.data!.filter((c: any) => c.ticker === stock.ticker);
+        if (cacheEntries.length > 0) {
+          stock.stock_analysis_cache = cacheEntries;
         }
       });
     }
@@ -658,16 +702,17 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
     console.warn('[Fetch Optimization] Failed to fetch analysis cache:', err);
   }
 
-  // 🆕 Batch fetch realtime signals for technical indicators
+  // Batch fetch realtime signals (5초 타임아웃, 없어도 무방한 보조 데이터)
   try {
-    const { data: signalData } = await supabase
-      .from('realtime_signals')
-      .select('ticker, rsi, macd_diff, adx, rvol, dna_score')
-      .in('ticker', results.map(s => s.ticker));
-    
-    if (signalData) {
+    const signalResult = await withTimeout(
+      supabase.from('realtime_signals').select('ticker, rsi, macd_diff, adx, rvol, dna_score').in('ticker', results.map(s => s.ticker)),
+      5000,
+      'realtime signals'
+    ).catch(() => ({ data: null }));
+
+    if (signalResult.data) {
       results.forEach(stock => {
-        const match = signalData.find(sig => sig.ticker === stock.ticker);
+        const match = signalResult.data!.find((sig: any) => sig.ticker === stock.ticker);
         if (match) {
           stock.rsi = match.rsi ?? undefined;
           stock.macdDiff = match.macd_diff ?? undefined;
