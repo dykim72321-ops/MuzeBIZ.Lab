@@ -131,8 +131,7 @@ export function useDashboardData() {
   );
 
   const concentrationPct = useMemo(() => {
-    const cash = displayedAccount.cash_available ?? 100000;
-    const equity = cash + investedCapital;
+    const equity = displayedAccount.total_assets || 100000;
     if (equity === 0) return 0;
     return (investedCapital / equity) * 100;
   }, [investedCapital, displayedAccount]);
