@@ -64,9 +64,18 @@ _nyse_calendar = mcal.get_calendar("NYSE")
 _holiday_cache: dict = {}
 
 
-def is_market_hours() -> bool:
-    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00 및 휴장일 체크). DST 자동 처리."""
-    now_et = datetime.now(ZoneInfo("America/New_York"))
+def is_market_hours(ref_dt=None) -> bool:
+    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00 및 휴장일 체크). DST 자동 처리.
+
+    ref_dt: 바 타임스탬프(tz-aware). None이면 현재 벽시계로 판단.
+            warm_up 재생 등 과거 바를 처리할 때 반드시 바 시간을 전달해야
+            장외 시간 기준이 바 시간이 아닌 현재 시각으로 판단되는 버그를 방지한다.
+    """
+    if ref_dt is not None:
+        now_et = ref_dt.astimezone(ZoneInfo("America/New_York"))
+    else:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+
     if now_et.weekday() >= 5:
         return False
 
@@ -1068,8 +1077,32 @@ async def on_minute_bar_closed(bar):
         # ── 전체 DNA 경로 (신규 발굴 / 미보유 종목) ────────────────────────
         payload = await asyncio.to_thread(run_pulse_engine, ticker_symbol, df_hist)
 
-        # ── 장 외 시간 BUY 차단 ───────────────────────────────────────────
-        if payload.get("signal") == "BUY" and not is_market_hours():
+        # ── 장 외 시간 BUY 차단 (바 타임스탬프 기준) ─────────────────────
+        # is_market_hours()에 바 시간을 전달해야 warm_up 재생 바가
+        # 장 마감 후 처리될 때 현재 벽시계로 잘못 차단되지 않는다.
+        bar_ts = getattr(bar, "timestamp", None)
+        if payload.get("signal") == "BUY" and not is_market_hours(bar_ts):
+            if app_state.supabase and payload.get("strength") == "STRONG":
+                try:
+                    await asyncio.to_thread(
+                        app_state.supabase.table("engine_decisions")
+                        .insert(
+                            {
+                                "ticker": ticker_symbol,
+                                "gate": "MARKET_HOURS",
+                                "outcome": "BLOCKED",
+                                "signal": "BUY",
+                                "dna_score": float(payload.get("dna_score", 0)),
+                                "rsi": float(payload.get("rsi", 0)),
+                                "rvol": float(payload.get("rvol", 0)),
+                                "price": float(payload.get("price", 0)),
+                                "note": "장외 시간 BUY 차단",
+                            }
+                        )
+                        .execute
+                    )
+                except Exception:
+                    pass
             payload["signal"] = "HOLD"
             payload["strength"] = "NORMAL"
 
@@ -1096,6 +1129,27 @@ async def on_minute_bar_closed(bar):
             )
             if not is_valid:
                 print(f"🛡️ [Interceptor] {ticker_symbol} 매수 차단: {reject_reason}")
+                if app_state.supabase:
+                    try:
+                        await asyncio.to_thread(
+                            app_state.supabase.table("engine_decisions")
+                            .insert(
+                                {
+                                    "ticker": ticker_symbol,
+                                    "gate": "MOMENTUM_VALIDATOR",
+                                    "outcome": "BLOCKED",
+                                    "signal": "BUY",
+                                    "dna_score": float(payload.get("dna_score", 0)),
+                                    "rsi": float(payload.get("rsi", 0)),
+                                    "rvol": float(payload.get("rvol", 0)),
+                                    "price": float(payload.get("price", 0)),
+                                    "note": reject_reason,
+                                }
+                            )
+                            .execute
+                        )
+                    except Exception:
+                        pass
                 payload["signal"] = "HOLD"
                 payload["strength"] = "NORMAL"
                 payload["ai_report"] = (
@@ -1324,6 +1378,22 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
 
         if not active_tickers:
             print("⚠️ No active tickers to monitor. Pulse engine standby.")
+            if app_state.supabase:
+                try:
+                    await asyncio.to_thread(
+                        app_state.supabase.table("engine_decisions")
+                        .insert(
+                            {
+                                "ticker": "__SYSTEM__",
+                                "gate": "NO_TICKERS",
+                                "outcome": "BLOCKED",
+                                "note": "daily_discovery가 비어있어 스트림 구독 대상 없음 — Pulse engine standby",
+                            }
+                        )
+                        .execute
+                    )
+                except Exception:
+                    pass
             return
 
         if active_tickers:
@@ -1334,6 +1404,22 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
 
         if not api_key or not api_secret:
             print("❌ Alpaca API Key missing. Stream cannot start.")
+            if app_state.supabase:
+                try:
+                    await asyncio.to_thread(
+                        app_state.supabase.table("engine_decisions")
+                        .insert(
+                            {
+                                "ticker": "__SYSTEM__",
+                                "gate": "API_KEY_MISSING",
+                                "outcome": "BLOCKED",
+                                "note": "APCA_API_KEY_ID 또는 APCA_API_SECRET_KEY 미설정",
+                            }
+                        )
+                        .execute
+                    )
+                except Exception:
+                    pass
             return
 
         stream = StockDataStream(api_key, api_secret, feed=DataFeed.IEX)

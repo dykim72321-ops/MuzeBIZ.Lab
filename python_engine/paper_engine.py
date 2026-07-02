@@ -79,6 +79,37 @@ class PaperTradingManager:
         self.webhook = WebhookManager()
         self.webhook.set_supabase_client(supabase_client)
 
+    async def _log_decision(
+        self,
+        ticker: str,
+        gate: str,
+        outcome: str,
+        signal: str = None,
+        dna_score: float = None,
+        rsi: float = None,
+        rvol: float = None,
+        price: float = None,
+        note: str = None,
+    ):
+        """게이트 통과/차단 결과를 engine_decisions 테이블에 기록."""
+        try:
+            row = {
+                "ticker": ticker,
+                "gate": gate,
+                "outcome": outcome,
+                "signal": signal,
+                "dna_score": dna_score,
+                "rsi": rsi,
+                "rvol": rvol,
+                "price": price,
+                "note": note,
+            }
+            await asyncio.to_thread(
+                self.supabase.table("engine_decisions").insert(row).execute
+            )
+        except Exception as e:
+            print(f"⚠️ [DecisionLog] insert failed: {e}")
+
     async def get_account(self):
         query = self.supabase.table("paper_account").select("*").limit(1)
         res = await asyncio.to_thread(query.execute)
@@ -262,6 +293,34 @@ class PaperTradingManager:
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
         is_penny_signal = price <= PENNY_MAX_PRICE
         dna_gate = 55 if is_penny_signal else 70
+
+        # ── Gate: signal 조건 사전 체크 (ARMED 여부 포함) ────────────────────
+        if signal_type == "BUY" and strength == "STRONG" and not pos:
+            if not is_armed:
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="ARMED_OFF",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=price,
+                    note="SYSTEM_ARMED=False — 매수 신호 수신했으나 비무장 상태",
+                )
+                return
+            if dna_score < dna_gate:
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="DNA_GATE",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=price,
+                    note=f"DNA {dna_score:.1f} < gate {dna_gate} ({'penny' if is_penny_signal else 'normal'})",
+                )
+                return
+
         if (
             signal_type == "BUY"
             and strength == "STRONG"
@@ -279,11 +338,31 @@ class PaperTradingManager:
                 print(
                     f"⛔ [{ticker}] 동시 포지션 한도 초과 ({MAX_CONCURRENT_POSITIONS}개) — 진입 차단"
                 )
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="MAX_POSITIONS",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=price,
+                    note=f"동시 포지션 {pos_count_res.count}개 ≥ 한도 {MAX_CONCURRENT_POSITIONS}개",
+                )
                 return
             # 재진입 쿨다운 체크 (청산 후 60분 이내 재진입 차단)
             if await self._is_in_cooldown(ticker):
                 print(
                     f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
+                )
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="COOLDOWN",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=price,
+                    note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
                 )
                 return
             # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 80% 초과 시 신규 진입 차단
@@ -293,6 +372,16 @@ class PaperTradingManager:
                 conc_pct = invested / total_equity * 100
                 print(
                     f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
+                )
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="CONCENTRATION",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=price,
+                    note=f"투입 비중 {conc_pct:.1f}% ≥ 한도 {MAX_CONCENTRATION_PCT*100:.0f}%",
                 )
                 return
             # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
@@ -310,6 +399,16 @@ class PaperTradingManager:
                 MAX_BUY_BUDGET,
             )
             if buy_budget < MIN_BUY_BUDGET:
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="MIN_BUDGET",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=price,
+                    note=f"매수 예산 ${buy_budget:.2f} < 최소 ${MIN_BUY_BUDGET}",
+                )
                 return
 
             # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결
@@ -370,6 +469,16 @@ class PaperTradingManager:
                         f"손절선: ${ts_threshold:.4f} ({'-15%' if is_penny_signal else '-10%'}) | 비중: {effective_fraction*100:.1f}%{report_line}"
                     ),
                     color=0x2ECC71,
+                )
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="EXECUTED",
+                    outcome="EXECUTED",
+                    signal="BUY",
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=fill_price,
+                    note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}",
                 )
                 # 관심종목 자동 등록 (DNA≥80 매수 → HOLDING)
                 await self._sync_watchlist_buy(
