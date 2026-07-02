@@ -18,7 +18,7 @@ MAX_BUY_BUDGET = 5000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_B
 # $5k × 15 = $75k = MAX_CONCENTRATION 75% → 내부 수학 완결
 MAX_CONCURRENT_POSITIONS = 20  # 동시 보유 최대 종목 수 (실질 도달 가능 상한)
 MAX_CONCENTRATION_PCT = 0.75  # 총 자산 대비 투입 비중 상한 (75%)
-TS_INIT_PCT = 0.95  # 초기 트레일링 스탑: 진입가 × 95% (-5%, 손실 포지션 빠른 탈출)
+TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%, 손실 포지션 빠른 탈출)
 TS_TRAIL_PCT = 0.95  # 최고가 갱신 시 TS 추적 비율: highest × 95%
 SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
 SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
@@ -26,7 +26,7 @@ POS_WEIGHT = 0.15  # paper_positions.weight 기록값
 
 # ── Penny Lab 전용 파라미터 ($1 이하 종목 동적 적용) ─────────────────────────
 PENNY_MAX_PRICE = 1.0  # 진입가 ≤ 이 값이면 페니 파라미터 자동 전환
-PENNY_TS_INIT_PCT = 0.90  # 초기 TS: 진입가 × 90% (-10%)
+PENNY_TS_INIT_PCT = 0.85  # 초기 TS: 진입가 × 85% (-15%)
 PENNY_TS_TRAIL_PCT = 0.90  # 최고가 추종 TS: highest × 90%
 PENNY_BREAKEVEN_TRIGGER = 1.10  # 수익 +10% 달성 시 TS 하한을 진입가(본전)로 락인
 PENNY_SCALE_OUT_RSI = 60  # 1차 매도 RSI 기준 (일반 52 → 페니 60)

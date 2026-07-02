@@ -96,6 +96,7 @@ class DBManager:
             discovery_res = (
                 self.supabase.table("daily_discovery")
                 .select("ticker")
+                .not_.is_("dna_score", "null")
                 .order("dna_score", desc=True)
                 .limit(limit)
                 .execute()

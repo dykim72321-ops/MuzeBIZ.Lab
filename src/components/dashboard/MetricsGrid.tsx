@@ -81,9 +81,9 @@ const SpeedometerGauge = React.memo(function SpeedometerGauge({
           />
           <circle cx="50" cy="50" r="3.5" fill="#ffffff" stroke={dialColor} strokeWidth="1.5" />
         </svg>
-        <div className="absolute bottom-1 text-center font-mono leading-none">
-          <span className="text-2xl font-black text-slate-900">{pct.toFixed(1)}%</span>
-          <span className="text-xs font-bold text-slate-800 block mt-0.5 font-sans">{label}</span>
+        <div className="absolute bottom-[-4px] flex flex-col items-center justify-center text-center">
+          <span className="text-[26px] font-black text-slate-900 font-mono leading-tight">{pct.toFixed(1)}%</span>
+          <span className="text-[11px] font-extrabold text-slate-600 block mt-1 tracking-wider uppercase font-sans">{label}</span>
         </div>
       </div>
 

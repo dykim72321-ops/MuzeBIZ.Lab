@@ -153,20 +153,19 @@ export const UnifiedDashboard = () => {
 
         {/* SYSTEM STATUS INFO BAR */}
         <div className="bg-slate-50 py-5 px-5 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-2.5 text-slate-900">
+          <div className="flex items-center gap-2.5 text-slate-900 min-w-0">
             <span className="w-2.5 h-2.5 rounded-full bg-slate-700 animate-pulse shadow-[0_0_8px_rgba(71,85,105,0.5)] shrink-0" />
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-900 border-b border-slate-900 pb-0.5 font-sans">
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-900 border-b border-slate-900 pb-0.5 font-sans whitespace-nowrap shrink-0">
               시스템 가이드
             </span>
-            <span className="text-slate-800 text-[13px] font-semibold font-sans">
+            <span className="text-slate-800 text-[13px] font-semibold font-sans truncate">
               {isArmed
                 ? '자동 매매 활성(ARMED) 모드입니다. 관심 종목 중 퀀트 매수 지표 조건 충족 시 실시간 자동 매수가 구동됩니다.'
                 : '현재 안전 관제(SAFE) 모드입니다. 실시간 탐색 및 알림은 유지되나 가상 주문은 실행되지 않습니다.'}
             </span>
           </div>
-          <div className="text-sm font-semibold text-slate-550 md:text-right shrink-0 font-sans">
-            * $100 이하 전 종목 스캔 · 진입가 $1 이하 자동 페니 파라미터 (-10% TS) · $1 초과 일반 파라미터
-            (-5% TS)
+          <div className="text-sm font-semibold text-slate-550 md:text-right shrink-0 font-sans whitespace-nowrap">
+            * $100 이하 전 종목 스캔 · 진입가 $1 이하 페니 파라미터 (-15% TS) · $1 초과 일반 파라미터 (-10% TS)
           </div>
         </div>
 
