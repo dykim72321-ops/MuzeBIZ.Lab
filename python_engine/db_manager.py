@@ -110,8 +110,6 @@ class DBManager:
 
         return tickers[:limit]
 
-        return ["TSLA", "AAPL"]
-
 
 if __name__ == "__main__":
     db = DBManager()
