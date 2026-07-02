@@ -679,14 +679,14 @@ class PaperTradingManager:
                 ts_threshold = max(ts_threshold, new_ts)
 
             # B. SCALE_OUT 체크
+            profit_pct = price / entry_price - 1
             if is_penny:
-                profit_pct = price / entry_price - 1
                 # RSI arm은 최소 +5% 수익 확인 후 허용 (단순 변동성으로 인한 조기 청산 방지)
                 scale_trigger = (
                     rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
                 ) or profit_pct >= PENNY_SCALE_OUT_PROFIT
             else:
-                scale_trigger = rsi > 52
+                scale_trigger = rsi > 52 or profit_pct >= 0.07
             sell_slip = SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL
             if (
                 scale_trigger

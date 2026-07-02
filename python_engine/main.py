@@ -1077,11 +1077,27 @@ async def on_minute_bar_closed(bar):
         # ── 전체 DNA 경로 (신규 발굴 / 미보유 종목) ────────────────────────
         payload = await asyncio.to_thread(run_pulse_engine, ticker_symbol, df_hist)
 
-        # ── 장 외 시간 BUY 차단 (바 타임스탬프 기준) ─────────────────────
+        # ── 장 외 시간 및 15:00 ET 이후 BUY 차단 (바 타임스탬프 기준) ─────────────────────
         # is_market_hours()에 바 시간을 전달해야 warm_up 재생 바가
         # 장 마감 후 처리될 때 현재 벽시계로 잘못 차단되지 않는다.
         bar_ts = getattr(bar, "timestamp", None)
-        if payload.get("signal") == "BUY" and not is_market_hours(bar_ts):
+        is_market_open = is_market_hours(bar_ts)
+        is_before_1500 = False
+        if bar_ts is not None:
+            now_et = bar_ts.astimezone(ZoneInfo("America/New_York"))
+        else:
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+        if (now_et.hour * 60 + now_et.minute) < (15 * 60):
+            is_before_1500 = True
+
+        if payload.get("signal") == "BUY" and (
+            not is_market_open or not is_before_1500
+        ):
+            reason = (
+                "장외 시간 BUY 차단"
+                if not is_market_open
+                else "15:00 ET 이후 신규 진입 차단"
+            )
             if app_state.supabase and payload.get("strength") == "STRONG":
                 try:
                     await asyncio.to_thread(
@@ -1096,7 +1112,7 @@ async def on_minute_bar_closed(bar):
                                 "rsi": float(payload.get("rsi", 0)),
                                 "rvol": float(payload.get("rvol", 0)),
                                 "price": float(payload.get("price", 0)),
-                                "note": "장외 시간 BUY 차단",
+                                "note": reason,
                             }
                         )
                         .execute
