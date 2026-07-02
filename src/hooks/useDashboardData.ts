@@ -179,19 +179,22 @@ export function useDashboardData() {
       let name = '?';
       if (item.created_at) {
         const d = new Date(item.created_at);
-        const isToday = d.toDateString() === new Date().toDateString();
-        if (isToday) {
-          name = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        } else {
-          name = `${d.getMonth() + 1}/${d.getDate()}`;
-        }
+        name = `${d.getMonth() + 1}/${d.getDate()}`;
       }
       return { name, value: Math.round(running), ts: new Date(item.created_at ?? 0).getTime() };
     });
 
-    if (chartRange === 'all' && allPoints.length > 0) {
+    let startTs = 0;
+    if (chartRange === '7d') {
+      startTs = now - 7 * 86_400_000;
+      startLabel = '7일전';
+    } else if (chartRange === '30d') {
+      startTs = now - 30 * 86_400_000;
+      startLabel = '30일전';
+    } else if (chartRange === 'all' && allPoints.length > 0) {
       const d = new Date(allPoints[0].ts);
-      startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+      startLabel = '시작';
+      startTs = allPoints[0].ts - 86_400_000; // 1 day before first trade
     }
 
     const inRange =
@@ -212,11 +215,11 @@ export function useDashboardData() {
     });
 
     const series: { name: string; value: number; ts: number; ma: number }[] = [
-      { name: startLabel, value: startValue, ts: 0, ma: startValue },
+      { name: startLabel, value: startValue, ts: startTs, ma: startValue },
       ...maPoints,
     ];
 
-    const lastTs = maPoints.length > 0 ? maPoints[maPoints.length - 1].ts : 0;
+    const lastTs = maPoints.length > 0 ? maPoints[maPoints.length - 1].ts : startTs;
     if (now - lastTs > 60_000) {
       const currentVal =
         currentActualValue != null
@@ -227,7 +230,23 @@ export function useDashboardData() {
       series.push({ name: '현재', value: currentVal, ts: now, ma: currentVal });
     }
 
-    return series;
+    // Duplicate string labels removal logic: 
+    // Recharts uses 'name' for XAxis ticks if dataKey='name'.
+    // If consecutive points have the same date, clear out the name to avoid overlapping text,
+    // but keep it in tooltip if possible? Actually, if we just empty the name, XAxis won't show it.
+    let lastSeenName = '';
+    const cleanSeries = series.map((s, idx) => {
+      if (idx === 0 || idx === series.length - 1) return s; // Always keep start and end
+      if (s.name === lastSeenName) {
+        return { ...s, displayName: '' }; // displayName used for Axis
+      }
+      lastSeenName = s.name;
+      return { ...s, displayName: s.name };
+    });
+    cleanSeries[0].displayName = cleanSeries[0].name;
+    cleanSeries[cleanSeries.length - 1].displayName = cleanSeries[cleanSeries.length - 1].name;
+
+    return cleanSeries;
   }, [liveHistory, chartRange, displayedAccount]);
 
   // ── Handlers ──

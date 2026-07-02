@@ -269,48 +269,52 @@ export const UnifiedDashboard = () => {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                    <AreaChart data={chartData} margin={{ top: 15, right: 10, left: 5, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15} />
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0.01} />
+                          <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis
-                        dataKey="name"
-                        stroke="#64748b"
+                        dataKey="displayName"
+                        stroke="#94a3b8"
                         fontSize={11}
                         tickLine={false}
                         axisLine={false}
-                        dy={8}
-                        minTickGap={30}
+                        dy={10}
+                        minTickGap={20}
                         interval="preserveStartEnd"
                       />
                       <YAxis
-                        stroke="#64748b"
+                        stroke="#94a3b8"
                         fontSize={11}
                         tickLine={false}
                         axisLine={false}
-                        domain={['dataMin - 1000', 'dataMax + 1000']}
-                        tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`}
+                        domain={['auto', 'auto']}
+                        tickFormatter={(val) => `$${(val / 1000).toFixed(1)}k`}
                       />
                       <Tooltip content={<CustomTooltip />} />
                       <Area
-                        type="monotone"
+                        type="monotoneX"
                         dataKey="value"
-                        stroke="#6366f1"
-                        strokeWidth={3}
+                        stroke="#4f46e5"
+                        strokeWidth={2.5}
                         fillOpacity={1}
                         fill="url(#colorValue)"
+                        activeDot={{ r: 5, fill: '#4f46e5', stroke: '#fff', strokeWidth: 2 }}
+                        animationDuration={1000}
                       />
                       <Line
-                        type="monotone"
+                        type="monotoneX"
                         dataKey="ma"
                         stroke="#f59e0b"
                         strokeWidth={1.5}
                         dot={false}
-                        strokeDasharray="4 2"
+                        strokeDasharray="4 4"
+                        opacity={0.8}
+                        animationDuration={1000}
                       />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -487,7 +491,7 @@ export const UnifiedDashboard = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-100 text-xs font-mono font-semibold text-slate-800 uppercase tracking-widest">
+                  <tr className="border-b border-slate-100 text-xs font-mono font-semibold text-slate-500 uppercase tracking-widest">
                     <th className="pb-3">종목</th>
                     <th className="pb-3 text-right">구분</th>
                     <th className="pb-3 text-right font-mono text-xs hidden md:table-cell">수량</th>
@@ -552,7 +556,16 @@ export const UnifiedDashboard = () => {
                               <span className="text-slate-800">—</span>
                             )}
                           </td>
-                          <td className="py-4 text-right font-mono text-rose-500 text-sm font-semibold tabular-nums hidden md:table-cell">
+                          <td
+                            className={clsx(
+                              'py-4 text-right font-mono text-sm font-semibold tabular-nums hidden md:table-cell',
+                              pos.ts_threshold != null
+                                ? pos.ts_threshold > pos.entry_price
+                                  ? 'text-emerald-500' // Secured profit
+                                  : 'text-amber-500' // Stop loss below entry
+                                : 'text-slate-400',
+                            )}
+                          >
                             {pos.ts_threshold
                               ? `$${Number(pos.ts_threshold).toFixed(decimals)}`
                               : 'N/A'}
@@ -586,10 +599,10 @@ export const UnifiedDashboard = () => {
                               </span>
                             )}
                           </td>
-                          <td className="py-4 text-right">
+                          <td className="py-4 text-right pr-1">
                             <button
                               onClick={() => handleClosePosition(pos.ticker)}
-                              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-600 border border-rose-200 text-rose-600 hover:text-white text-xs font-bold rounded-lg transition-all cursor-pointer font-sans"
+                              className="px-3.5 py-1.5 bg-rose-50/80 hover:bg-rose-500 border border-rose-200/80 text-rose-600 hover:text-white text-[11px] font-black rounded-md transition-all duration-200 shadow-sm hover:shadow-md active:scale-95 cursor-pointer font-sans whitespace-nowrap"
                             >
                               즉시 청산
                             </button>
