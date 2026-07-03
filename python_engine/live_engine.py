@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 from typing import TYPE_CHECKING
 
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -114,7 +115,8 @@ async def start_trade_update_stream(
 
     main.py startup_event에서 asyncio.create_task()로 기동한다.
     """
-    stream = TradingStream(api_key, api_secret, paper=False)
+    is_paper = os.getenv("APCA_PAPER", "true").lower() == "true"
+    stream = TradingStream(api_key, api_secret, paper=is_paper)
 
     async def _on_trade_update(data):
         event = getattr(data, "event", None)
@@ -178,3 +180,8 @@ async def start_trade_update_stream(
         await stream._run_forever()
     except Exception as e:
         print(f"❌ [TradeUpdate Stream] 종료: {e}")
+    finally:
+        try:
+            await stream.close()
+        except Exception:
+            pass

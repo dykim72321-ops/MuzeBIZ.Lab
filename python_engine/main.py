@@ -1721,6 +1721,26 @@ async def startup_event():
     asyncio.create_task(stream_liveness_watchdog())
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("🛑 [Shutdown] Stopping streams gracefully...")
+    await _stop_current_stream()
+    if app_state._current_ws_stream:
+        try:
+            await app_state._current_ws_stream.close()
+        except Exception as e:
+            print(f"⚠️ [Shutdown] Error closing stream: {e}")
+
+    if hasattr(app_state, "_trade_update_task") and app_state._trade_update_task:
+        task = app_state._trade_update_task
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+
 async def run_startup_sequence():
     """초기화 시퀀스: 워밍업 후 스냅샷 펄스 방출 및 스트림 시작"""
     supabase = app_state.supabase
@@ -1852,7 +1872,7 @@ async def run_startup_sequence():
     if app_state.TRADE_MODE == "LIVE" and app_state.live_engine is not None:
         from live_engine import start_trade_update_stream
 
-        asyncio.create_task(
+        app_state._trade_update_task = asyncio.create_task(
             start_trade_update_stream(
                 api_key=_APCA_API_KEY,
                 api_secret=_APCA_API_SECRET,
