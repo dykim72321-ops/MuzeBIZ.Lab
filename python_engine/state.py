@@ -16,12 +16,23 @@ class AppState:
     # ── 자동 매매 플래그 ────────────────────────────────────────────────
     SYSTEM_ARMED: bool = False
 
+    # ── 매매 모드 ("PAPER" | "LIVE") ────────────────────────────────────
+    TRADE_MODE: str = "PAPER"
+
     # ── 외부 클라이언트 ─────────────────────────────────────────────────
     supabase = None  # supabase.Client
     paper_engine = None  # PaperTradingManager
+    live_engine = None  # LiveTradingManager (TRADE_MODE=LIVE 시 초기화)
     trading_client = None  # alpaca TradingClient
     webhook = None  # WebhookManager
     db = None  # DBManager
+
+    @property
+    def active_engine(self):
+        """현재 TRADE_MODE에 따라 활성 엔진을 반환."""
+        if self.TRADE_MODE == "LIVE" and self.live_engine is not None:
+            return self.live_engine
+        return self.paper_engine
 
     # ── WebSocket 브로드캐스터 ──────────────────────────────────────────
     manager = None  # ConnectionManager (main.py에서 주입)

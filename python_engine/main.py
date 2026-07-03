@@ -49,6 +49,9 @@ from supabase import Client, create_client
 from db_manager import DBManager
 from paper_engine import PaperTradingManager
 from state import app_state
+
+_TRADE_MODE = os.getenv("TRADE_MODE", "PAPER").upper()
+app_state.TRADE_MODE = _TRADE_MODE
 from webhook_manager import WebhookManager
 
 try:
@@ -196,6 +199,28 @@ try:
                 )
 except Exception:
     app_state.supabase = None
+
+# ── LiveTradingManager 초기화 (TRADE_MODE=LIVE) ──────────────────────────────
+# APCA_PAPER=true  → Alpaca 페이퍼 계좌에 실제 주문 제출 (Alpaca 사이트에서 확인 가능)
+# APCA_PAPER=false → Alpaca 실계좌에 실제 주문 제출 (실제 자금 사용 — 주의)
+if _TRADE_MODE == "LIVE" and app_state.supabase and app_state.trading_client:
+    from live_engine import LiveTradingManager
+
+    app_state.live_engine = LiveTradingManager(
+        app_state.supabase, app_state.trading_client
+    )
+    if app_state.live_engine.webhook and _webhook.webhook_url:
+        app_state.live_engine.webhook.webhook_url = _webhook.webhook_url
+    account_type = "페이퍼(가상)" if _APCA_PAPER else "실계좌(실제 자금!)"
+    print(f"🔴 [INIT] LiveTradingManager 초기화 — Alpaca {account_type} 주문 활성")
+    if not _APCA_PAPER:
+        print(
+            "⚠️  [INIT] 실계좌 모드: 실제 자금으로 주문됩니다. ARM 활성 전 반드시 확인!"
+        )
+elif _TRADE_MODE == "LIVE":
+    print("⚠️ [INIT] TRADE_MODE=LIVE이지만 Supabase/Alpaca 미연결 — Paper 유지")
+else:
+    print("📄 [INIT] TRADE_MODE=PAPER — 내부 가상매매 모드 (Alpaca 주문 없음)")
 
 # ── stats_cache 공유 참조 (routers/strategy.py 와 run_pulse_engine 에서 모두 사용) ──
 from routers.strategy import stats_cache, _stats_cache_lock
@@ -1048,7 +1073,7 @@ async def on_minute_bar_closed(bar):
                     "dna_score": None,
                 }
             )
-            await app_state.paper_engine.process_signal(
+            await app_state.active_engine.process_signal(
                 ticker=ticker_symbol,
                 price=current_price,
                 signal_type="SELL" if is_eod else "HOLD",
@@ -1269,8 +1294,8 @@ async def on_minute_bar_closed(bar):
                         f"⚠️ [daily_discovery] upsert skipped for {ticker_symbol}: {dd_err}"
                     )
 
-                if app_state.paper_engine:
-                    await app_state.paper_engine.process_signal(
+                if app_state.active_engine:
+                    await app_state.active_engine.process_signal(
                         ticker=ticker_symbol,
                         price=payload.get("price"),
                         signal_type=payload.get("signal"),
@@ -1822,6 +1847,19 @@ async def run_startup_sequence():
 
     # MTF 캐시 주기적 갱신 스케줄러 시작 (프리워밍은 1-2 단계에서 완료)
     asyncio.create_task(mtf_cache_scheduler())
+
+    # 실거래 모드: Alpaca Trade Update 스트림 기동
+    if app_state.TRADE_MODE == "LIVE" and app_state.live_engine is not None:
+        from live_engine import start_trade_update_stream
+
+        asyncio.create_task(
+            start_trade_update_stream(
+                api_key=_APCA_API_KEY,
+                api_secret=_APCA_API_SECRET,
+                webhook_manager=app_state.webhook,
+                supabase_client=app_state.supabase,
+            )
+        )
 
 
 # ── 진입점 ───────────────────────────────────────────────────────────────────

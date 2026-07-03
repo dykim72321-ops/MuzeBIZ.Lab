@@ -99,8 +99,10 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(insert_args["is_scaled_out"])
 
     async def test_penny_breakeven_trigger(self):
-        """Test 2: +10% 수익 시 본전(진입가) 하한 락인"""
-        # Mock position and account
+        """Test 2: +10% 수익 시 Scale-Out이 동시 발동 — Scale-Out TS(highest*0.95)가 entry_price보다 높으므로 Scale-Out 값 우선"""
+        # PENNY_BREAKEVEN_TRIGGER(+10%)와 PENNY_SCALE_OUT_PROFIT(+10%)가 동시에 발동.
+        # Scale-Out이 TS 업데이트 이후에 실행되므로 Scale-Out의 ts_threshold가 최종값.
+        # expected: max(entry_price, highest * PENNY_TIGHT_TS_PCT) = max(0.50, 0.55*0.95) = 0.5225
         pos_data = {
             "ticker": "SNDL",
             "status": "HOLD",
@@ -120,7 +122,7 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
             pos_data
         ]
 
-        # Price moves to $0.55 (+10%), rsi is normal (e.g. 50)
+        # Price moves to $0.55 (+10%): BOTH breakeven lock AND scale-out fire
         await self.manager.process_signal(
             ticker="SNDL",
             price=0.55,
@@ -131,9 +133,9 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
             dna_score=85.0,
         )
 
-        # TS threshold should be locked at entry_price ($0.50)
+        # Scale-Out TS wins: max(0.50, 0.55*0.95) = 0.5225, clamped to price=0.55
         update_args = self.mock_table_positions.update.call_args[0][0]
-        self.assertAlmostEqual(update_args["ts_threshold"], 0.50)
+        self.assertAlmostEqual(update_args["ts_threshold"], 0.5225)
 
     async def test_penny_scale_out_trigger_and_tight_ts(self):
         """Test 3: 페니: RSI > 70 OR 수익률 >= +20% 시 50% 분할 매도 및 -7% 타이트 TS 적용"""
@@ -174,8 +176,9 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(update_args["units"], 1500)
         self.assertTrue(update_args["is_scaled_out"])
 
-        # TS threshold for scale out should be max(entry_price, highest_price * 0.93) = max(0.50, 0.61 * 0.93) = 0.5673
-        self.assertAlmostEqual(update_args["ts_threshold"], 0.61 * 0.93)
+        # TS threshold for scale out: max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
+        # = max(0.50, 0.61 * 0.95) = max(0.50, 0.5795) = 0.5795
+        self.assertAlmostEqual(update_args["ts_threshold"], 0.61 * 0.95)
 
         # Now test trailing stop tracking after scale out (is_scaled_out = True)
         self.mock_table_positions.update.reset_mock()
@@ -205,9 +208,10 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
             dna_score=85.0,
         )
 
-        # TS threshold should follow tight TS (-7%): 0.70 * 0.93 = 0.651
+        # Tight TS after scale-out: max(entry_price, highest * PENNY_TIGHT_TS_PCT)
+        # = max(0.50, 0.70 * 0.95) = 0.665
         update_args = self.mock_table_positions.update.call_args[0][0]
-        self.assertAlmostEqual(update_args["ts_threshold"], 0.651)
+        self.assertAlmostEqual(update_args["ts_threshold"], 0.70 * 0.95)
 
 
 if __name__ == "__main__":

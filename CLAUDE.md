@@ -454,6 +454,7 @@ SUPABASE_SERVICE_ROLE_KEY
 APCA_API_KEY_ID
 APCA_API_SECRET_KEY
 APCA_PAPER=true               # false = 실제 자금 (주의)
+TRADE_MODE=PAPER              # PAPER(기본) | LIVE(실계좌 — APCA_PAPER=false 필수)
 DISCORD_WEBHOOK_URL
 ADMIN_SECRET_KEY
 DISABLE_ALPACA_STREAM=false   # true 시 WebSocket 비활성화 → REST 60초 폴링 모드

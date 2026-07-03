@@ -215,6 +215,16 @@ class PaperTradingManager:
         except Exception as e:
             print(f"⚠️ [Watchlist Sync EXIT] {ticker}: {e}")
 
+    async def _on_order_buy(self, _ticker: str, _qty: float, _price: float) -> bool:
+        """매수 실행 훅 — LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
+        return True
+
+    async def _on_order_sell(
+        self, _ticker: str, _qty: float, _price: float, _reason: str
+    ) -> bool:
+        """매도 실행 훅 — LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
+        return True
+
     async def _sync_watchlist_stop_loss(self, ticker: str, stop_loss: float):
         """트레일링 스탑 이동 시 관심종목 stop_loss 동기화."""
         try:
@@ -414,6 +424,11 @@ class PaperTradingManager:
             # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결
             fill_price = _apply_slippage(price, is_buy=True, is_penny=is_penny_signal)
             units = buy_budget / fill_price
+
+            # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출. 실패 시 DB 기록 차단.
+            if not await self._on_order_buy(ticker, units, fill_price):
+                print(f"⚠️ [{ticker}] Live buy order rejected — DB write skipped")
+                return
             ts_init = PENNY_TS_INIT_PCT if is_penny_signal else TS_INIT_PCT
             ts_threshold = fill_price * ts_init
 
@@ -518,6 +533,13 @@ class PaperTradingManager:
                 fill_exit_price = _apply_slippage(
                     price, is_buy=False, is_penny=is_penny
                 )
+                if not await self._on_order_sell(
+                    ticker, units, fill_exit_price, "EOD Force Exit"
+                ):
+                    print(
+                        f"⚠️ [{ticker}] Live EOD sell order rejected — retaining position"
+                    )
+                    return
                 profit_cash = units * fill_exit_price
                 pnl_pct = (fill_exit_price / entry_price - 1) * 100
                 profit_amt = (fill_exit_price - entry_price) * units
@@ -596,6 +618,13 @@ class PaperTradingManager:
                         fill_exit_price = _apply_slippage(
                             price, is_buy=False, is_penny=is_penny
                         )
+                        if not await self._on_order_sell(
+                            ticker, units, fill_exit_price, "Time-Decay Exit"
+                        ):
+                            print(
+                                f"⚠️ [{ticker}] Live time-decay sell order rejected — retaining position"
+                            )
+                            return
                         profit_cash = units * fill_exit_price
                         pnl_pct = (fill_exit_price / entry_price - 1) * 100
                         profit_amt = (fill_exit_price - entry_price) * units
@@ -699,6 +728,13 @@ class PaperTradingManager:
                 fill_sell_price = _apply_slippage(
                     price, is_buy=False, is_penny=is_penny
                 )
+                if not await self._on_order_sell(
+                    ticker, sell_units, fill_sell_price, "Scale-Out"
+                ):
+                    print(
+                        f"⚠️ [{ticker}] Live scale-out order rejected — retaining position"
+                    )
+                    return
                 profit_cash = sell_units * fill_sell_price
 
                 # 가상 계좌 업데이트 (cash_available만 갱신 — total_assets는 /api/broker/paper/account에서
@@ -799,6 +835,13 @@ class PaperTradingManager:
                 fill_exit_price = _apply_slippage(
                     price, is_buy=False, is_penny=is_penny
                 )
+                if not await self._on_order_sell(
+                    ticker, units, fill_exit_price, "Trailing Stop"
+                ):
+                    print(
+                        f"⚠️ [{ticker}] Live trailing stop order rejected — retaining position"
+                    )
+                    return
                 profit_cash = units * fill_exit_price
                 pnl_pct = (fill_exit_price / entry_price - 1) * 100
                 profit_amt = (fill_exit_price - entry_price) * units
