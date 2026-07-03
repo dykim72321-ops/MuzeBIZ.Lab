@@ -23,3 +23,25 @@ python_engine/*.bak
 
 # Vercel cache
 .vercel/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+
+# Temporary / backup directories
+hello-fly/
+MuzeStock.Lab_backup/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Misc scratch files
+diff.txt
+test_conc.js

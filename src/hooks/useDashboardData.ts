@@ -192,7 +192,6 @@ export function useDashboardData() {
       startTs = now - 30 * 86_400_000;
       startLabel = '30일전';
     } else if (chartRange === 'all' && allPoints.length > 0) {
-      const d = new Date(allPoints[0].ts);
       startLabel = '시작';
       startTs = allPoints[0].ts - 86_400_000; // 1 day before first trade
     }
@@ -214,7 +213,7 @@ export function useDashboardData() {
       return { ...p, ma: Math.round(ma) };
     });
 
-    const series: { name: string; value: number; ts: number; ma: number }[] = [
+    const series: { name: string; value: number; ts: number; ma: number; displayName?: string }[] = [
       { name: startLabel, value: startValue, ts: startTs, ma: startValue },
       ...maPoints,
     ];
