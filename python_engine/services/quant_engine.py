@@ -29,6 +29,22 @@ def calculate_advanced_signals(
     RSI와 MACD를 결합한 고도화된 신호 엔진.
     avg_daily_volume: 30일 일봉 평균 거래량 (주입 시 분봉 RVOL 정확도 향상)
     """
+    if len(df) < 26:
+        df = df.copy()
+        df["RSI"] = 50.0
+        df["MACD_Line"] = 0.0
+        df["MACD_Signal"] = 0.0
+        df["MACD_Diff"] = 0.0
+        df["ADX"] = 0.0
+        df["+DI"] = 0.0
+        df["-DI"] = 0.0
+        df["RVOL"] = 1.0
+        df["Is_Extended"] = False
+        df["DNA_Score"] = 50.0
+        df["Strong_Buy"] = False
+        df["Strong_Sell"] = False
+        return df
+
     df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
 
     macd_indicator = ta.trend.MACD(
@@ -271,6 +287,18 @@ def calculate_position_sizing(
     dynamic_kelly_weight: float = None,
 ):
     """1단계(ATR 기반 변동성 조절)와 3단계(동적 켈리 공식)를 결합한 포지션 사이징 엔진"""
+    if len(df) < 15:
+        rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns and len(df) > 0 else 1.0
+        return {
+            "annualized_volatility": 0.0,
+            "vol_weight": 0.0,
+            "kelly_f": 0.0,
+            "atr": 0.0,
+            "recommended_weight": 0.0,
+            "rvol": round(float(rvol), 2),
+            "is_safe_to_trade": False,
+        }
+
     atr_indicator = ta.volatility.AverageTrueRange(
         high=df["High"], low=df["Low"], close=df["Close"], window=14
     )
