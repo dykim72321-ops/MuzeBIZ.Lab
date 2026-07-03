@@ -136,8 +136,7 @@ def calculate_advanced_signals(
     tier1 = (~is_penny) & (df["DNA_Score"] >= 80.0)
     tier2 = (~is_penny) & (df["DNA_Score"] >= 75.0) & (df["RVOL"] > 1.5)
     tier_penny = is_penny & (df["DNA_Score"] >= 65.0)
-    is_uptrend = df["Close"] > ma20
-    df["Strong_Buy"] = (tier1 | tier2 | tier_penny) & is_uptrend
+    df["Strong_Buy"] = tier1 | tier2 | tier_penny
     df["Strong_Sell"] = df["DNA_Score"] <= 40.0
 
     return df
