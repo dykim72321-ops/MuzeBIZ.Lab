@@ -104,14 +104,12 @@ async def start_trade_update_stream(
     api_key: str,
     api_secret: str,
     webhook_manager,
-    supabase_client=None,
 ) -> None:
     """
     Alpaca TradingStream을 구독해 실시간 주문 체결 이벤트를 수신한다.
 
-    filled 이벤트 수신 시:
-      - Discord 알림 발송
-      - (선택) paper_history에 체결 기록 추가 (supabase_client 전달 시)
+    filled 이벤트 수신 시 Discord 알림만 발송한다. paper_history 기록은
+    paper_engine.py의 매도 로직에서 이미 처리하므로 여기서 중복 기록하지 않는다.
 
     main.py startup_event에서 asyncio.create_task()로 기동한다.
     """
@@ -144,27 +142,6 @@ async def start_trade_update_stream(
                 ),
                 color=0x2ECC71,
             )
-
-            # paper_history에 실거래 체결 기록 (대시보드 표시용)
-            if supabase_client and fill_price and side:
-                try:
-                    side_str = str(side).lower()
-                    if "sell" in side_str:
-                        record = {
-                            "ticker": ticker,
-                            "entry_price": None,
-                            "exit_price": float(fill_price),
-                            "exit_reason": f"Live Fill ({event})",
-                            "pnl_pct": None,
-                            "profit_amt": None,
-                        }
-                        await asyncio.to_thread(
-                            supabase_client.table("paper_history")
-                            .insert(record)
-                            .execute
-                        )
-                except Exception as db_err:
-                    print(f"⚠️ [TradeUpdate] DB 기록 실패: {db_err}")
 
         elif event in ("canceled", "expired", "rejected"):
             await webhook_manager.send_alert(

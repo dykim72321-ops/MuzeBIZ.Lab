@@ -1877,7 +1877,6 @@ async def run_startup_sequence():
                 api_key=_APCA_API_KEY,
                 api_secret=_APCA_API_SECRET,
                 webhook_manager=app_state.webhook,
-                supabase_client=app_state.supabase,
             )
         )
 
