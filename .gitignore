@@ -42,7 +42,7 @@ supabase/.temp/
 # Temporary deployment directories
 hello-fly/
 
-MuzeStock.Lab_backup/
+**/*backup*/
 
 # 프로세스 PID 파일
 python_engine/.watchdog.pid

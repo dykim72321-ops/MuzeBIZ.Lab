@@ -1,9 +1,7 @@
-# Python venvs — 모든 패턴 제외
-python_engine/venv/
-python_engine/venv_backup/
-python_engine/.venv/
-python_engine/.venv_old/
-python_engine/*venv*/
+# Python venvs — 모든 패턴 제외 (루트 + 하위 어디든, 점(.) 접두사 포함)
+**/venv/
+**/.venv/
+**/*venv*/
 
 # Python cache
 python_engine/__pycache__/
@@ -29,9 +27,9 @@ node_modules/
 dist/
 dist-ssr/
 
-# Temporary / backup directories
+# Temporary / backup directories (점 접두사로 숨겨진 변형까지 포함)
 hello-fly/
-MuzeStock.Lab_backup/
+**/*backup*/
 
 # Editor / OS
 .vscode/
