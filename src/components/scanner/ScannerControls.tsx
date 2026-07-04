@@ -33,17 +33,17 @@ export const ScannerControls = ({
   onViewModeChange
 }: ScannerControlsProps) => {
   return (
-    <div className="bg-[#0b101a]/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-4 shadow-2xl">
+    <div className="bg-[#0b101a]/80 backdrop-blur-xl border border-blue-800 rounded-2xl p-4 shadow-2xl">
       <div className="flex flex-col xl:flex-row gap-6 items-center justify-between">
         <div className="flex flex-wrap items-center gap-4">
           <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 group-focus-within:text-indigo-400 transition-colors" />
             <input
               type="text"
               placeholder="Search symbol..."
               value={searchTerm}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="pl-10 w-64 bg-black/40 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-all"
+              className="pl-10 w-64 bg-black/40 border border-blue-800 rounded-lg px-3 py-2 text-sm text-white placeholder-blue-600 focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-all"
             />
           </div>
 
@@ -53,7 +53,7 @@ export const ScannerControls = ({
               "flex items-center gap-2 px-4 py-2 rounded-md border transition-all text-sm font-black active:scale-95 shadow-sm",
               minDna === 70
                 ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
-                : "bg-slate-900/50 border-slate-700 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                : "bg-blue-900/50 border-blue-700 text-blue-400 hover:bg-blue-800/50 hover:text-blue-200"
             )}
           >
             <Zap className={clsx("w-3.5 h-3.5", minDna === 70 ? "fill-current" : "")} />
@@ -66,21 +66,21 @@ export const ScannerControls = ({
               "flex items-center gap-2 px-4 py-2 rounded-md border transition-all text-sm font-black active:scale-95 shadow-sm",
               isHistorical
                 ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
-                : "bg-slate-900/50 border-slate-700 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                : "bg-blue-900/50 border-blue-700 text-blue-400 hover:bg-blue-800/50 hover:text-blue-200"
             )}
           >
             <Clock className={clsx("w-3.5 h-3.5", isHistorical ? "fill-current" : "")} />
             HISTORICAL SCAN
           </button>
 
-          <div className="flex items-center bg-slate-900/50 rounded-lg p-1 border border-slate-800">
+          <div className="flex items-center bg-blue-900/50 rounded-lg p-1 border border-blue-800">
             {['All', 'Low', 'Medium', 'High'].map(risk => (
               <button
                 key={risk}
                 onClick={() => onRiskChange(risk)}
                 className={clsx(
                   "px-4 py-1.5 rounded-md text-[10px] font-black uppercase tracking-widest transition-all",
-                  selectedRisk === risk ? "bg-slate-800 text-indigo-400 shadow-sm border border-slate-700" : "text-slate-500 hover:text-slate-300"
+                  selectedRisk === risk ? "bg-blue-800 text-indigo-400 shadow-sm border border-blue-700" : "text-blue-500 hover:text-blue-300"
                 )}
               >
                 {risk}
@@ -91,23 +91,23 @@ export const ScannerControls = ({
           <select
             value={selectedSector}
             onChange={(e) => onSectorChange(e.target.value)}
-            className="bg-black/40 border border-slate-800 text-slate-300 rounded-lg px-4 py-2 text-sm font-bold focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-all"
+            className="bg-black/40 border border-blue-800 text-blue-300 rounded-lg px-4 py-2 text-sm font-bold focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/10 outline-none transition-all"
           >
             {sectors.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="flex bg-slate-900/50 border border-slate-800 rounded-lg p-1 shadow-inner">
+          <div className="flex bg-blue-900/50 border border-blue-800 rounded-lg p-1 shadow-inner">
             <button
               onClick={() => onViewModeChange('table')}
-              className={clsx("p-2 rounded-md transition-all", viewMode === 'table' ? "bg-slate-800 text-indigo-400 shadow-sm" : "text-slate-400")}
+              className={clsx("p-2 rounded-md transition-all", viewMode === 'table' ? "bg-blue-800 text-indigo-400 shadow-sm" : "text-blue-400")}
             >
               <List className="w-4 h-4" />
             </button>
             <button
               onClick={() => onViewModeChange('grid')}
-              className={clsx("p-2 rounded-md transition-all", viewMode === 'grid' ? "bg-slate-800 text-indigo-400 shadow-sm" : "text-slate-400")}
+              className={clsx("p-2 rounded-md transition-all", viewMode === 'grid' ? "bg-blue-800 text-indigo-400 shadow-sm" : "text-blue-400")}
             >
               <LayoutGrid className="w-4 h-4" />
             </button>

@@ -127,7 +127,7 @@ function calcDna(p: DnaParams): DnaResult {
   const isSell = finalScore <= 40;
 
   let tier = 'HOLD';
-  let tierColor = 'text-slate-700';
+  let tierColor = 'text-blue-700';
   let signal = 'NORMAL';
   if (isPennyBuy) { tier = 'Tier-Penny'; tierColor = 'text-cyan-700'; signal = 'STRONG BUY'; }
   else if (isTier1) { tier = 'Tier-1'; tierColor = 'text-emerald-700'; signal = 'STRONG BUY'; }
@@ -182,14 +182,14 @@ function Slider({ label, value, min, max, step = 1, onChange, unit = '', color =
   return (
     <div className="space-y-1.5">
       <div className="flex justify-between items-center">
-        <span className="text-xs font-black uppercase tracking-widest text-slate-700">{label}</span>
-        <span className="text-sm font-black text-slate-900 font-mono">{value.toFixed(step < 1 ? 2 : 0)}{unit}</span>
+        <span className="text-xs font-black uppercase tracking-widest text-blue-700">{label}</span>
+        <span className="text-sm font-black text-blue-900 font-mono">{value.toFixed(step < 1 ? 2 : 0)}{unit}</span>
       </div>
       <div className="relative">
         <input
           type="range" min={min} max={max} step={step} value={value}
           onChange={e => onChange(+e.target.value)}
-          className={`w-full h-1.5 rounded-full appearance-none bg-slate-200 cursor-pointer ${colorMap[color] ?? 'accent-indigo-500'}`}
+          className={`w-full h-1.5 rounded-full appearance-none bg-blue-200 cursor-pointer ${colorMap[color] ?? 'accent-indigo-500'}`}
         />
         <div className="absolute top-0 left-0 h-1.5 rounded-full pointer-events-none"
           style={{ width: `${pct}%`, background: color === 'rose' ? '#f43f5e' : color === 'emerald' ? '#10b981' : color === 'cyan' ? '#06b6d4' : color === 'amber' ? '#f59e0b' : '#6366f1' }}
@@ -204,9 +204,9 @@ function DeltaBar({ label, value, maxAbs = 25 }: { label: string; value: number;
   const isPos = value >= 0;
   return (
     <div className="flex items-center gap-3 text-sm">
-      <span className="w-20 text-right text-slate-700 font-mono shrink-0">{label}</span>
+      <span className="w-20 text-right text-blue-700 font-mono shrink-0">{label}</span>
       {/* 중앙 기준선: 왼쪽 절반(음수), 오른쪽 절반(양수) */}
-      <div className="flex-1 h-5 flex rounded overflow-hidden relative bg-slate-100">
+      <div className="flex-1 h-5 flex rounded overflow-hidden relative bg-blue-100">
         <div className="w-1/2 flex justify-end items-center">
           {!isPos && (
             <div
@@ -427,41 +427,41 @@ export function DnaSimulatorPage() {
     : null;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+    <div className="p-4 md:p-8 lg:p-10 min-h-screen bg-[#fbfdff] text-blue-800 font-sans">
       {/* Header */}
-      <div className="border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-sm border-slate-200 px-8 py-5">
-        <div className="max-w-[1400px] mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigate('/stock/dashboard')}
-              className="flex items-center gap-2 text-slate-700 hover:text-slate-900 transition-colors text-sm font-black uppercase tracking-widest"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:block">대시보드</span>
-            </button>
-            <div className="w-px h-6 bg-slate-100" />
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center">
-              <FlaskConical className="w-5 h-5 text-indigo-700" />
-            </div>
-            <div>
-              <h1 className="text-base font-black uppercase tracking-widest text-slate-900 flex items-center gap-2">
-                DNA Score Simulator
-                {urlTicker && <span className="text-indigo-700 text-sm">— {urlTicker}</span>}
-              </h1>
-              <p className="text-xs text-slate-700 uppercase tracking-widest">Fix A·B·C·D 반영 — 매수 전 리스크 사전 검증</p>
-            </div>
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-8 w-full">
+        <div className="flex items-center gap-4 w-full lg:w-auto flex-shrink-0">
+          <button
+            onClick={() => navigate('/stock/dashboard')}
+            className="flex items-center gap-2 text-blue-700 hover:text-blue-900 transition-colors text-sm font-black uppercase tracking-widest"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:block">대시보드</span>
+          </button>
+          <div className="w-px h-6 bg-blue-100" />
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center">
+            <FlaskConical className="w-5 h-5 text-indigo-700" />
           </div>
+          <div>
+            <h1 className="text-base font-black uppercase tracking-widest text-blue-900 flex items-center gap-2">
+              DNA Score Simulator
+              {urlTicker && <span className="text-indigo-700 text-sm">— {urlTicker}</span>}
+            </h1>
+            <p className="text-xs text-blue-700 uppercase tracking-widest">Fix A·B·C·D 반영 — 매수 전 리스크 사전 검증</p>
+          </div>
+        </div>
 
-          {/* 서버 연동 상태 배지 */}
-          <div className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border ${
+        {/* 서버 연동 상태 배지 */}
+        <div className="bg-white/80 backdrop-blur-xl px-6 py-4 rounded-xl flex items-center gap-6 border border-blue-200 shadow-sm w-full lg:w-auto">
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border ${
             apiOnline === true  ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
             apiOnline === false ? 'bg-amber-50 border-amber-200 text-amber-700' :
-                                  'bg-slate-100 border-slate-200 text-slate-500'
+                                  'bg-blue-100 border-blue-200 text-blue-500'
           }`}>
             <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
               apiOnline === true  ? 'bg-emerald-500' :
               apiOnline === false ? 'bg-amber-500' :
-                                    'bg-slate-400 animate-pulse'
+                                    'bg-blue-400 animate-pulse'
             }`} />
             <span className="font-black uppercase tracking-widest">
               {apiOnline === true ? '서버 연동' : apiOnline === false ? '로컬 폴백' : '연결 확인 중'}
@@ -470,10 +470,13 @@ export function DnaSimulatorPage() {
 
           {/* 계좌 잔고 표시 */}
           {buyingPower != null && (
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100/80 border border-slate-200 rounded-xl text-xs">
-              <span className="text-slate-700 uppercase tracking-widest font-black">가용잔고</span>
-              <span className="text-slate-900 font-black font-mono">${buyingPower.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
-            </div>
+            <>
+              <div className="hidden sm:block w-px h-8 bg-blue-200/50" />
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-100/80 border border-blue-200 rounded-xl text-xs">
+                <span className="text-blue-700 uppercase tracking-widest font-black">가용잔고</span>
+                <span className="text-blue-900 font-black font-mono">${buyingPower.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -491,7 +494,7 @@ export function DnaSimulatorPage() {
                 <item.icon className="w-4 h-4 mt-0.5 shrink-0" />
                 <div>
                   <div className="text-xs font-black uppercase tracking-widest mb-0.5">{item.title}</div>
-                  <div className="text-xs text-slate-700 leading-relaxed">{item.desc}</div>
+                  <div className="text-xs text-blue-700 leading-relaxed">{item.desc}</div>
                 </div>
               </div>
             ))}
@@ -505,10 +508,10 @@ export function DnaSimulatorPage() {
         <div className="space-y-5">
 
           {/* 프리셋 버튼 */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-4 shadow-sm space-y-3">
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-4 shadow-sm space-y-3">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-3 h-3 text-slate-700" />
-              <span className="text-xs font-black uppercase tracking-widest text-slate-700">빠른 시나리오</span>
+              <Sparkles className="w-3 h-3 text-blue-700" />
+              <span className="text-xs font-black uppercase tracking-widest text-blue-700">빠른 시나리오</span>
             </div>
             <div className="grid grid-cols-3 gap-2">
               {PRESETS.map(p => (
@@ -518,15 +521,15 @@ export function DnaSimulatorPage() {
                   className={`px-3 py-2.5 rounded-xl border text-left transition-all ${p.color}`}
                 >
                   <div className="text-sm font-black uppercase tracking-widest leading-none">{p.label}</div>
-                  <div className="text-sm text-slate-700 mt-1">{p.desc}</div>
+                  <div className="text-sm text-blue-700 mt-1">{p.desc}</div>
                 </button>
               ))}
             </div>
           </div>
 
           {/* 기본 지표 */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-5 shadow-sm space-y-5">
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-700">기술적 지표</h2>
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-5 shadow-sm space-y-5">
+            <h2 className="text-xs font-black uppercase tracking-widest text-blue-700">기술적 지표</h2>
 
             <Slider label="RSI" value={rsi} min={0} max={100} onChange={setRsi}
               color={rsi < 30 ? 'emerald' : rsi >= 75 ? 'rose' : 'indigo'} />
@@ -541,12 +544,12 @@ export function DnaSimulatorPage() {
               color={rvol >= 5 ? 'emerald' : rvol >= 3 ? 'cyan' : 'indigo'} unit="×" />
 
             <div className="space-y-1.5">
-              <span className="text-xs font-black uppercase tracking-widest text-slate-700">MACD 상태</span>
+              <span className="text-xs font-black uppercase tracking-widest text-blue-700">MACD 상태</span>
               <div className="grid grid-cols-2 gap-2">
                 {macdOptions.map(o => (
                   <button key={o.value} onClick={() => setMacdStatus(o.value)}
                     className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider border transition-all text-left flex justify-between items-center
-                      ${macdStatus === o.value ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'border-slate-200 text-slate-700 hover:border-slate-300 hover:text-slate-700'}`}>
+                      ${macdStatus === o.value ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'border-blue-200 text-blue-700 hover:border-blue-300 hover:text-blue-700'}`}>
                     <span>{o.label}</span>
                     <span className={o.score > 0 ? 'text-emerald-700' : 'text-rose-700'}>{o.score > 0 ? '+' : ''}{o.score}</span>
                   </button>
@@ -557,12 +560,12 @@ export function DnaSimulatorPage() {
             <Slider label="ADX (추세 강도)" value={adx} min={0} max={50} onChange={setAdx} color="amber" />
 
             <div className="space-y-1.5">
-              <span className="text-xs font-black uppercase tracking-widest text-slate-700">DI 방향</span>
+              <span className="text-xs font-black uppercase tracking-widest text-blue-700">DI 방향</span>
               <div className="grid grid-cols-2 gap-2">
                 {[true, false].map(v => (
                   <button key={String(v)} onClick={() => setDiPositive(v)}
                     className={`px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider border transition-all
-                      ${diPositive === v ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
+                      ${diPositive === v ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'border-blue-200 text-blue-700 hover:border-blue-300'}`}>
                     {v ? '+DI > -DI (상승)' : '-DI > +DI (하락)'}
                   </button>
                 ))}
@@ -571,36 +574,36 @@ export function DnaSimulatorPage() {
 
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-xs font-black uppercase tracking-widest text-slate-700">Is_Extended (급등)</span>
+                <span className="text-xs font-black uppercase tracking-widest text-blue-700">Is_Extended (급등)</span>
                 {isExtended && <p className="text-sm text-amber-700 mt-0.5">
                   {rvol >= 5 ? 'RVOL≥5.0 → 패널티 -12 (Fix B)' : 'RVOL<5.0 → 패널티 -25'}
                 </p>}
               </div>
               <button onClick={() => setIsExtended(v => !v)}
                 className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all
-                  ${isExtended ? 'bg-rose-100 border-rose-300 text-rose-700' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
+                  ${isExtended ? 'bg-rose-100 border-rose-300 text-rose-700' : 'border-blue-200 text-blue-700 hover:border-blue-300'}`}>
                 {isExtended ? 'ON' : 'OFF'}
               </button>
             </div>
 
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-xs font-black uppercase tracking-widest text-slate-700">페니 종목 ($1 이하)</span>
+                <span className="text-xs font-black uppercase tracking-widest text-blue-700">페니 종목 ($1 이하)</span>
                 {isPenny && <p className="text-sm text-cyan-700 mt-0.5">DNA ≥ 70이면 Tier-Penny 진입</p>}
               </div>
               <button onClick={() => setIsPenny(v => !v)}
                 className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider border transition-all
-                  ${isPenny ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
+                  ${isPenny ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'border-blue-200 text-blue-700 hover:border-blue-300'}`}>
                 {isPenny ? 'ON' : 'OFF'}
               </button>
             </div>
           </div>
 
           {/* 포지션 사이징 */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-5 shadow-sm space-y-5">
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-5 shadow-sm space-y-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-xs font-black uppercase tracking-widest text-slate-700">포지션 사이징 (Fix D)</h2>
-              <span className="text-sm text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">가중평균 = (vol + kelly) / 2</span>
+              <h2 className="text-xs font-black uppercase tracking-widest text-blue-700">포지션 사이징 (Fix D)</h2>
+              <span className="text-sm text-blue-700 bg-blue-100 px-2 py-1 rounded-lg">가중평균 = (vol + kelly) / 2</span>
             </div>
             <Slider label="승률 (Win Rate)" value={winRate} min={0.3} max={0.9} step={0.01} onChange={setWinRate} color="emerald" unit="" />
             <Slider label="손익비 (b)" value={profitRatio} min={0.5} max={5} step={0.1} onChange={setProfitRatio} color="emerald" unit="×" />
@@ -608,10 +611,10 @@ export function DnaSimulatorPage() {
           </div>
 
           {/* Chandelier Exit */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-5 shadow-sm space-y-5">
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-5 shadow-sm space-y-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-xs font-black uppercase tracking-widest text-slate-700">Chandelier Exit TS (Fix C)</h2>
-              <span className="text-sm text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">k={isPenny ? '6.5 (페니)' : '3.0 (일반)'}</span>
+              <h2 className="text-xs font-black uppercase tracking-widest text-blue-700">Chandelier Exit TS (Fix C)</h2>
+              <span className="text-sm text-blue-700 bg-blue-100 px-2 py-1 rounded-lg">k={isPenny ? '6.5 (페니)' : '3.0 (일반)'}</span>
             </div>
             <Slider label="진입가 ($)" value={entryPrice} min={0.1} max={isPenny ? 1.0 : 100} step={isPenny ? 0.01 : 0.5} onChange={setEntryPrice} color="cyan" />
             <Slider label="최고가 진입 후 상승%" value={highestPct} min={0} max={50} step={1} onChange={setHighestPct} color="emerald" unit="%" />
@@ -622,7 +625,7 @@ export function DnaSimulatorPage() {
         <div className="space-y-5">
 
           {/* Score + Tier */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-sm">
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-6 shadow-sm">
             <div className="flex flex-col sm:flex-row items-center gap-8">
               <div className="flex flex-col items-center">
                 <ScoreArc score={activeDna.score} />
@@ -631,7 +634,7 @@ export function DnaSimulatorPage() {
                   activeDna.tier === 'Tier-2' ? 'bg-teal-100 border-teal-200 text-teal-700' :
                   activeDna.tier === 'Tier-Penny' ? 'bg-cyan-100 border-cyan-200 text-cyan-700' :
                   activeDna.tier === 'SELL' ? 'bg-rose-100 border-rose-200 text-rose-700' :
-                  'bg-slate-100 border-slate-300 text-slate-700'
+                  'bg-blue-100 border-blue-300 text-blue-700'
                 }`}>{activeDna.tier} — {activeDna.signal}</div>
               </div>
 
@@ -643,7 +646,7 @@ export function DnaSimulatorPage() {
                 <DeltaBar label="ADX" value={activeDna.deltas.adx} />
                 <DeltaBar label="RVOL" value={activeDna.deltas.rvol} />
                 <DeltaBar label="Extended" value={activeDna.deltas.ext} />
-                <div className="border-t border-slate-200 pt-2">
+                <div className="border-t border-blue-200 pt-2">
                   <DeltaBar label="TOTAL" value={activeDna.score} maxAbs={100} />
                 </div>
               </div>
@@ -659,9 +662,9 @@ export function DnaSimulatorPage() {
                 const gap = activeDna.score - t.gate;
                 const active = t.cond && activeDna.score >= t.gate;
                 return (
-                  <div key={t.label} className={`rounded-xl border p-3 text-center transition-all ${active ? t.activeCard : 'border-slate-100 bg-slate-50'}`}>
-                    <div className={`text-sm font-black uppercase tracking-widest ${active ? t.activeLbl : 'text-slate-700'}`}>{t.label}</div>
-                    <div className={`text-xs font-black mt-1 ${active ? t.activeVal : 'text-slate-700'}`}>≥ {t.gate}</div>
+                  <div key={t.label} className={`rounded-xl border p-3 text-center transition-all ${active ? t.activeCard : 'border-blue-100 bg-blue-50'}`}>
+                    <div className={`text-sm font-black uppercase tracking-widest ${active ? t.activeLbl : 'text-blue-700'}`}>{t.label}</div>
+                    <div className={`text-xs font-black mt-1 ${active ? t.activeVal : 'text-blue-700'}`}>≥ {t.gate}</div>
                     <div className={`text-sm mt-1 ${gap >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                       {gap >= 0 ? '✓ 진입' : `${gap.toFixed(1)}pt 부족`}
                     </div>
@@ -672,8 +675,8 @@ export function DnaSimulatorPage() {
           </div>
 
           {/* 포지션 사이징 결과 */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-sm">
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-700 mb-4">포지션 사이징 결과</h2>
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-6 shadow-sm">
+            <h2 className="text-xs font-black uppercase tracking-widest text-blue-700 mb-4">포지션 사이징 결과</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
               {[
                 { label: '연환산 변동성', value: `${(activeSizing.annVol * 100).toFixed(1)}%`, desc: 'ATR × √252' },
@@ -681,41 +684,41 @@ export function DnaSimulatorPage() {
                 { label: 'Kelly(f)', value: `${(activeSizing.optimalKelly).toFixed(1)}%`, desc: '하프켈리 × 0.25' },
                 { label: '최종 비중', value: `${activeSizing.finalWeight.toFixed(1)}%`, desc: '(vol+kelly)/2 ← Fix D' },
               ].map(item => (
-                <div key={item.label} className="bg-slate-50 rounded-xl border border-slate-100 p-3 text-center">
-                  <div className="text-sm font-black uppercase tracking-widest text-slate-700">{item.label}</div>
-                  <div className="text-lg font-black text-slate-900 mt-1">{item.value}</div>
-                  <div className="text-[8px] text-slate-700 mt-0.5">{item.desc}</div>
+                <div key={item.label} className="bg-blue-50 rounded-xl border border-blue-100 p-3 text-center">
+                  <div className="text-sm font-black uppercase tracking-widest text-blue-700">{item.label}</div>
+                  <div className="text-lg font-black text-blue-900 mt-1">{item.value}</div>
+                  <div className="text-[8px] text-blue-700 mt-0.5">{item.desc}</div>
                 </div>
               ))}
             </div>
 
             {/* 비중 비교 (min vs avg) */}
-            <div className="bg-slate-50 rounded-xl border border-slate-100 p-4">
-              <div className="text-sm font-black uppercase tracking-widest text-slate-700 mb-3">Fix D 효과 — min vs 가중평균</div>
+            <div className="bg-blue-50 rounded-xl border border-blue-100 p-4">
+              <div className="text-sm font-black uppercase tracking-widest text-blue-700 mb-3">Fix D 효과 — min vs 가중평균</div>
               <div className="space-y-2">
                 {[
-                  { label: '기존 (min)', value: Math.min(activeSizing.volWeight, activeSizing.optimalKelly), color: 'bg-slate-600' },
+                  { label: '기존 (min)', value: Math.min(activeSizing.volWeight, activeSizing.optimalKelly), color: 'bg-blue-600' },
                   { label: '신규 (avg)', value: activeSizing.finalWeight, color: 'bg-indigo-500' },
                 ].map(row => (
                   <div key={row.label} className="flex items-center gap-3">
-                    <span className="text-xs text-slate-700 w-24 shrink-0">{row.label}</span>
-                    <div className="flex-1 bg-slate-100 rounded h-4 overflow-hidden">
+                    <span className="text-xs text-blue-700 w-24 shrink-0">{row.label}</span>
+                    <div className="flex-1 bg-blue-100 rounded h-4 overflow-hidden">
                       <div className={`${row.color} h-full rounded transition-all duration-500`} style={{ width: `${Math.min(row.value * 4, 100)}%` }} />
                     </div>
-                    <span className="text-xs font-black text-slate-900 font-mono w-12 text-right">{row.value.toFixed(1)}%</span>
+                    <span className="text-xs font-black text-blue-900 font-mono w-12 text-right">{row.value.toFixed(1)}%</span>
                   </div>
                 ))}
               </div>
 
               {/* 실제 잔고 기반 달러 예산 */}
-              <div className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between">
-                <p className="text-sm text-slate-700">
+              <div className="mt-3 pt-3 border-t border-blue-200 flex items-center justify-between">
+                <p className="text-sm text-blue-700">
                   buy_budget = min(잔고 × {activeSizing.finalWeight.toFixed(1)}%, $1,000)
                 </p>
                 <p className="text-xs font-black font-mono">
                   {buyBudgetDollar != null
-                    ? <span className="text-indigo-700">${buyBudgetDollar.toFixed(0)} <span className="text-slate-700 font-normal text-sm">예상 매수액</span></span>
-                    : <span className="text-slate-700">잔고 불러오는 중…</span>
+                    ? <span className="text-indigo-700">${buyBudgetDollar.toFixed(0)} <span className="text-blue-700 font-normal text-sm">예상 매수액</span></span>
+                    : <span className="text-blue-700">잔고 불러오는 중…</span>
                   }
                 </p>
               </div>
@@ -723,10 +726,10 @@ export function DnaSimulatorPage() {
           </div>
 
           {/* Scale-Out 시나리오 */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-sm">
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-black uppercase tracking-widest text-slate-700">Scale-Out 시나리오</h2>
-              <span className="text-sm text-slate-700 bg-slate-100 px-2 py-1 rounded-lg">
+              <h2 className="text-xs font-black uppercase tracking-widest text-blue-700">Scale-Out 시나리오</h2>
+              <span className="text-sm text-blue-700 bg-blue-100 px-2 py-1 rounded-lg">
                 {isPenny ? 'RSI>70 또는 수익≥20%' : 'RSI>60'}
               </span>
             </div>
@@ -734,70 +737,70 @@ export function DnaSimulatorPage() {
             {/* 트리거 조건 카드 */}
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div className={`rounded-xl border p-3 text-center transition-all ${
-                (isPenny ? rsi > 70 : rsi > 60) ? 'border-amber-200 bg-amber-50' : 'border-slate-100 bg-slate-50'
+                (isPenny ? rsi > 70 : rsi > 60) ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'
               }`}>
-                <div className="text-sm font-black uppercase tracking-widest text-slate-700">RSI 트리거</div>
-                <div className={`text-sm font-black mt-1 ${(isPenny ? rsi > 70 : rsi > 60) ? 'text-amber-700' : 'text-slate-700'}`}>
+                <div className="text-sm font-black uppercase tracking-widest text-blue-700">RSI 트리거</div>
+                <div className={`text-sm font-black mt-1 ${(isPenny ? rsi > 70 : rsi > 60) ? 'text-amber-700' : 'text-blue-700'}`}>
                   RSI {isPenny ? '> 70' : '> 60'}
                 </div>
-                <div className={`text-sm mt-1 ${(isPenny ? rsi > 70 : rsi > 60) ? 'text-amber-700' : 'text-slate-700'}`}>
+                <div className={`text-sm mt-1 ${(isPenny ? rsi > 70 : rsi > 60) ? 'text-amber-700' : 'text-blue-700'}`}>
                   {(isPenny ? rsi > 70 : rsi > 60) ? '✓ 발동' : `현재 RSI=${rsi}`}
                 </div>
               </div>
               {isPenny && (
                 <div className={`rounded-xl border p-3 text-center transition-all ${
-                  profitPct >= 0.20 ? 'border-amber-200 bg-amber-50' : 'border-slate-100 bg-slate-50'
+                  profitPct >= 0.20 ? 'border-amber-200 bg-amber-50' : 'border-blue-100 bg-blue-50'
                 }`}>
-                  <div className="text-sm font-black uppercase tracking-widest text-slate-700">수익률 트리거</div>
-                  <div className={`text-sm font-black mt-1 ${profitPct >= 0.20 ? 'text-amber-700' : 'text-slate-700'}`}>
+                  <div className="text-sm font-black uppercase tracking-widest text-blue-700">수익률 트리거</div>
+                  <div className={`text-sm font-black mt-1 ${profitPct >= 0.20 ? 'text-amber-700' : 'text-blue-700'}`}>
                     수익 ≥ 20%
                   </div>
-                  <div className={`text-sm mt-1 ${profitPct >= 0.20 ? 'text-amber-700' : 'text-slate-700'}`}>
+                  <div className={`text-sm mt-1 ${profitPct >= 0.20 ? 'text-amber-700' : 'text-blue-700'}`}>
                     {profitPct >= 0.20 ? '✓ 발동' : `현재 +${(profitPct * 100).toFixed(0)}%`}
                   </div>
                 </div>
               )}
               {!isPenny && (
-                <div className={`rounded-xl border p-3 text-center ${scaleOutFires ? 'border-emerald-200 bg-emerald-50' : 'border-slate-100 bg-slate-50'}`}>
-                  <div className="text-sm font-black uppercase tracking-widest text-slate-700">수익 가드</div>
+                <div className={`rounded-xl border p-3 text-center ${scaleOutFires ? 'border-emerald-200 bg-emerald-50' : 'border-blue-100 bg-blue-50'}`}>
+                  <div className="text-sm font-black uppercase tracking-widest text-blue-700">수익 가드</div>
                   <div className={`text-sm font-black mt-1 ${scaleOutProfitOk ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {scaleOutProfitOk ? '수익 중' : '손실 — 차단'}
                   </div>
-                  <div className="text-sm mt-1 text-slate-700">손실 구간 Scale-Out 방지</div>
+                  <div className="text-sm mt-1 text-blue-700">손실 구간 Scale-Out 방지</div>
                 </div>
               )}
             </div>
 
             {/* Scale-Out 결과 */}
-            <div className={`rounded-xl border p-4 transition-all ${scaleOutFires ? 'border-amber-200 bg-amber-500/5' : 'border-slate-100 bg-slate-50'}`}>
+            <div className={`rounded-xl border p-4 transition-all ${scaleOutFires ? 'border-amber-200 bg-amber-500/5' : 'border-blue-100 bg-blue-50'}`}>
               <div className="flex items-center gap-2 mb-3">
-                <div className={`w-2 h-2 rounded-full ${scaleOutFires ? 'bg-amber-400 animate-pulse' : 'bg-slate-700'}`} />
-                <span className={`text-xs font-black uppercase tracking-widest ${scaleOutFires ? 'text-amber-700' : 'text-slate-700'}`}>
+                <div className={`w-2 h-2 rounded-full ${scaleOutFires ? 'bg-amber-400 animate-pulse' : 'bg-blue-700'}`} />
+                <span className={`text-xs font-black uppercase tracking-widest ${scaleOutFires ? 'text-amber-700' : 'text-blue-700'}`}>
                   {scaleOutFires ? 'Scale-Out 발동 — 50% 부분 청산' : 'Scale-Out 미발동'}
                 </span>
               </div>
               {scaleOutFires ? (
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-slate-700">청산 수량</span>
-                    <span className="font-black text-slate-900">보유 주식의 50%</span>
+                    <span className="text-blue-700">청산 수량</span>
+                    <span className="font-black text-blue-900">보유 주식의 50%</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-700">잔여 물량 TS 이동</span>
+                    <span className="text-blue-700">잔여 물량 TS 이동</span>
                     <span className="font-black text-amber-700">
                       ${postScaleTs.toFixed(isPenny ? 3 : 2)}
-                      <span className="text-slate-700 font-normal ml-1">
+                      <span className="text-blue-700 font-normal ml-1">
                         ({postScaleTsLabel})
                       </span>
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-700">현재 최고가</span>
-                    <span className="font-black text-slate-900">${highest.toFixed(isPenny ? 3 : 2)}</span>
+                    <span className="text-blue-700">현재 최고가</span>
+                    <span className="font-black text-blue-900">${highest.toFixed(isPenny ? 3 : 2)}</span>
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-slate-700">
+                <p className="text-xs text-blue-700">
                   {isPenny
                     ? `RSI를 70 이상으로 올리거나 "최고가 상승%"를 20% 이상으로 올려보세요`
                     : `RSI를 60 이상으로 올려보세요 (현재 ${rsi})`}
@@ -807,8 +810,8 @@ export function DnaSimulatorPage() {
           </div>
 
           {/* Chandelier Exit 결과 */}
-          <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-sm">
-            <h2 className="text-xs font-black uppercase tracking-widest text-slate-700 mb-4">
+          <div className="bg-white border border-blue-200/85 rounded-2xl p-6 shadow-sm">
+            <h2 className="text-xs font-black uppercase tracking-widest text-blue-700 mb-4">
               Chandelier Exit — TS = Highest − {activeChandelier.k}×ATR
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
@@ -818,38 +821,38 @@ export function DnaSimulatorPage() {
                 { label: '고정 % TS', value: `$${activeChandelier.tsFixed.toFixed(isPenny ? 3 : 2)}`, sub: `${isPenny ? '-15%' : '-10%'} (기존)` },
                 { label: 'Chandelier TS', value: `$${activeChandelier.tsChandelier.toFixed(isPenny ? 3 : 2)}`, sub: `k=${activeChandelier.k}×ATR`, highlight: true },
               ].map(item => (
-                <div key={item.label} className={`rounded-xl border p-3 text-center ${item.highlight ? 'border-indigo-200 bg-indigo-50' : 'border-slate-100 bg-slate-50'}`}>
-                  <div className="text-sm font-black uppercase tracking-widest text-slate-700">{item.label}</div>
-                  <div className={`text-lg font-black mt-1 ${item.highlight ? 'text-indigo-700' : 'text-slate-900'}`}>{item.value}</div>
-                  {item.sub && <div className="text-[8px] text-slate-700 mt-0.5">{item.sub}</div>}
+                <div key={item.label} className={`rounded-xl border p-3 text-center ${item.highlight ? 'border-indigo-200 bg-indigo-50' : 'border-blue-100 bg-blue-50'}`}>
+                  <div className="text-sm font-black uppercase tracking-widest text-blue-700">{item.label}</div>
+                  <div className={`text-lg font-black mt-1 ${item.highlight ? 'text-indigo-700' : 'text-blue-900'}`}>{item.value}</div>
+                  {item.sub && <div className="text-[8px] text-blue-700 mt-0.5">{item.sub}</div>}
                 </div>
               ))}
             </div>
 
             {/* TS 비교 시각화 */}
-            <div className="bg-slate-50 rounded-xl border border-slate-100 p-4 space-y-3">
-              <div className="text-sm font-black uppercase tracking-widest text-slate-700 mb-2">스탑 라인 위치 비교</div>
+            <div className="bg-blue-50 rounded-xl border border-blue-100 p-4 space-y-3">
+              <div className="text-sm font-black uppercase tracking-widest text-blue-700 mb-2">스탑 라인 위치 비교</div>
               {[
-                { label: '고정 % TS', price: activeChandelier.tsFixed, color: 'bg-slate-500' },
+                { label: '고정 % TS', price: activeChandelier.tsFixed, color: 'bg-blue-500' },
                 { label: 'Chandelier TS', price: activeChandelier.tsChandelier, color: 'bg-indigo-500' },
               ].map(row => {
                 const dropPct = ((highest - row.price) / highest) * 100;
                 return (
                   <div key={row.label} className="flex items-center gap-3">
-                    <span className="text-xs text-slate-700 w-28 shrink-0">{row.label}</span>
-                    <div className="flex-1 bg-slate-100 rounded h-4 overflow-hidden">
+                    <span className="text-xs text-blue-700 w-28 shrink-0">{row.label}</span>
+                    <div className="flex-1 bg-blue-100 rounded h-4 overflow-hidden">
                       <div className={`${row.color} h-full rounded transition-all`} style={{ width: `${Math.max(0, 100 - dropPct * 3)}%` }} />
                     </div>
                     <span className="text-xs font-black text-rose-700 font-mono w-16 text-right">-{dropPct.toFixed(1)}%</span>
                   </div>
                 );
               })}
-              <p className="text-sm text-slate-700 mt-1">
+              <p className="text-sm text-blue-700 mt-1">
                 Chandelier가 낮을수록(더 여유) 스탑헌팅 내성 강화
               </p>
             </div>
 
-            <div className="mt-4 flex items-start gap-2 text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+            <div className="mt-4 flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
               <ChevronRight className="w-3 h-3 mt-0.5 text-indigo-700 shrink-0" />
               <span>ATR%가 클수록(변동성 높음) Chandelier TS가 낮아져 마켓메이커 노이즈를 흡수합니다. ATR이 작으면 수익을 더 단단히 잠급니다.</span>
             </div>

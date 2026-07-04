@@ -46,9 +46,9 @@ export const BacktestPanel = () => {
   };
 
   return (
-    <div className="space-y-6 pt-6 border-t border-slate-100">
+    <div className="space-y-6 pt-6 border-t border-blue-100">
       <div>
-        <span className="text-xs font-bold text-slate-600 uppercase tracking-widest block mb-0.5">Backtest Engine</span>
+        <span className="text-xs font-bold text-blue-600 uppercase tracking-widest block mb-0.5">Backtest Engine</span>
         <h3 className="text-sm font-black text-indigo-900">DNA 전략 백테스트</h3>
         <p className="text-xs text-indigo-700 mt-1 leading-relaxed">
           파라미터를 조정하고 실행해 전략 성과를 검증하세요. 결과는 15분간 캐시됩니다.
@@ -60,23 +60,23 @@ export const BacktestPanel = () => {
         {/* Date inputs */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">시작일</label>
+            <label className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1">시작일</label>
             <input
               type="text"
               value={params.start_date}
               onChange={e => setParam('start_date', e.target.value)}
               placeholder="YYYY-MM-DD"
-              className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-indigo-300"
+              className="w-full px-3 py-2 text-xs font-mono bg-blue-50 border border-blue-200 rounded-lg text-blue-800 focus:outline-none focus:border-indigo-300"
             />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">종료일 (빈칸=오늘)</label>
+            <label className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1">종료일 (빈칸=오늘)</label>
             <input
               type="text"
               value={params.end_date}
               onChange={e => setParam('end_date', e.target.value)}
               placeholder="YYYY-MM-DD"
-              className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:border-indigo-300"
+              className="w-full px-3 py-2 text-xs font-mono bg-blue-50 border border-blue-200 rounded-lg text-blue-800 focus:outline-none focus:border-indigo-300"
             />
           </div>
         </div>
@@ -84,7 +84,7 @@ export const BacktestPanel = () => {
         {/* Gamma slider */}
         <div>
           <div className="flex justify-between items-center mb-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">γ Gamma (추세 민감도)</label>
+            <label className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">γ Gamma (추세 민감도)</label>
             <span className="text-xs font-black font-mono text-indigo-600">{params.gamma!.toFixed(1)}</span>
           </div>
           <input
@@ -93,7 +93,7 @@ export const BacktestPanel = () => {
             onChange={e => setParam('gamma', parseFloat(e.target.value))}
             className="w-full accent-indigo-600"
           />
-          <div className="flex justify-between text-[9px] font-mono text-slate-400 mt-0.5">
+          <div className="flex justify-between text-[9px] font-mono text-blue-400 mt-0.5">
             <span>0.5</span><span>2.0</span>
           </div>
         </div>
@@ -101,7 +101,7 @@ export const BacktestPanel = () => {
         {/* Delta slider */}
         <div>
           <div className="flex justify-between items-center mb-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">δ Delta (변동성 가중)</label>
+            <label className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">δ Delta (변동성 가중)</label>
             <span className="text-xs font-black font-mono text-indigo-600">{params.delta!.toFixed(1)}</span>
           </div>
           <input
@@ -110,7 +110,7 @@ export const BacktestPanel = () => {
             onChange={e => setParam('delta', parseFloat(e.target.value))}
             className="w-full accent-indigo-600"
           />
-          <div className="flex justify-between text-[9px] font-mono text-slate-400 mt-0.5">
+          <div className="flex justify-between text-[9px] font-mono text-blue-400 mt-0.5">
             <span>1.0</span><span>3.0</span>
           </div>
         </div>
@@ -118,7 +118,7 @@ export const BacktestPanel = () => {
         {/* Deviation threshold slider */}
         <div>
           <div className="flex justify-between items-center mb-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">괴리 임계값 (손절 기준)</label>
+            <label className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">괴리 임계값 (손절 기준)</label>
             <span className="text-xs font-black font-mono text-rose-500">{(params.deviation_threshold! * 100).toFixed(0)}%</span>
           </div>
           <input
@@ -127,7 +127,7 @@ export const BacktestPanel = () => {
             onChange={e => setParam('deviation_threshold', parseFloat(e.target.value))}
             className="w-full accent-rose-500"
           />
-          <div className="flex justify-between text-[9px] font-mono text-slate-400 mt-0.5">
+          <div className="flex justify-between text-[9px] font-mono text-blue-400 mt-0.5">
             <span>-20%</span><span>-3%</span>
           </div>
         </div>
@@ -135,7 +135,7 @@ export const BacktestPanel = () => {
         {/* Target ATR slider */}
         <div>
           <div className="flex justify-between items-center mb-1">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">목표 ATR</label>
+            <label className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">목표 ATR</label>
             <span className="text-xs font-black font-mono text-indigo-600">{params.target_atr!.toFixed(1)}</span>
           </div>
           <input
@@ -144,7 +144,7 @@ export const BacktestPanel = () => {
             onChange={e => setParam('target_atr', parseFloat(e.target.value))}
             className="w-full accent-indigo-600"
           />
-          <div className="flex justify-between text-[9px] font-mono text-slate-400 mt-0.5">
+          <div className="flex justify-between text-[9px] font-mono text-blue-400 mt-0.5">
             <span>2.0</span><span>10.0</span>
           </div>
         </div>
@@ -153,7 +153,7 @@ export const BacktestPanel = () => {
         <button
           onClick={handleRun}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all active:scale-95 disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all active:scale-95 disabled:bg-blue-300 disabled:cursor-not-allowed cursor-pointer"
         >
           {loading ? (
             <><Loader2 className="w-4 h-4 animate-spin" /> 백테스트 실행 중...</>
@@ -171,23 +171,23 @@ export const BacktestPanel = () => {
 
       {/* Results */}
       {result && !result.is_empty && (
-        <div className="space-y-4 pt-4 border-t border-slate-100">
-          <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+        <div className="space-y-4 pt-4 border-t border-blue-100">
+          <h4 className="text-xs font-black text-blue-700 uppercase tracking-widest flex items-center gap-2">
             <Activity className="w-3.5 h-3.5 text-indigo-500" /> 백테스트 결과
           </h4>
 
           {/* Stats Grid */}
           <div className="grid grid-cols-3 gap-2">
             {[
-              { label: '총 거래', value: `${result.total_trades}회`, color: 'text-slate-900' },
+              { label: '총 거래', value: `${result.total_trades}회`, color: 'text-blue-900' },
               { label: '승률', value: `${result.win_rate.toFixed(1)}%`, color: result.win_rate >= 50 ? 'text-emerald-600' : 'text-rose-600' },
               { label: '평균 수익률', value: `${result.avg_pnl >= 0 ? '+' : ''}${result.avg_pnl.toFixed(2)}%`, color: result.avg_pnl >= 0 ? 'text-emerald-600' : 'text-rose-600' },
               { label: 'Profit Factor', value: `${result.profit_factor.toFixed(2)}x`, color: result.profit_factor >= 1 ? 'text-emerald-600' : 'text-rose-600' },
               { label: 'MDD', value: `${result.mdd.toFixed(1)}%`, color: 'text-rose-600' },
-              { label: '평균 보유일', value: `${result.avg_days.toFixed(1)}일`, color: 'text-slate-700' },
+              { label: '평균 보유일', value: `${result.avg_days.toFixed(1)}일`, color: 'text-blue-700' },
             ].map(stat => (
-              <div key={stat.label} className="bg-slate-50 border border-slate-100 rounded-xl p-3">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">{stat.label}</span>
+              <div key={stat.label} className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                <span className="text-[9px] font-bold text-blue-400 uppercase tracking-widest block mb-1">{stat.label}</span>
                 <span className={clsx('text-sm font-black font-mono', stat.color)}>{stat.value}</span>
               </div>
             ))}
@@ -198,7 +198,7 @@ export const BacktestPanel = () => {
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <BarChart3 className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">자산 곡선 ($10,000 기준)</span>
+                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">자산 곡선 ($10,000 기준)</span>
               </div>
               <div className="h-40 w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -221,7 +221,7 @@ export const BacktestPanel = () => {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+              <div className="flex items-center justify-between text-[10px] font-mono text-blue-500">
                 <span>
                   최종: <span className={clsx('font-black', (result.equity_curve[result.equity_curve.length - 1]?.value ?? 10000) >= 10000 ? 'text-emerald-600' : 'text-rose-600')}>
                     ${(result.equity_curve[result.equity_curve.length - 1]?.value ?? 10000).toLocaleString(undefined, { maximumFractionDigits: 0 })}

@@ -24,7 +24,7 @@ export const PennyStockCard = ({ stock }: PennyStockCardProps) => {
         "relative bg-[#0b101a]/60 backdrop-blur-md border rounded-2xl p-5 transition-all duration-300 group hover:bg-[#0b101a]/80",
         stock.is_top
           ? "border-cyan-500/30 shadow-[0_0_30px_rgba(34,211,238,0.08)]"
-          : "border-slate-800/60 hover:border-slate-700/60"
+          : "border-blue-800/60 hover:border-blue-700/60"
       )}
     >
       {/* Top badge */}
@@ -43,7 +43,7 @@ export const PennyStockCard = ({ stock }: PennyStockCardProps) => {
               ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
               : stock.signal === 'SELL'
                 ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                : "bg-slate-800/60 border-slate-700/40 text-slate-400"
+                : "bg-blue-800/60 border-blue-700/40 text-blue-400"
           )}>
             {stock.ticker.charAt(0)}
           </div>
@@ -56,7 +56,7 @@ export const PennyStockCard = ({ stock }: PennyStockCardProps) => {
                 </span>
               )}
             </div>
-            <div className="text-[10px] font-bold text-slate-500 mt-0.5 flex items-center gap-2">
+            <div className="text-[10px] font-bold text-blue-500 mt-0.5 flex items-center gap-2">
               <span>Rank #{stock.rank}</span>
 
             </div>
@@ -78,12 +78,12 @@ export const PennyStockCard = ({ stock }: PennyStockCardProps) => {
       {/* Row 2: DNA Score Bar */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">DNA Score</span>
+          <span className="text-[9px] font-black text-blue-500 uppercase tracking-[0.2em]">DNA Score</span>
           <span className={clsx(
             "text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded",
             stock.signal === 'BUY' ? "bg-emerald-500/10 text-emerald-400" :
             stock.signal === 'SELL' ? "bg-rose-500/10 text-rose-400" :
-            "bg-slate-800 text-slate-400"
+            "bg-blue-800 text-blue-400"
           )}>
             {stock.signal}
           </span>
@@ -99,19 +99,19 @@ export const PennyStockCard = ({ stock }: PennyStockCardProps) => {
           { label: 'ADX', value: stock.adx.toFixed(1), ok: stock.adx > 20 },
           { label: 'RVOL', value: stock.rvol.toFixed(1) + 'x', ok: stock.rvol >= 3.0 },
         ].map((ind) => (
-          <div key={ind.label} className="bg-[#020617]/60 rounded-lg p-2 border border-slate-800/40 text-center">
-            <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest mb-1">{ind.label}</div>
-            <div className={clsx("text-[11px] font-black tabular-nums", ind.ok ? "text-emerald-400" : "text-slate-400")}>
+          <div key={ind.label} className="bg-[#020617]/60 rounded-lg p-2 border border-blue-800/40 text-center">
+            <div className="text-[8px] font-black text-blue-600 uppercase tracking-widest mb-1">{ind.label}</div>
+            <div className={clsx("text-[11px] font-black tabular-nums", ind.ok ? "text-emerald-400" : "text-blue-400")}>
               {ind.value}
             </div>
-            <div className={clsx("w-1 h-1 rounded-full mx-auto mt-1", ind.ok ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]" : "bg-slate-700")} />
+            <div className={clsx("w-1 h-1 rounded-full mx-auto mt-1", ind.ok ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]" : "bg-blue-700")} />
           </div>
         ))}
       </div>
 
       {/* Row 4: Volume + Action */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-[10px] text-slate-500">
+        <div className="flex items-center gap-2 text-[10px] text-blue-500">
           <Activity className="w-3 h-3" />
           <span className="font-bold tabular-nums">{stock.volume.toLocaleString()} vol</span>
         </div>

@@ -18,7 +18,7 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
 }) => {
   return (
     <section className="space-y-8 relative">
-      <div className="flex items-center justify-between border-b border-slate-800/80 pb-5">
+      <div className="flex items-center justify-between border-b border-blue-800/80 pb-5">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-center shadow-[inset_0_0_15px_rgba(99,102,241,0.15)]">
              <Activity className="w-5 h-5 text-indigo-400" />
@@ -27,8 +27,8 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
             Strategic Signal Matrix
           </h2>
         </div>
-        <div className="flex gap-2 bg-[#020617] p-1 rounded-xl border border-slate-800/80">
-          <button className="px-5 py-2 text-[10px] font-black text-slate-500 hover:text-white uppercase tracking-widest transition-all rounded-lg">
+        <div className="flex gap-2 bg-[#020617] p-1 rounded-xl border border-blue-800/80">
+          <button className="px-5 py-2 text-[10px] font-black text-blue-500 hover:text-white uppercase tracking-widest transition-all rounded-lg">
             Active Nodes
           </button>
           <button className="px-5 py-2 bg-indigo-600 text-white font-black text-[10px] rounded-lg uppercase tracking-widest shadow-[0_0_15px_rgba(79,70,229,0.35)]">
@@ -81,7 +81,7 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Confidence</span>
+                      <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest block mb-1">Confidence</span>
                       <span className={clsx("text-3xl font-black font-mono tracking-tighter", textColor)}>
                         {displaySignal.dnaScore}<span className="text-sm ml-0.5 opacity-50">%</span>
                       </span>
@@ -89,14 +89,14 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
                   </div>
 
                   <div className="grid grid-cols-2 gap-5 flex-1 relative z-10">
-                    <div className="bg-[#020617]/40 rounded-3xl p-5 border border-slate-800/50 backdrop-blur-md">
+                    <div className="bg-[#020617]/40 rounded-3xl p-5 border border-blue-800/50 backdrop-blur-md">
                       <h4 className={clsx("text-[9px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2", textColor)}>
                         <Zap className="w-3 h-3 fill-current" />
                         {isBull ? "Bullish Catalysts" : "Bearish Catalysts"}
                       </h4>
                       <ul className="space-y-3">
                         {(isBull ? displaySignal.bullPoints : displaySignal.bearPoints).slice(0, 3).map((point, i) => (
-                          <li key={i} className="flex gap-2.5 items-start text-[11px] text-slate-400 font-medium leading-relaxed">
+                          <li key={i} className="flex gap-2.5 items-start text-[11px] text-blue-400 font-medium leading-relaxed">
                             <span className={clsx("w-1 h-1 rounded-full mt-1.5 shrink-0 animate-pulse", isBull ? "bg-emerald-400" : "bg-rose-400")} />
                             {point}
                           </li>
@@ -104,14 +104,14 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
                       </ul>
                     </div>
                     
-                    <div className="bg-[#020617]/40 rounded-3xl p-5 border border-slate-800/50 backdrop-blur-md opacity-60">
-                      <h4 className="text-[9px] font-black uppercase tracking-[0.2em] mb-4 text-slate-500">
+                    <div className="bg-[#020617]/40 rounded-3xl p-5 border border-blue-800/50 backdrop-blur-md opacity-60">
+                      <h4 className="text-[9px] font-black uppercase tracking-[0.2em] mb-4 text-blue-500">
                         {isBull ? "Delta Risks" : "Bull Offset"}
                       </h4>
                       <ul className="space-y-3">
                         {(isBull ? displaySignal.bearPoints : displaySignal.bullPoints).slice(0, 3).map((point, i) => (
-                          <li key={i} className="flex gap-2.5 items-start text-[11px] text-slate-500 font-medium leading-relaxed">
-                             <div className="w-1 h-1 bg-slate-700 rounded-full mt-1.5 shrink-0" />
+                          <li key={i} className="flex gap-2.5 items-start text-[11px] text-blue-500 font-medium leading-relaxed">
+                             <div className="w-1 h-1 bg-blue-700 rounded-full mt-1.5 shrink-0" />
                              {point}
                           </li>
                         ))}
@@ -119,8 +119,8 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
                     </div>
                   </div>
 
-                  <div className="mt-8 pt-6 border-t border-slate-800/50 flex justify-between items-center relative z-10">
-                    <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Execution Node Locked</span>
+                  <div className="mt-8 pt-6 border-t border-blue-800/50 flex justify-between items-center relative z-10">
+                    <span className="text-[9px] font-bold text-blue-600 uppercase tracking-widest">Execution Node Locked</span>
                     <button
                       onClick={() => handleDeepDive?.(rawData)}
                       className={clsx(
@@ -148,7 +148,7 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
             return (
               <motion.div 
                 key={ticker} 
-                className="bg-[#020617]/40 backdrop-blur-md border border-slate-800/80 rounded-[2rem] p-6 hover:border-indigo-500/40 hover:bg-[#020617]/60 transition-all group cursor-help relative"
+                className="bg-[#020617]/40 backdrop-blur-md border border-blue-800/80 rounded-[2rem] p-6 hover:border-indigo-500/40 hover:bg-[#020617]/60 transition-all group cursor-help relative"
               >
                 <div className="flex justify-between items-center mb-4">
                   <h4 className="text-2xl font-black text-white tracking-widest uppercase font-mono group-hover:text-indigo-400 transition-all">{ticker}</h4>
@@ -156,12 +156,12 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
                     <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">AlphaSync</span>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed mb-6 font-medium">
+                <p className="text-[11px] text-blue-500 line-clamp-2 leading-relaxed mb-6 font-medium">
                   {displaySignal.reasoning || displaySignal.bullPoints[0]}
                 </p>
-                <div className="flex justify-between items-center pt-5 border-t border-slate-800/50">
+                <div className="flex justify-between items-center pt-5 border-t border-blue-800/50">
                   <div className="flex flex-col">
-                      <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest">DNA Score</span>
+                      <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">DNA Score</span>
                       <span className="text-xl font-black text-white font-mono leading-none mt-1">{displaySignal.dnaScore}</span>
                   </div>
                   <button
@@ -178,10 +178,10 @@ export const StrategicSignalMatrix: React.FC<StrategicSignalMatrixProps> = ({
       )}
 
       {strongTickers.length === 0 && normalTickers.length === 0 && (
-        <div className="bg-[#020617]/40 backdrop-blur-3xl rounded-[3rem] border border-dashed border-slate-800 p-24 text-center">
+        <div className="bg-[#020617]/40 backdrop-blur-3xl rounded-[3rem] border border-dashed border-blue-800 p-24 text-center">
           <Activity className="w-16 h-16 text-indigo-500 animate-pulse mx-auto mb-6 opacity-30 shadow-[0_0_20px_rgba(99,102,241,0.2)]" />
-          <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mb-2 opacity-50">Deep Market Scan Active</p>
-          <p className="text-slate-700 text-[10px] font-medium tracking-widest">// Awaiting algorithmic execution pulse...</p>
+          <p className="text-[10px] font-black text-blue-500 uppercase tracking-[0.4em] mb-2 opacity-50">Deep Market Scan Active</p>
+          <p className="text-blue-700 text-[10px] font-medium tracking-widest">// Awaiting algorithmic execution pulse...</p>
         </div>
       )}
     </section>

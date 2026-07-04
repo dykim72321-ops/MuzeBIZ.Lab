@@ -13,9 +13,9 @@ export const Card: React.FC<CardProps> = ({ children, className, onClick }) => {
     <div 
       onClick={onClick}
       className={clsx(
-        // 반투명 유리 질감 베이스 - bg-slate-900/60으로 소폭 어둡게 조정
+        // 반투명 유리 질감 베이스 - bg-blue-900/60으로 소폭 어둡게 조정
         "relative overflow-hidden rounded-2xl border border-white/10",
-        "bg-slate-900/60 backdrop-blur-md shadow-2xl",
+        "bg-blue-900/60 backdrop-blur-md shadow-2xl",
         "hover:border-indigo-500/50 transition-all duration-300 group",
         className
       )}

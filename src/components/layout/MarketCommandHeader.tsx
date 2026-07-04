@@ -30,7 +30,7 @@ export const MarketCommandHeader: React.FC<MarketCommandHeaderProps> = ({
       <div className="absolute top-0 left-0 w-1 h-full bg-blue-500" />
       <div>
         <div className="flex items-center gap-3 mb-1">
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
+          <h1 className="text-3xl font-extrabold text-blue-900 tracking-tight flex items-center gap-3">
             <div className="relative">
               <div className={clsx(
                 "w-4 h-4 rounded-full",
@@ -45,10 +45,10 @@ export const MarketCommandHeader: React.FC<MarketCommandHeaderProps> = ({
           </h1>
           <div className="px-3 py-1 bg-white/40 border border-white/20 rounded-full flex items-center gap-2 backdrop-blur-sm">
             <span className={clsx("w-2 h-2 rounded-full", isConnected ? 'bg-emerald-500' : 'bg-rose-500')} />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">{engineVersion}</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">{engineVersion}</span>
           </div>
         </div>
-        <p className="text-sm text-slate-500 font-semibold tracking-tight">{subtitle}</p>
+        <p className="text-sm text-blue-500 font-semibold tracking-tight">{subtitle}</p>
       </div>
 
       <div className="flex items-center gap-4">
@@ -68,7 +68,7 @@ export const MarketCommandHeader: React.FC<MarketCommandHeaderProps> = ({
           className={clsx(
             "flex items-center gap-2 px-6 py-3 rounded-md font-black text-sm transition-all shadow-md active:scale-95",
             isHunting 
-              ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' 
+              ? 'bg-blue-100 text-blue-400 cursor-not-allowed border border-blue-200' 
               : 'bg-[#0176d3] hover:bg-[#014486] text-white shadow-blue-100'
           )}
         >

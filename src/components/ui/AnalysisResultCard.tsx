@@ -48,7 +48,7 @@ export const AnalysisResultCard = ({
                 )}
             >
                 <div className={clsx(
-                    "relative h-full min-h-[220px] flex flex-col p-5 bg-slate-900/40 backdrop-blur-2xl border rounded-[2rem] overflow-hidden transition-all duration-300",
+                    "relative h-full min-h-[220px] flex flex-col p-5 bg-blue-900/40 backdrop-blur-2xl border rounded-[2rem] overflow-hidden transition-all duration-300",
                     isSTier ? "border-indigo-500/20 bg-indigo-500/5 hover:border-indigo-500/40" :
                         isATier ? "border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40" :
                             "border-white/5 hover:border-white/10"
@@ -80,10 +80,10 @@ export const AnalysisResultCard = ({
                     {/* Data Bar: Probability & Mini Chart */}
                     <div className="flex items-center gap-4 mb-4">
                         <div className="flex-1 bg-white/5 p-3 rounded-2xl border border-white/5 flex items-center gap-3">
-                            <Zap className={clsx("w-4 h-4", popProbability > 50 ? "text-cyan-400 fill-current" : "text-slate-500")} />
+                            <Zap className={clsx("w-4 h-4", popProbability > 50 ? "text-cyan-400 fill-current" : "text-blue-500")} />
                             <div>
                                 <p className="text-[10px] text-white font-black font-mono leading-none">{popProbability}%</p>
-                                <p className="text-[8px] text-slate-500 uppercase font-bold tracking-tighter mt-1">상승 우위 확률</p>
+                                <p className="text-[8px] text-blue-500 uppercase font-bold tracking-tighter mt-1">상승 우위 확률</p>
                             </div>
                         </div>
                         <div className="w-24 h-10 bg-white/5 rounded-xl border border-white/5 p-1 relative">
@@ -99,13 +99,13 @@ export const AnalysisResultCard = ({
                                     />
                                 </AreaChart>
                             </ResponsiveContainer>
-                            <span className="absolute bottom-0 right-1 text-[7px] text-slate-600 font-bold uppercase">시스템 신뢰도</span>
+                            <span className="absolute bottom-0 right-1 text-[7px] text-blue-600 font-bold uppercase">시스템 신뢰도</span>
                         </div>
                     </div>
 
                     {/* System Logic Verdict */}
                     <div className="flex-1 flex flex-col justify-center min-h-[48px] mt-2 mb-4">
-                        <p className="text-[12px] text-slate-400 font-medium leading-relaxed line-clamp-3 italic opacity-80 group-hover:opacity-100 transition-opacity">
+                        <p className="text-[12px] text-blue-400 font-medium leading-relaxed line-clamp-3 italic opacity-80 group-hover:opacity-100 transition-opacity">
                             "{(quantSummary || bullPoints[0] || "").split(';')[0]}..."
                         </p>
                     </div>
@@ -116,7 +116,7 @@ export const AnalysisResultCard = ({
                             <div className="pt-3 border-t border-white/5 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <Target className="w-3 h-3 text-indigo-400/70" />
-                                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">통계적 유사 패턴 {matchedLegend.ticker}</span>
+                                    <span className="text-[9px] font-bold text-blue-500 uppercase tracking-widest">통계적 유사 패턴 {matchedLegend.ticker}</span>
                                 </div>
                                 <span className="text-[9px] font-mono font-bold text-indigo-300/70">{matchedLegend.similarity}% 유사</span>
                             </div>

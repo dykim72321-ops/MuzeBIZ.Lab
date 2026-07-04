@@ -82,7 +82,7 @@ export const AlphaFundPositions = () => {
                 </div>
                 <div className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">
                         {positions.length} Assets Online
                     </span>
                 </div>
@@ -91,20 +91,20 @@ export const AlphaFundPositions = () => {
             {positions.length === 0 ? (
                 <div className="text-center py-16">
                     <div className="w-12 h-12 bg-white/[0.03] border border-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Activity className="w-6 h-6 text-slate-600" />
+                        <Activity className="w-6 h-6 text-blue-600" />
                     </div>
-                    <p className="text-slate-500 font-medium text-sm">현재 진행 중인 투자 포지션이 없습니다.</p>
+                    <p className="text-blue-500 font-medium text-sm">현재 진행 중인 투자 포지션이 없습니다.</p>
                 </div>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-white/[0.02]">
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.12em]">Asset</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.12em]">Entry Price</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.12em] text-right">Market Price</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.12em] text-right">Live P&L</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.12em] text-right">Duration</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em]">Asset</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em]">Entry Price</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right">Market Price</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right">Live P&L</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right">Duration</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/[0.04]">
@@ -123,7 +123,7 @@ export const AlphaFundPositions = () => {
                                                 <div className="font-black text-white group-hover:text-indigo-300 transition-colors">
                                                     {pos.ticker}
                                                 </div>
-                                                <div className="text-[10px] text-slate-600 uppercase tracking-wider mt-0.5">
+                                                <div className="text-[10px] text-blue-600 uppercase tracking-wider mt-0.5">
                                                     {pos.status}
                                                 </div>
                                             </div>
@@ -131,7 +131,7 @@ export const AlphaFundPositions = () => {
                                     </td>
 
                                     {/* Entry Price */}
-                                    <td className="px-6 py-4 font-mono text-slate-400 text-sm">
+                                    <td className="px-6 py-4 font-mono text-blue-400 text-sm">
                                         ${Number(pos.entry_price).toFixed(2)}
                                     </td>
 
@@ -158,7 +158,7 @@ export const AlphaFundPositions = () => {
 
                                     {/* Duration */}
                                     <td className="px-6 py-4 text-right">
-                                        <div className="flex items-center justify-end gap-1.5 text-slate-500 text-xs font-medium">
+                                        <div className="flex items-center justify-end gap-1.5 text-blue-500 text-xs font-medium">
                                             <Clock className="w-3.5 h-3.5 opacity-50" />
                                             {formatDistanceToNow(new Date(pos.created_at), { addSuffix: false })}
                                         </div>
@@ -169,7 +169,7 @@ export const AlphaFundPositions = () => {
                     </table>
 
                     <div className="px-6 py-4 border-t border-white/5 text-center">
-                        <span className="text-xs text-slate-600 font-bold uppercase tracking-wider">
+                        <span className="text-xs text-blue-600 font-bold uppercase tracking-wider">
                             {positions.length} open position{positions.length !== 1 ? 's' : ''}
                         </span>
                     </div>

@@ -18,7 +18,7 @@ import { queryClient } from './lib/queryClient';
 const AlphaFundView = lazy(() => import('./pages/AlphaFundView').then(m => ({ default: m.AlphaFundView })));
 
 const MuzepartSearchPage = lazy(() => import('./pages/MuzepartSearchPage').then(m => ({ default: m.MuzepartSearchPage })));
-const UnifiedDashboard = lazy(() => import('./pages/UnifiedDashboard').then(m => ({ default: m.UnifiedDashboard })));
+const UnifiedDashboard = lazy(() => import('./pages/UnifiedDashboard'));
 
 
 const PersonaPerformance = lazy(() => import('./components/dashboard/PersonaPerformance').then(m => ({ default: m.PersonaPerformance })));
@@ -29,13 +29,13 @@ const DnaSimulatorPage = lazy(() => import('./pages/DnaSimulatorPage').then(m =>
 
 // 로딩 폴백 컴포넌트
 const PageLoadingFallback = () => (
-  <div className="p-8 space-y-4 bg-slate-50 min-h-screen">
-    <Skeleton className="h-[60px] w-full bg-slate-200" />
+  <div className="p-8 space-y-4 bg-blue-50 min-h-screen">
+    <Skeleton className="h-[60px] w-full bg-blue-200" />
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <Skeleton className="h-[300px] w-full lg:col-span-2 bg-slate-200" />
-      <Skeleton className="h-[300px] w-full bg-slate-200" />
+      <Skeleton className="h-[300px] w-full lg:col-span-2 bg-blue-200" />
+      <Skeleton className="h-[300px] w-full bg-blue-200" />
     </div>
-    <Skeleton className="h-[400px] w-full bg-slate-200" />
+    <Skeleton className="h-[400px] w-full bg-blue-200" />
   </div>
 );
 

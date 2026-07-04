@@ -38,7 +38,6 @@ export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
     const avgLoss = negReturns.length > 0 ? negReturns.reduce((s, v) => s + v, 0) / negReturns.length : 0;
     const winLossRatio = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : (avgWin > 0 ? 99 : 0);
 
-    // Max drawdown from equity curve
     const sorted = [...history].sort(
       (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
     );
@@ -61,10 +60,10 @@ export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
 
   if (!history || history.length === 0) {
     return (
-      <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)] flex flex-col items-center justify-center min-h-[200px] gap-3">
-        <AlertTriangle className="w-8 h-8 text-amber-400" />
-        <p className="text-sm font-extrabold text-slate-600">청산 이력 필요</p>
-        <p className="text-xs text-slate-500 text-center">리스크 지표는 청산 이력이 있을 때 표시됩니다.</p>
+      <div className="sfdc-card p-6 flex flex-col items-center justify-center min-h-[200px] gap-3">
+        <AlertTriangle className="w-8 h-8 text-amber-500" />
+        <p className="text-sm font-bold text-blue-900">청산 이력 필요</p>
+        <p className="text-xs text-blue-800 text-center">리스크 지표는 청산 이력이 있을 때 표시됩니다.</p>
       </div>
     );
   }
@@ -74,62 +73,53 @@ export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
       label: 'Sharpe Ratio',
       value: metrics?.sharpe.toFixed(2) ?? '—',
       sub: metrics ? (metrics.sharpe > 1 ? '우수' : metrics.sharpe > 0 ? '보통' : '부정적') : '',
-      color: metrics ? (metrics.sharpe > 1 ? 'text-emerald-600' : metrics.sharpe > 0 ? 'text-amber-500' : 'text-rose-600') : 'text-slate-600',
-      border: metrics ? (metrics.sharpe > 1 ? 'border-emerald-200' : metrics.sharpe > 0 ? 'border-amber-200' : 'border-rose-200') : 'border-slate-200',
+      color: metrics ? (metrics.sharpe > 1 ? 'text-emerald-700' : metrics.sharpe > 0 ? 'text-amber-600' : 'text-rose-700') : 'text-blue-900',
     },
     {
       label: 'VaR 95%',
       value: metrics ? `${metrics.var95.toFixed(2)}%` : '—',
       sub: '손실 상한 (95% 신뢰)',
-      color: 'text-rose-600',
-      border: 'border-rose-200',
+      color: 'text-rose-700',
     },
     {
       label: 'Win/Loss Ratio',
       value: metrics?.winLossRatio.toFixed(2) ?? '—',
       sub: metrics ? (metrics.winLossRatio > 1 ? '수익>손실' : '손실>수익') : '',
-      color: metrics ? (metrics.winLossRatio > 1 ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-600',
-      border: metrics ? (metrics.winLossRatio > 1 ? 'border-emerald-200' : 'border-rose-200') : 'border-slate-200',
+      color: metrics ? (metrics.winLossRatio > 1 ? 'text-emerald-700' : 'text-rose-700') : 'text-blue-900',
     },
     {
       label: 'Max Drawdown',
       value: metrics ? `${metrics.mdd.toFixed(2)}%` : '—',
       sub: '최대 낙폭',
-      color: 'text-rose-600',
-      border: 'border-rose-200',
+      color: 'text-rose-700',
     },
     {
       label: 'Calmar Ratio',
       value: metrics?.calmar.toFixed(2) ?? '—',
       sub: '수익 / MDD',
-      color: metrics ? (metrics.calmar > 1 ? 'text-emerald-600' : 'text-amber-500') : 'text-slate-600',
-      border: metrics ? (metrics.calmar > 1 ? 'border-emerald-200' : 'border-amber-200') : 'border-slate-200',
+      color: metrics ? (metrics.calmar > 1 ? 'text-emerald-700' : 'text-amber-600') : 'text-blue-900',
     },
     {
       label: 'Avg Win / Loss',
       value: metrics ? `${metrics.avgWin.toFixed(1)}% / ${metrics.avgLoss.toFixed(1)}%` : '—',
       sub: '평균 익절 / 평균 손절',
-      color: 'text-slate-700',
-      border: 'border-slate-200',
+      color: 'text-black',
     },
   ];
 
   return (
-    <div className="bg-white border border-slate-200/85 rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)] space-y-4">
-      <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-        <div>
-          <span className="text-[10px] font-mono font-bold text-slate-700 uppercase tracking-widest block mb-0.5">Risk Analytics</span>
-          <h2 className="text-[15px] font-extrabold text-slate-900">리스크 지표 분석</h2>
-        </div>
-        <ShieldCheck className="w-5 h-5 text-indigo-500 drop-shadow-[0_0_8px_rgba(79,70,229,0.4)]" />
+    <div className="sfdc-card flex flex-col">
+      <div className="sfdc-card-header">
+        <h2 className="text-sm font-black text-black">Risk Analytics</h2>
+        <ShieldCheck className="w-4 h-4 text-blue-700" />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="p-4 grid grid-cols-2 gap-3">
         {cards.map(card => (
-          <div key={card.label} className={clsx('border rounded-xl p-3', card.border)}>
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">{card.label}</span>
+          <div key={card.label} className="bg-blue-50 border-2 border-blue-100 rounded-md p-3">
+            <span className="text-[9px] font-black text-blue-950 uppercase tracking-widest block mb-1">{card.label}</span>
             <span className={clsx('text-base font-black font-mono block', card.color)}>{card.value}</span>
-            {card.sub && <span className="text-[10px] font-semibold text-slate-400 block mt-0.5">{card.sub}</span>}
+            {card.sub && <span className="text-[10px] font-bold text-blue-800 block mt-0.5">{card.sub}</span>}
           </div>
         ))}
       </div>

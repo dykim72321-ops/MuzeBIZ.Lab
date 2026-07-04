@@ -20,7 +20,7 @@ export const PennyQuantScoreBar = ({ score, size = 'md', showLabel = true }: Pen
 
   return (
     <div className="flex items-center gap-3 w-full">
-      <div className={clsx("flex-1 bg-slate-800/60 rounded-full overflow-hidden", barHeight)}>
+      <div className={clsx("flex-1 bg-blue-800/60 rounded-full overflow-hidden", barHeight)}>
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${Math.min(score, 100)}%` }}

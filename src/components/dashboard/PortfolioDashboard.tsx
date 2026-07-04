@@ -85,7 +85,7 @@ export const PortfolioDashboard = () => {
 
                     <div className="relative z-10 flex flex-col h-full justify-between">
                         <div>
-                            <div className="text-xs font-bold text-slate-400 mb-1 flex items-center gap-2 uppercase tracking-widest whitespace-nowrap">
+                            <div className="text-xs font-bold text-blue-400 mb-1 flex items-center gap-2 uppercase tracking-widest whitespace-nowrap">
                                 <Wallet className="w-4 h-4 text-indigo-400" />
                                 계좌 자산 수익률
                             </div>
@@ -134,11 +134,11 @@ export const PortfolioDashboard = () => {
                     <div className="bg-white/5 rounded-2xl p-5 border border-white/5 flex flex-col justify-between hover:bg-white/10 transition-colors relative overflow-hidden group w-full">
                         <div className="flex items-center gap-2 mb-2 relative z-10">
                             <PieChart className="w-4 h-4 text-cyan-400" />
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">승률 (Win Rate)</span>
+                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest whitespace-nowrap">승률 (Win Rate)</span>
                         </div>
                         <div className="relative z-10">
                             <div className="text-3xl font-black text-white font-mono tracking-tighter group-hover:scale-105 transition-transform origin-left">{stats.winRate.toFixed(0)}%</div>
-                            <div className="w-full bg-slate-700/30 h-1 mt-3 rounded-full overflow-hidden">
+                            <div className="w-full bg-blue-700/30 h-1 mt-3 rounded-full overflow-hidden">
                                 <div className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded-full shadow-[0_0_10px_rgba(34,211,238,0.5)]" style={{ width: `${stats.winRate}%` }} />
                             </div>
                         </div>
@@ -150,7 +150,7 @@ export const PortfolioDashboard = () => {
                     <div className="bg-white/5 rounded-2xl p-5 border border-white/5 flex flex-col justify-between hover:bg-white/10 transition-colors relative overflow-hidden group w-full">
                         <div className="flex items-center gap-2 mb-2 relative z-10">
                             <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">최고 효자 종목</span>
+                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest whitespace-nowrap">최고 효자 종목</span>
                         </div>
                         <div className="relative z-10">
                             <div className="text-xl font-black text-white font-mono tracking-tight truncate mb-1">{stats.bestPerformer.ticker}</div>

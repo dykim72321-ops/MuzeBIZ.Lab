@@ -65,10 +65,10 @@ export const Tooltip: React.FC<TooltipProps> = ({
   };
 
   const arrowStyles = {
-    top: 'top-full left-1/2 -translate-x-1/2 -mt-1 border-t-slate-800 border-x-transparent border-b-transparent',
-    bottom: 'bottom-full left-1/2 -translate-x-1/2 -mb-1 border-b-slate-800 border-x-transparent border-t-transparent',
-    left: 'left-full top-1/2 -translate-y-1/2 -ml-1 border-l-slate-800 border-y-transparent border-r-transparent',
-    right: 'right-full top-1/2 -translate-y-1/2 -mr-1 border-r-slate-800 border-y-transparent border-l-transparent'
+    top: 'top-full left-1/2 -translate-x-1/2 -mt-1 border-t-blue-800 border-x-transparent border-b-transparent',
+    bottom: 'bottom-full left-1/2 -translate-x-1/2 -mb-1 border-b-blue-800 border-x-transparent border-t-transparent',
+    left: 'left-full top-1/2 -translate-y-1/2 -ml-1 border-l-blue-800 border-y-transparent border-r-transparent',
+    right: 'right-full top-1/2 -translate-y-1/2 -mr-1 border-r-blue-800 border-y-transparent border-l-transparent'
   };
 
   return (
@@ -90,7 +90,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
               style={{ top: coords.top, left: coords.left }}
               className={`fixed z-[9999] pointer-events-none ${positionClasses[position]}`}
             >
-              <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.5),0_0_20px_rgba(99,102,241,0.2)] whitespace-normal min-w-[140px] max-w-[280px] leading-relaxed break-keep relative">
+              <div className="bg-blue-900/95 backdrop-blur-md border border-blue-700/50 text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.5),0_0_20px_rgba(99,102,241,0.2)] whitespace-normal min-w-[140px] max-w-[280px] leading-relaxed break-keep relative">
                 {content}
                 <div className={`absolute border-4 ${arrowStyles[position]}`} />
               </div>

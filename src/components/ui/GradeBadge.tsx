@@ -19,7 +19,7 @@ export const GradeBadge: React.FC<GradeBadgeProps> = ({ grade, className, showLa
       case 'F':
         return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
       default:
-        return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+        return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
     }
   };
 
@@ -33,7 +33,7 @@ export const GradeBadge: React.FC<GradeBadgeProps> = ({ grade, className, showLa
         {grade.toUpperCase()}
       </div>
       {showLabel && (
-        <div className="text-[9px] text-slate-500 font-bold uppercase mt-1 tracking-tighter">Grade</div>
+        <div className="text-[9px] text-blue-500 font-bold uppercase mt-1 tracking-tighter">Grade</div>
       )}
     </div>
   );

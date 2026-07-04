@@ -26,16 +26,16 @@ export const PersonaLeaderboard: React.FC = () => {
         staleTime: 60000,
     });
 
-    if (isLoading) return <div className="h-48 bg-slate-800/20 rounded-2xl animate-pulse" />;
+    if (isLoading) return <div className="h-48 bg-blue-800/20 rounded-2xl animate-pulse" />;
     
     if (!stats || stats.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-                <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 text-slate-600 border border-white/5">
+                <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mb-4 text-blue-600 border border-white/5">
                     <Target className="w-8 h-8 opacity-20" />
                 </div>
                 <p className="text-white font-bold text-sm tracking-tight">정확도 분석 중...</p>
-                <p className="text-slate-500 text-[10px] mt-1 max-w-[150px] leading-relaxed">
+                <p className="text-blue-500 text-[10px] mt-1 max-w-[150px] leading-relaxed">
                     페르소나별 승률 계산을 위해 신규 데이터를 수집하고 있습니다.
                 </p>
                 <div className="mt-4 flex gap-1">
@@ -56,16 +56,16 @@ export const PersonaLeaderboard: React.FC = () => {
                             <div className={clsx(
                                 "w-6 h-6 rounded flex items-center justify-center text-[10px] font-black border",
                                 index === 0 ? "bg-amber-500/20 text-amber-400 border-amber-500/30" :
-                                    index === 1 ? "bg-slate-300/20 text-slate-300 border-slate-300/30" :
+                                    index === 1 ? "bg-blue-300/20 text-blue-300 border-blue-300/30" :
                                         index === 2 ? "bg-orange-700/20 text-orange-400 border-orange-700/30" :
-                                            "bg-slate-800/50 text-slate-500 border-slate-700"
+                                            "bg-blue-800/50 text-blue-500 border-blue-700"
                             )}>
                                 {index + 1}
                             </div>
                             <div>
                                 <p className="text-xs font-bold text-white uppercase tracking-tight group-hover:text-indigo-300 transition-colors">{persona.persona_name}</p>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[9px] text-slate-500 flex items-center gap-1 font-mono">
+                                    <span className="text-[9px] text-blue-500 flex items-center gap-1 font-mono">
                                         <Target className="w-2.5 h-2.5" /> {persona.total_predictions}회 예측
                                     </span>
                                 </div>
@@ -75,7 +75,7 @@ export const PersonaLeaderboard: React.FC = () => {
                         <div className="text-right">
                             <div className="text-sm font-black text-white font-mono flex items-center justify-end gap-1">
                                 {(persona.win_rate * 100).toFixed(0)}%
-                                <span className="text-[9px] text-slate-500 font-bold">승률</span>
+                                <span className="text-[9px] text-blue-500 font-bold">승률</span>
                             </div>
                             <div className={clsx(
                                 "text-[10px] font-bold font-mono",

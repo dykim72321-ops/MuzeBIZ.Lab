@@ -26,7 +26,7 @@ export const ScannerAssetList = ({
 }: ScannerAssetListProps) => {
   return (
     <>
-      <div className="flex items-center gap-4 border-b border-slate-800 pb-4 mb-8">
+      <div className="flex items-center gap-4 border-b border-blue-800 pb-4 mb-8">
         <div className="w-8 h-8 bg-indigo-600/10 rounded-lg border border-indigo-500/20 flex items-center justify-center">
             <Zap className="w-4 h-4 text-indigo-400" />
         </div>
@@ -36,10 +36,10 @@ export const ScannerAssetList = ({
       </div>
 
       {viewMode === 'table' ? (
-        <div className="bg-[#0b101a]/60 backdrop-blur-xl rounded-[2rem] border border-slate-800 shadow-3xl overflow-hidden">
+        <div className="bg-[#0b101a]/60 backdrop-blur-xl rounded-[2rem] border border-blue-800 shadow-3xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm border-separate border-spacing-0">
-              <thead className="bg-[#0f172a]/80 text-slate-500 uppercase text-[10px] font-black tracking-[0.2em] border-b border-slate-800">
+              <thead className="bg-[#0f172a]/80 text-blue-500 uppercase text-[10px] font-black tracking-[0.2em] border-b border-blue-800">
                 <tr>
                   <th className="px-8 py-6 font-black">Asset Identification</th>
                   <th className="px-8 py-6 cursor-pointer hover:text-white transition-colors" onClick={() => onSort('price')}>
@@ -55,7 +55,7 @@ export const ScannerAssetList = ({
                   <th className="px-8 py-6 text-right">Terminal</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800 font-medium">
+              <tbody className="divide-y divide-blue-800 font-medium">
                 {stocks.map(stock => (
                   <tr
                     key={stock.id}
@@ -64,12 +64,12 @@ export const ScannerAssetList = ({
                   >
                     <td className="px-8 py-7">
                       <div className="flex items-center gap-5">
-                        <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center font-black text-sm text-indigo-400 group-hover:bg-indigo-600/20 transition-all">
+                        <div className="w-12 h-12 rounded-xl bg-blue-900 border border-blue-800 flex items-center justify-center font-black text-sm text-indigo-400 group-hover:bg-indigo-600/20 transition-all">
                           {stock.ticker[0]}
                         </div>
                         <div>
                           <div className="font-black text-2xl text-white tracking-tighter group-hover:text-indigo-400 transition-colors uppercase leading-none mb-1">{stock.ticker}</div>
-                          <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{stock.sector}</div>
+                          <div className="text-[10px] text-blue-500 font-bold uppercase tracking-widest">{stock.sector}</div>
                         </div>
                       </div>
                     </td>
@@ -92,7 +92,7 @@ export const ScannerAssetList = ({
                     </td>
                     <td className="px-8 py-7">
                       <div className="flex items-center gap-5">
-                        <div className="flex-1 h-2 w-32 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                        <div className="flex-1 h-2 w-32 bg-blue-900 rounded-full overflow-hidden border border-blue-800">
                           <motion.div
                             initial={{ width: 0 }}
                             animate={{ width: `${stock.dnaScore}%` }}
@@ -108,7 +108,7 @@ export const ScannerAssetList = ({
                       </div>
                     </td>
                     <td className="px-8 py-7 text-right">
-                      <button className="p-4 bg-slate-900/50 text-slate-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all border border-slate-800 hover:border-indigo-500/50 hover:text-indigo-400 shadow-2xl">
+                      <button className="p-4 bg-blue-900/50 text-blue-500 rounded-xl opacity-0 group-hover:opacity-100 transition-all border border-blue-800 hover:border-indigo-500/50 hover:text-indigo-400 shadow-2xl">
                         <ArrowUpRight className="w-5 h-5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                       </button>
                     </td>
@@ -123,14 +123,14 @@ export const ScannerAssetList = ({
           {stocks.map(stock => (
             <div
               key={stock.id}
-              className="p-6 bg-[#0b101a]/80 backdrop-blur-xl border border-slate-800 group-hover:border-indigo-500/50 transition-all group cursor-pointer rounded-[2rem] shadow-2xl relative overflow-hidden"
+              className="p-6 bg-[#0b101a]/80 backdrop-blur-xl border border-blue-800 group-hover:border-indigo-500/50 transition-all group cursor-pointer rounded-[2rem] shadow-2xl relative overflow-hidden"
               onClick={() => onDeepDive(stock)}
             >
               {/* Card Glow Effect */}
               <div className="absolute -inset-1 bg-gradient-to-tr from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
               
               <div className="flex justify-between items-start mb-8 relative z-10">
-                <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center font-black text-lg text-indigo-400 group-hover:bg-indigo-600/20 transition-all duration-300 shadow-2xl">
+                <div className="w-12 h-12 rounded-2xl bg-blue-900 border border-blue-800 flex items-center justify-center font-black text-lg text-indigo-400 group-hover:bg-indigo-600/20 transition-all duration-300 shadow-2xl">
                   {stock.ticker[0]}
                 </div>
                 <div className={clsx(
@@ -145,18 +145,18 @@ export const ScannerAssetList = ({
 
               <div className="mb-10 relative z-10">
                 <h3 className="text-4xl font-black text-white tracking-tighter group-hover:text-indigo-400 transition-colors uppercase">{stock.ticker}</h3>
-                <p className="text-[10px] text-slate-500 uppercase font-black tracking-[0.3em] mt-2 truncate">{stock.name}</p>
+                <p className="text-[10px] text-blue-500 uppercase font-black tracking-[0.3em] mt-2 truncate">{stock.name}</p>
               </div>
 
-              <div className="flex items-end justify-between border-t border-slate-800 pb-6 pt-8 mb-6 relative z-10">
+              <div className="flex items-end justify-between border-t border-blue-800 pb-6 pt-8 mb-6 relative z-10">
                 <div>
-                  <p className="text-[10px] text-slate-600 uppercase font-black tracking-widest mb-2">Asset Value</p>
+                  <p className="text-[10px] text-blue-600 uppercase font-black tracking-widest mb-2">Asset Value</p>
                   <p className="text-3xl font-mono font-black text-white tracking-tighter tabular-nums">${stock.price.toFixed(2)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] text-slate-600 uppercase font-black tracking-widest mb-2">DNA Power</p>
+                  <p className="text-[10px] text-blue-600 uppercase font-black tracking-widest mb-2">DNA Power</p>
                   <div className="flex items-center gap-3 justify-end leading-none">
-                    <Zap className={clsx("w-5 h-5 fill-current", stock.dnaScore >= 70 ? "text-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.5)]" : "text-slate-600")} />
+                    <Zap className={clsx("w-5 h-5 fill-current", stock.dnaScore >= 70 ? "text-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.5)]" : "text-blue-600")} />
                     <p className="text-3xl font-mono text-white font-black tracking-tighter leading-none">{stock.dnaScore}</p>
                   </div>
                 </div>

@@ -58,9 +58,9 @@ export const PersonaPerformance = () => {
   if (error) {
     return (
       <Card className="p-5 h-full flex flex-col items-center justify-center gap-3">
-        <Trophy className="w-8 h-8 text-slate-600" />
-        <p className="text-sm font-bold text-slate-400">페르소나 데이터를 불러올 수 없습니다</p>
-        <p className="text-xs text-slate-600 font-mono">{error}</p>
+        <Trophy className="w-8 h-8 text-blue-600" />
+        <p className="text-sm font-bold text-blue-400">페르소나 데이터를 불러올 수 없습니다</p>
+        <p className="text-xs text-blue-600 font-mono">{error}</p>
       </Card>
     );
   }
@@ -88,12 +88,12 @@ export const PersonaPerformance = () => {
               <div className="text-sm font-bold text-white mb-2">{topPersona.persona_name}</div>
               <div className="flex items-center gap-3">
                  <div>
-                   <div className="text-[10px] text-slate-500 uppercase font-mono">Win Rate</div>
+                   <div className="text-[10px] text-blue-500 uppercase font-mono">Win Rate</div>
                    <div className="text-sm font-bold text-emerald-400 font-mono">{topPersona.win_rate.toFixed(1)}%</div>
                  </div>
                  <div className="w-px h-6 bg-white/10" />
                  <div>
-                   <div className="text-[10px] text-slate-500 uppercase font-mono">Predictions</div>
+                   <div className="text-[10px] text-blue-500 uppercase font-mono">Predictions</div>
                    <div className="text-sm font-bold text-white font-mono">{topPersona.total_predictions}</div>
                  </div>
               </div>
@@ -103,15 +103,15 @@ export const PersonaPerformance = () => {
 
         {/* Small Horizontal Chart for Win Rates */}
         <div className="space-y-3">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Win Rate Comparison</h3>
+          <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest">Win Rate Comparison</h3>
           <div className="space-y-4">
             {personas.slice(0, 4).map((persona) => (
               <div key={persona.persona_name} className="space-y-1.5">
                 <div className="flex justify-between items-end text-[11px]">
-                  <span className="text-slate-300 font-medium">{persona.persona_name}</span>
+                  <span className="text-blue-300 font-medium">{persona.persona_name}</span>
                   <span className="text-white font-bold font-mono">{persona.win_rate.toFixed(1)}%</span>
                 </div>
-                <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-1.5 w-full bg-blue-800 rounded-full overflow-hidden">
                   <div 
                     className="h-full rounded-full transition-all duration-1000 ease-out"
                     style={{ 

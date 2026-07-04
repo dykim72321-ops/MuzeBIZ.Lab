@@ -8,7 +8,7 @@ interface ScannerHeaderProps {
 
 export const ScannerHeader = ({ loading, onRefresh }: ScannerHeaderProps) => {
   return (
-    <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0b101a]/80 backdrop-blur-xl p-6 rounded-[1.5rem] border border-slate-800 shadow-2xl relative overflow-hidden group">
+    <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0b101a]/80 backdrop-blur-xl p-6 rounded-[1.5rem] border border-blue-800 shadow-2xl relative overflow-hidden group">
       <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
       
       <div className="flex items-center gap-5 relative z-10">
@@ -22,9 +22,9 @@ export const ScannerHeader = ({ loading, onRefresh }: ScannerHeaderProps) => {
       </div>
 
       <div className="flex items-center gap-4 relative z-10">
-        <div className="hidden lg:flex items-center gap-3 py-2.5 px-5 bg-slate-900/50 rounded-xl border border-slate-800 text-[10px]">
+        <div className="hidden lg:flex items-center gap-3 py-2.5 px-5 bg-blue-900/50 rounded-xl border border-blue-800 text-[10px]">
           <span className="flex h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
-          <span className="font-black text-slate-400 uppercase tracking-widest">Market Pulse:</span>
+          <span className="font-black text-blue-400 uppercase tracking-widest">Market Pulse:</span>
           <span className="font-black text-white uppercase tracking-widest">Optimized Signal Stream</span>
         </div>
         

@@ -8,16 +8,16 @@ interface PerformanceSummaryProps {
 }
 
 const MetricCard = ({ label, value, colorClass, icon: Icon }: { label: string, value: string | number, colorClass: string, icon?: any }) => (
-  <div className="bg-slate-50 border border-slate-200 p-5 rounded-3xl hover:bg-white hover:shadow-md transition-all group overflow-hidden relative">
+  <div className="bg-blue-50 border border-blue-200 p-5 rounded-3xl hover:bg-white hover:shadow-md transition-all group overflow-hidden relative">
     <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
-      {Icon && <Icon className="w-12 h-12 text-slate-400" />}
+      {Icon && <Icon className="w-12 h-12 text-blue-400" />}
     </div>
-    <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2 block">{label}</span>
+    <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] mb-2 block">{label}</span>
     <div className="flex items-baseline gap-1">
       <span className={clsx("text-2xl font-black font-mono tracking-tighter", colorClass)}>{value}</span>
-      {label === "Win Rate" && <span className="text-[10px] text-slate-400 font-bold">%</span>}
+      {label === "Win Rate" && <span className="text-[10px] text-blue-400 font-bold">%</span>}
     </div>
-    <div className="mt-3 w-full h-1 bg-slate-200 rounded-full overflow-hidden">
+    <div className="mt-3 w-full h-1 bg-blue-200 rounded-full overflow-hidden">
       <motion.div
         initial={{ width: 0 }}
         animate={{ width: typeof value === 'number' ? `${value}%` : '65%' }}
@@ -35,7 +35,7 @@ export const PerformanceSummary: React.FC<PerformanceSummaryProps> = ({ stats })
     <motion.section
       initial={{ opacity: 0, y: 30 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white border border-slate-200 rounded-[2.5rem] p-8 shadow-sm relative overflow-hidden"
+      className="bg-white border border-blue-200 rounded-[2.5rem] p-8 shadow-sm relative overflow-hidden"
     >
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
@@ -43,16 +43,16 @@ export const PerformanceSummary: React.FC<PerformanceSummaryProps> = ({ stats })
             <Award className="w-6 h-6 text-amber-500" />
           </div>
           <div>
-            <h2 className="text-sm font-black text-slate-900 uppercase tracking-[0.3em]">
+            <h2 className="text-sm font-black text-blue-900 uppercase tracking-[0.3em]">
               Mission Briefing Summary
             </h2>
             <div className="flex items-center gap-2 mt-1">
               <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Performance Metrics Synced</span>
+              <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Performance Metrics Synced</span>
             </div>
           </div>
         </div>
-        <BarChart3 className="w-5 h-5 text-slate-400 hover:text-indigo-600 transition-colors cursor-help" />
+        <BarChart3 className="w-5 h-5 text-blue-400 hover:text-indigo-600 transition-colors cursor-help" />
       </div>
 
       <div className="grid grid-cols-2 gap-5">
@@ -82,12 +82,12 @@ export const PerformanceSummary: React.FC<PerformanceSummaryProps> = ({ stats })
         />
       </div>
 
-      <div className="mt-8 pt-6 border-t border-slate-200 flex items-center justify-between">
+      <div className="mt-8 pt-6 border-t border-blue-200 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="px-3 py-1 bg-indigo-50 rounded-lg border border-indigo-200">
             <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">Squad: Alpha Prime</span>
           </div>
-          <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Uptime: 142H</span>
+          <span className="text-[9px] font-black text-blue-400 uppercase tracking-tighter">Uptime: 142H</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />

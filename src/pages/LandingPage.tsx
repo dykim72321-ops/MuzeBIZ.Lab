@@ -18,6 +18,7 @@ import {
   Bell,
   ActivitySquare
 } from 'lucide-react';
+import clsx from 'clsx';
 import { 
   ResponsiveContainer, 
   ComposedChart, 
@@ -98,24 +99,24 @@ export default function LandingPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0f111a] text-[#dce1fb] overflow-x-hidden font-sans relative">
+    <div className="min-h-screen bg-blue-50 text-blue-950 overflow-x-hidden font-sans relative selection:bg-blue-300 selection:text-black">
       <style>{styleSheet}</style>
       
-      {/* Background atmospheric glows */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-[#2563EB]/15 blur-[120px] pointer-events-none rounded-full" />
-      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-[#67E8F9]/10 blur-[150px] pointer-events-none rounded-full" />
+      {/* Background atmospheric glows - Light Mode */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full" />
+      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-cyan-600/5 blur-[150px] pointer-events-none rounded-full" />
 
-      {/* Top Header - Image Matched Navbar */}
-      <header className="fixed top-0 w-full z-50 bg-[#1e2235] border-b border-[#2a2f45] shadow-lg">
+      {/* Top Header */}
+      <header className="fixed top-0 w-full z-50 bg-white/95 backdrop-blur-xl border-b-2 border-blue-200 shadow-sm">
         <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
           
           {/* Logo */}
           <div className="flex items-center gap-3 select-none cursor-pointer group">
-            <div className="w-8 h-8 bg-[#2a2f45] rounded-full flex items-center justify-center border border-[#3b415a]">
-              <ActivitySquare className="w-4 h-4 text-[#8b9de0]" />
+            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center border-2 border-blue-300">
+              <ActivitySquare className="w-4 h-4 text-blue-700" />
             </div>
-            <span className="text-[15px] font-black text-white tracking-wide uppercase font-mono flex items-center gap-0.5">
-              MUZEBIZ<span className="text-[#8b9de0]">.LAB</span>
+            <span className="text-[15px] font-black text-black tracking-wide uppercase font-mono flex items-center gap-0.5">
+              MUZEBIZ<span className="text-blue-700">.LAB</span>
             </span>
           </div>
 
@@ -123,25 +124,25 @@ export default function LandingPage() {
           <nav className="hidden md:flex items-center gap-2">
             <button 
               onClick={() => handleNavClick('/stock/dashboard')}
-              className="flex items-center gap-2 px-4 py-2 bg-[#2a2f45] rounded-md text-[#8b9de0] hover:bg-[#343b57] hover:text-white transition-colors cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-50 rounded-md text-blue-800 border-2 border-blue-200 hover:bg-blue-100 hover:border-blue-400 transition-colors cursor-pointer shadow-sm"
             >
               <LayoutGrid className="w-3.5 h-3.5" />
-              <span className="text-[12px] font-bold">통합 지휘소</span>
+              <span className="text-[12px] font-black">통합 지휘소</span>
             </button>
 
             <button 
               onClick={() => handleNavClick('/dna-simulator')}
-              className="flex items-center gap-2 px-4 py-2 text-[#8d90a0] hover:text-white hover:bg-[#2a2f45] rounded-md transition-colors cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 text-blue-900 border-2 border-transparent hover:text-black hover:bg-blue-50 hover:border-blue-200 rounded-md transition-colors cursor-pointer"
             >
               <FlaskConical className="w-3.5 h-3.5" />
-              <span className="text-[12px] font-bold">DNA 시뮬레이터</span>
+              <span className="text-[12px] font-black">DNA 시뮬레이터</span>
             </button>
             <button 
               onClick={() => handleNavClick('/stock/search')}
-              className="flex items-center gap-2 px-4 py-2 text-[#8d90a0] hover:text-white hover:bg-[#2a2f45] rounded-md transition-colors cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 text-blue-900 border-2 border-transparent hover:text-black hover:bg-blue-50 hover:border-blue-200 rounded-md transition-colors cursor-pointer"
             >
               <Search className="w-3.5 h-3.5" />
-              <span className="text-[12px] font-bold">제품 검색</span>
+              <span className="text-[12px] font-black">제품 검색</span>
             </button>
           </nav>
 
@@ -149,29 +150,29 @@ export default function LandingPage() {
           <div className="flex items-center gap-4 sm:gap-5">
             <button
               onClick={() => handleNavClick('/dna-simulator')}
-              className="hidden sm:flex px-4 py-1.5 bg-transparent border border-[#3b415a] hover:bg-[#3b415a] hover:text-white text-[#8d90a0] text-[11px] font-bold uppercase tracking-widest font-mono rounded-md transition-colors cursor-pointer"
+              className="hidden sm:flex px-4 py-1.5 bg-blue-700 text-white hover:bg-blue-800 text-[11px] font-black uppercase tracking-widest font-mono rounded-md transition-colors cursor-pointer shadow-md"
             >
               LOGIN
             </button>
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#151828] border border-[#2a2f45] rounded-full">
-              <div className="w-1.5 h-1.5 bg-[#10B981] rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse" />
-              <span className="text-[10px] font-bold text-white uppercase tracking-widest font-mono">SYSTEM ONLINE</span>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-2 border-blue-200 rounded-full shadow-sm">
+              <div className="w-2 h-2 bg-emerald-600 rounded-full shadow-[0_0_8px_rgba(5,150,105,0.6)] animate-pulse" />
+              <span className="text-[10px] font-black text-blue-900 uppercase tracking-widest font-mono">SYSTEM ONLINE</span>
             </div>
             <div className="relative cursor-pointer group">
-              <Bell className="w-5 h-5 text-[#8d90a0] group-hover:text-white transition-colors" />
-              <div className="absolute top-0 right-0 w-2 h-2 bg-[#EF4444] rounded-full border border-[#1e2235]" />
+              <Bell className="w-5 h-5 text-blue-800 group-hover:text-blue-950 transition-colors" />
+              <div className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-white" />
             </div>
           </div>
         </div>
 
         {/* Real-time Ticker Tape (Attached below nav) */}
-        <div className="h-8 border-t border-[#2a2f45] bg-[#151828] overflow-hidden flex items-center text-[11px] font-mono whitespace-nowrap shadow-inner">
+        <div className="h-8 border-t-2 border-blue-200 bg-blue-50 overflow-hidden flex items-center text-[11px] font-mono whitespace-nowrap shadow-inner">
           <div className="flex animate-marquee min-w-max">
             {[...mockTickers, ...mockTickers, ...mockTickers].map((t, i) => (
-              <div key={i} className="flex items-center gap-2 px-6 border-r border-[#2a2f45]">
-                <span className="text-[#8d90a0]">{t.sym}</span>
-                <span className="text-[#dce1fb]">{t.price}</span>
-                <span className={t.up ? "text-[#10B981]" : "text-[#EF4444]"}>{t.change}</span>
+              <div key={i} className="flex items-center gap-2 px-6 border-r-2 border-blue-200">
+                <span className="text-blue-900 font-bold">{t.sym}</span>
+                <span className="text-black font-black">{t.price}</span>
+                <span className={clsx("font-black", t.up ? "text-emerald-700" : "text-rose-700")}>{t.change}</span>
               </div>
             ))}
           </div>
@@ -188,7 +189,7 @@ export default function LandingPage() {
               <motion.div 
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-[#1e2235]/80 border border-[#3b415a] text-[#8b9de0] text-[10px] font-bold font-mono uppercase tracking-widest shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border-2 border-blue-300 text-blue-800 text-[10px] font-black font-mono uppercase tracking-widest shadow-sm"
               >
                 <Cpu className="w-3.5 h-3.5" />
                 Live: Quantitative Engine v2.0
@@ -198,17 +199,17 @@ export default function LandingPage() {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.1 }}
-                className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-[1.15] tracking-tight"
+                className="text-4xl md:text-5xl lg:text-6xl font-black text-black leading-[1.15] tracking-tight"
               >
                 직관을 넘어서는 데이터,<br/>
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#b4c5ff] to-[#67E8F9]">터미널 하나로 끝내세요</span>
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-cyan-600">터미널 하나로 끝내세요</span>
               </motion.h1>
               
               <motion.p 
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.2 }}
-                className="text-[#8d90a0] text-base md:text-lg leading-relaxed max-w-lg font-medium"
+                className="text-blue-950 text-base md:text-lg leading-relaxed max-w-lg font-bold"
               >
                 기관 레벨의 실시간 스캐닝과 퀀트 알고리즘이 결합된 하이엔드 트레이딩 콕핏. 
                 차트 위에 그려지는 수학적 진입 타점, 켈리 기준 포지션 사이징을 단 1초 만에 시뮬레이션 합니다.
@@ -222,18 +223,18 @@ export default function LandingPage() {
               >
                 <button 
                   onClick={() => handleNavClick('/stock/dashboard')} 
-                  className="w-full sm:w-auto bg-[#2563EB] hover:bg-[#1d4ed8] border border-[#60A5FA]/30 text-white px-8 py-4 rounded-md font-bold text-sm shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] cursor-pointer flex items-center justify-center gap-3 font-mono uppercase tracking-widest"
+                  className="w-full sm:w-auto bg-blue-700 hover:bg-blue-800 border-2 border-blue-800 text-white px-8 py-4 rounded-md font-black text-sm shadow-[0_8px_15px_-3px_rgba(29,78,216,0.3)] transition-all hover:shadow-[0_12px_20px_-3px_rgba(29,78,216,0.5)] cursor-pointer flex items-center justify-center gap-3 font-mono uppercase tracking-widest active:scale-95"
                 >
-                  <Activity className="w-4 h-4 text-[#67E8F9]" />
+                  <Activity className="w-4 h-4 text-cyan-300" />
                   지휘소 접속하기
                 </button>
-                <div className="text-[10px] font-mono text-[#434655] uppercase tracking-widest">
+                <div className="text-[10px] font-mono font-black text-blue-900 uppercase tracking-widest border-2 border-blue-200 bg-white px-3 py-1 rounded-md shadow-sm">
                   Secure Access • Terminal UI
                 </div>
               </motion.div>
             </div>
 
-            {/* Right: Realistic Terminal UI with Recharts */}
+            {/* Right: Realistic Terminal UI with Recharts (Light Mode) */}
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -241,44 +242,44 @@ export default function LandingPage() {
               className="relative w-full max-w-2xl mx-auto lg:mr-0"
             >
               {/* Terminal Frame */}
-              <div className="bg-[#1e2235] rounded-xl border border-[#3b415a] shadow-[0_0_50px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.05)] overflow-hidden flex flex-col h-[460px]">
+              <div className="bg-white rounded-lg border-2 border-blue-300 shadow-[0_10px_30px_-5px_rgba(29,78,216,0.15)] overflow-hidden flex flex-col h-[460px]">
                 
                 {/* Terminal Header */}
-                <div className="h-10 bg-[#151828] border-b border-[#3b415a] flex items-center px-4 justify-between">
+                <div className="h-10 bg-blue-100 border-b-2 border-blue-300 flex items-center px-4 justify-between">
                   <div className="flex gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#EF4444]" />
-                    <div className="w-3 h-3 rounded-full bg-[#F59E0B]" />
-                    <div className="w-3 h-3 rounded-full bg-[#10B981]" />
+                    <div className="w-3 h-3 rounded-full bg-rose-500 border-2 border-rose-600" />
+                    <div className="w-3 h-3 rounded-full bg-amber-500 border-2 border-amber-600" />
+                    <div className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-emerald-600" />
                   </div>
-                  <div className="text-[11px] text-[#8d90a0] font-mono tracking-widest flex items-center gap-2">
+                  <div className="text-[11px] font-black text-blue-900 font-mono tracking-widest flex items-center gap-2">
                     <ActivitySquare className="w-3 h-3" /> MZT_SIMULATOR_ENV.exe
                   </div>
                   <div className="w-12"></div> {/* Spacer for centering */}
                 </div>
 
                 {/* Terminal Content Area */}
-                <div className="flex-1 p-5 flex flex-col gap-4 overflow-hidden bg-[#0f111a]">
+                <div className="flex-1 p-5 flex flex-col gap-4 overflow-hidden bg-blue-50/50">
                   {/* Top Stats Row */}
                   <div className="grid grid-cols-4 gap-3">
-                    <div className="bg-[#1e2235] border border-[#2a2f45] rounded-lg p-3">
-                      <div className="text-[10px] text-[#8d90a0] font-mono mb-1">ASSET</div>
-                      <div className="text-xl font-bold text-white font-mono leading-none">NVDA</div>
-                      <div className="text-[10px] text-[#10B981] font-mono mt-1.5">+3.42%</div>
+                    <div className="bg-white border-2 border-blue-200 rounded-md p-3 shadow-sm">
+                      <div className="text-[10px] font-black text-blue-900 font-mono mb-1">ASSET</div>
+                      <div className="text-xl font-black text-black font-mono leading-none">NVDA</div>
+                      <div className="text-[10px] font-black text-emerald-700 font-mono mt-1.5">+3.42%</div>
                     </div>
-                    <div className="bg-[#1e2235] border border-[#2a2f45] rounded-lg p-3">
-                      <div className="text-[10px] text-[#8d90a0] font-mono mb-1">DNA SCORE</div>
-                      <div className="text-xl font-black text-[#67E8F9] tabular-nums leading-none">98.4</div>
-                      <div className="text-[10px] text-[#10B981] font-mono mt-1.5">+12 STR</div>
+                    <div className="bg-white border-2 border-blue-200 rounded-md p-3 shadow-sm">
+                      <div className="text-[10px] font-black text-blue-900 font-mono mb-1">DNA SCORE</div>
+                      <div className="text-xl font-black text-cyan-700 tabular-nums leading-none">98.4</div>
+                      <div className="text-[10px] font-black text-emerald-700 font-mono mt-1.5">+12 STR</div>
                     </div>
-                    <div className="bg-[#1e2235] border border-[#2a2f45] rounded-lg p-3">
-                      <div className="text-[10px] text-[#8d90a0] font-mono mb-1">MOMENTUM</div>
-                      <div className="text-xl font-black text-[#10B981] tabular-nums leading-none">STRONG</div>
-                      <div className="text-[10px] text-[#8d90a0] font-mono mt-1.5">EMA ALIGNED</div>
+                    <div className="bg-white border-2 border-blue-200 rounded-md p-3 shadow-sm">
+                      <div className="text-[10px] font-black text-blue-900 font-mono mb-1">MOMENTUM</div>
+                      <div className="text-xl font-black text-emerald-700 tabular-nums leading-none">STRONG</div>
+                      <div className="text-[10px] font-black text-blue-800 font-mono mt-1.5">EMA ALIGNED</div>
                     </div>
-                    <div className="bg-[#1e2235] border border-[#2a2f45] rounded-lg p-3 shadow-[inset_0_0_15px_rgba(37,99,235,0.15)]">
-                      <div className="text-[10px] text-[#8b9de0] font-mono mb-1">KELLY ALLOC</div>
-                      <div className="text-xl font-black text-white tabular-nums leading-none">24.5%</div>
-                      <div className="text-[10px] text-[#8d90a0] font-mono mt-1.5">OPTIMAL</div>
+                    <div className="bg-blue-100 border-2 border-blue-300 rounded-md p-3 shadow-inner">
+                      <div className="text-[10px] font-black text-blue-800 font-mono mb-1">KELLY ALLOC</div>
+                      <div className="text-xl font-black text-blue-950 tabular-nums leading-none">24.5%</div>
+                      <div className="text-[10px] font-black text-blue-900 font-mono mt-1.5">OPTIMAL</div>
                     </div>
                   </div>
 
@@ -286,75 +287,74 @@ export default function LandingPage() {
                   <div className="flex-1 grid grid-cols-3 gap-4 h-full min-h-0">
                     
                     {/* Realistic Recharts Graph Area */}
-                    <div className="col-span-2 bg-[#151828] border border-[#2a2f45] rounded-lg relative overflow-hidden flex flex-col p-3">
+                    <div className="col-span-2 bg-white border-2 border-blue-200 rounded-md relative overflow-hidden flex flex-col p-3 shadow-sm">
                       <div className="flex justify-between items-center mb-2 px-1">
-                        <div className="text-[11px] font-bold text-[#8d90a0] flex items-center gap-1.5">
-                          <TrendingDown className="w-3.5 h-3.5 text-[#10B981]" />
+                        <div className="text-[11px] font-black text-blue-900 flex items-center gap-1.5 font-mono">
+                          <TrendingDown className="w-3.5 h-3.5 text-emerald-600" />
                           PRICE ACTION & EXIT LINE
                         </div>
-                        <div className="text-[10px] text-[#67E8F9] font-mono border border-[#67E8F9]/30 bg-[#67E8F9]/10 px-1.5 py-0.5 rounded">LIVE</div>
+                        <div className="text-[10px] text-cyan-800 font-black font-mono border-2 border-cyan-300 bg-cyan-50 px-1.5 py-0.5 rounded shadow-sm">LIVE</div>
                       </div>
                       <div className="flex-1 w-full min-h-[150px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart data={mockChartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
                             <defs>
-                              <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#2563EB" stopOpacity={0.3}/>
-                                <stop offset="95%" stopColor="#2563EB" stopOpacity={0}/>
+                              <linearGradient id="colorPriceLight" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#1d4ed8" stopOpacity={0.2}/>
+                                <stop offset="95%" stopColor="#1d4ed8" stopOpacity={0}/>
                               </linearGradient>
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2a2f45" vertical={false} />
-                            <XAxis dataKey="time" stroke="#8d90a0" fontSize={10} tickLine={false} axisLine={false} dy={5} />
-                            <YAxis domain={['dataMin - 2', 'dataMax + 2']} stroke="#8d90a0" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="#bfdbfe" vertical={false} />
+                            <XAxis dataKey="time" stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} dy={5} />
+                            <YAxis domain={['dataMin - 2', 'dataMax + 2']} stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
                             <Tooltip 
-                              contentStyle={{ backgroundColor: '#1e2235', border: '1px solid #3b415a', borderRadius: '4px', fontSize: '11px', color: '#fff' }}
-                              itemStyle={{ color: '#67E8F9' }}
+                              contentStyle={{ backgroundColor: '#ffffff', border: '2px solid #bfdbfe', borderRadius: '4px', fontSize: '11px', color: '#000000', fontWeight: 'bold' }}
                             />
-                            <Area type="monotone" dataKey="price" stroke="#2563EB" strokeWidth={2} fillOpacity={1} fill="url(#colorPrice)" />
-                            <Line type="monotone" dataKey="sma" stroke="#10B981" strokeWidth={1.5} dot={false} strokeDasharray="4 4" />
-                            <Line type="stepAfter" dataKey="exit" stroke="#EF4444" strokeWidth={1.5} dot={false} />
+                            <Area type="monotone" dataKey="price" stroke="#1d4ed8" strokeWidth={2} fillOpacity={1} fill="url(#colorPriceLight)" />
+                            <Line type="monotone" dataKey="sma" stroke="#059669" strokeWidth={2} dot={false} strokeDasharray="4 4" />
+                            <Line type="stepAfter" dataKey="exit" stroke="#e11d48" strokeWidth={2} dot={false} />
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
                       <div className="flex gap-4 px-2 mt-2">
-                        <div className="flex items-center gap-1.5 text-[9px] text-[#8d90a0] font-mono"><div className="w-2 h-0.5 bg-[#2563EB]"></div> PRICE</div>
-                        <div className="flex items-center gap-1.5 text-[9px] text-[#8d90a0] font-mono"><div className="w-2 h-0.5 bg-[#10B981] border-t border-dashed"></div> SMA 20</div>
-                        <div className="flex items-center gap-1.5 text-[9px] text-[#8d90a0] font-mono"><div className="w-2 h-0.5 bg-[#EF4444]"></div> CHANDELIER EXIT</div>
+                        <div className="flex items-center gap-1.5 text-[9px] font-black text-blue-900 font-mono"><div className="w-2 h-0.5 bg-blue-700"></div> PRICE</div>
+                        <div className="flex items-center gap-1.5 text-[9px] font-black text-blue-900 font-mono"><div className="w-2 h-0.5 bg-emerald-600 border-t-2 border-dashed"></div> SMA 20</div>
+                        <div className="flex items-center gap-1.5 text-[9px] font-black text-blue-900 font-mono"><div className="w-2 h-0.5 bg-rose-600"></div> CHANDELIER</div>
                       </div>
                     </div>
 
                     {/* Execution & Live Status Panel */}
-                    <div className="col-span-1 bg-[#1e2235] border border-[#2a2f45] rounded-lg p-4 flex flex-col justify-between">
+                    <div className="col-span-1 bg-white border-2 border-blue-200 rounded-md p-4 flex flex-col justify-between shadow-sm">
                       <div>
-                        <div className="text-[10px] text-[#8d90a0] font-mono mb-4 flex items-center gap-1 border-b border-[#2a2f45] pb-2">
+                        <div className="text-[10px] font-black text-blue-900 font-mono mb-4 flex items-center gap-1 border-b-2 border-blue-100 pb-2">
                           <Crosshair className="w-3 h-3" /> RISK METRICS
                         </div>
                         <div className="space-y-3">
-                          <div className="flex justify-between items-center border-b border-[#2a2f45] pb-1">
-                            <span className="text-[10px] text-[#8d90a0] font-mono">Win Rate</span>
-                            <span className="text-xs text-white font-mono tabular-nums">65.0%</span>
+                          <div className="flex justify-between items-center border-b-2 border-blue-50 pb-1">
+                            <span className="text-[10px] font-black text-blue-900 font-mono">Win Rate</span>
+                            <span className="text-xs font-black text-black font-mono tabular-nums">65.0%</span>
                           </div>
-                          <div className="flex justify-between items-center border-b border-[#2a2f45] pb-1">
-                            <span className="text-[10px] text-[#8d90a0] font-mono">P/L Ratio</span>
-                            <span className="text-xs text-[#10B981] font-mono tabular-nums">1 : 2.5</span>
+                          <div className="flex justify-between items-center border-b-2 border-blue-50 pb-1">
+                            <span className="text-[10px] font-black text-blue-900 font-mono">P/L Ratio</span>
+                            <span className="text-xs font-black text-emerald-700 font-mono tabular-nums">1 : 2.5</span>
                           </div>
-                          <div className="flex justify-between items-center border-b border-[#2a2f45] pb-1">
-                            <span className="text-[10px] text-[#8d90a0] font-mono">Stop Loss</span>
-                            <span className="text-xs text-[#EF4444] font-mono tabular-nums">$155.40</span>
+                          <div className="flex justify-between items-center border-b-2 border-blue-50 pb-1">
+                            <span className="text-[10px] font-black text-blue-900 font-mono">Stop Loss</span>
+                            <span className="text-xs font-black text-rose-700 font-mono tabular-nums">$155.40</span>
                           </div>
                         </div>
                         
                         {/* Live Log Mock */}
-                        <div className="mt-4 p-2 bg-[#0f111a] rounded border border-[#2a2f45] h-16 overflow-hidden relative">
-                          <div className="text-[8px] font-mono text-[#8d90a0] space-y-1">
-                            <p className="text-[#10B981]">&gt; Volatility check... OK</p>
+                        <div className="mt-4 p-2 bg-blue-100 rounded-md border-2 border-blue-200 h-16 overflow-hidden relative shadow-inner">
+                          <div className="text-[9px] font-black font-mono text-blue-950 space-y-1">
+                            <p className="text-emerald-700">&gt; Volatility check... OK</p>
                             <p>&gt; Calculating Kelly f...</p>
                             <p>&gt; Risk adjusted to 24.5%</p>
-                            <p className="animate-pulse">&gt; Awaiting execution...</p>
+                            <p className="animate-pulse text-blue-800">&gt; Awaiting execution...</p>
                           </div>
                         </div>
                       </div>
-                      <button className="w-full bg-[#10B981] hover:bg-[#059669] text-white py-2 rounded text-[11px] font-bold font-mono uppercase tracking-widest transition-colors shadow-[0_0_10px_rgba(16,185,129,0.2)] mt-3">
+                      <button className="w-full bg-emerald-600 hover:bg-emerald-700 border-2 border-emerald-700 text-white py-2 rounded-md text-[11px] font-black font-mono uppercase tracking-widest transition-colors shadow-md mt-3 active:scale-95">
                         Execute Long
                       </button>
                     </div>
@@ -366,19 +366,19 @@ export default function LandingPage() {
         </section>
 
         {/* Feature Grid - Bento Box Layout */}
-        <section className="py-24 bg-[#0a0c13] border-t border-[#1e2235]">
+        <section className="py-24 bg-white border-t-2 border-blue-200">
           <div className="max-w-[1440px] mx-auto px-6">
             <div className="mb-12">
-              <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight mb-2 uppercase font-mono">
-                System Capabilities <span className="text-[#67E8F9] text-xl">_</span>
+              <h2 className="text-2xl md:text-3xl font-black text-black tracking-tight mb-2 uppercase font-mono">
+                System Capabilities <span className="text-blue-700 text-xl">_</span>
               </h2>
-              <p className="text-sm text-[#8d90a0] font-mono uppercase tracking-widest">
+              <p className="text-sm font-black text-blue-900 font-mono uppercase tracking-widest">
                 High-Density Quantitative Modules
               </p>
             </div>
 
-            {/* CSS Grid for Hairline borders (Bento Box) */}
-            <div className="bg-[#2a2f45] grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[1px] rounded-xl overflow-hidden border border-[#2a2f45]">
+            {/* CSS Grid for Thick borders (Bento Box) */}
+            <div className="bg-blue-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0.5 rounded-lg overflow-hidden border-2 border-blue-200 shadow-sm">
               {[
                 {
                   icon: Activity,
@@ -417,13 +417,13 @@ export default function LandingPage() {
                   val: 'SYS.OK'
                 }
               ].map((f, i) => (
-                <div key={i} className="bg-[#151828] p-8 hover:bg-[#1e2235] transition-colors relative group">
+                <div key={i} className="bg-white p-8 hover:bg-blue-50 transition-colors relative group">
                   <div className="flex justify-between items-start mb-6">
-                    <f.icon className="w-6 h-6 text-[#2563EB] group-hover:text-[#67E8F9] transition-colors" />
-                    <span className="text-[10px] text-[#434655] font-mono">{f.val}</span>
+                    <f.icon className="w-6 h-6 text-blue-700 group-hover:scale-110 transition-transform" />
+                    <span className="text-[10px] font-black text-blue-900 bg-blue-100 px-2 py-1 rounded border-2 border-blue-200 font-mono">{f.val}</span>
                   </div>
-                  <h3 className="text-sm font-bold text-white mb-3 tracking-widest uppercase font-mono">{f.title}</h3>
-                  <p className="text-xs text-[#8d90a0] leading-relaxed">
+                  <h3 className="text-sm font-black text-black mb-3 tracking-widest uppercase font-mono">{f.title}</h3>
+                  <p className="text-xs font-bold text-blue-950 leading-relaxed">
                     {f.desc}
                   </p>
                 </div>
@@ -434,13 +434,13 @@ export default function LandingPage() {
       </main>
 
       {/* Footer Area */}
-      <footer className="border-t border-[#1e2235] py-8 bg-[#0f111a] relative z-10 font-mono text-[10px] text-[#434655] uppercase flex flex-col md:flex-row items-center justify-between px-6 max-w-[1440px] mx-auto">
+      <footer className="border-t-2 border-blue-200 py-8 bg-blue-50 relative z-10 font-mono text-[10px] font-black text-blue-900 uppercase flex flex-col md:flex-row items-center justify-between px-6 max-w-[1440px] mx-auto">
         <div className="flex items-center gap-2 mb-4 md:mb-0">
-          <ActivitySquare className="w-3 h-3 text-[#2563EB]" />
+          <ActivitySquare className="w-4 h-4 text-blue-700" />
           <span>MuzeBIZ.LAB Terminal Build v2.1</span>
         </div>
-        <div className="text-right">
-          <span className="text-[#EF4444]/60">RISK DISCLOSURE:</span> SIMULATION DATA IS BASED ON HISTORICAL STATS.<br/> PAST PERFORMANCE IS NOT INDICATIVE OF FUTURE RESULTS.
+        <div className="text-right leading-tight">
+          <span className="text-rose-700">RISK DISCLOSURE:</span> SIMULATION DATA IS BASED ON HISTORICAL STATS.<br/> PAST PERFORMANCE IS NOT INDICATIVE OF FUTURE RESULTS.
         </div>
       </footer>
 
@@ -453,36 +453,36 @@ export default function LandingPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowLoginModal(false)}
-              className="absolute inset-0 bg-[#020617]/90 backdrop-blur-sm cursor-pointer"
+              className="absolute inset-0 bg-blue-950/80 backdrop-blur-sm cursor-pointer"
             />
 
             <motion.div 
               initial={{ opacity: 0, scale: 0.98, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.98, y: 10 }}
-              className="bg-[#1e2235] border border-[#3b415a] shadow-[0_0_50px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.05)] rounded-xl w-full max-w-sm p-6 relative z-10"
+              className="bg-white border-2 border-blue-300 shadow-[0_20px_50px_-10px_rgba(29,78,216,0.3)] rounded-lg w-full max-w-sm p-6 relative z-10 overflow-hidden"
             >
-              <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-[#2563EB] to-[#67E8F9] shadow-[0_0_10px_rgba(103,232,249,0.5)]" />
+              <div className="absolute top-0 left-0 w-full h-2 bg-blue-700" />
               
-              <div className="flex justify-between items-start mb-6">
+              <div className="flex justify-between items-start mb-6 pt-2">
                 <div>
-                  <h2 className="text-lg font-bold text-white tracking-widest font-mono">AUTH</h2>
-                  <p className="text-[10px] text-[#67E8F9] uppercase tracking-widest font-mono">Terminal Protocol</p>
+                  <h2 className="text-xl font-black text-black tracking-widest font-mono">AUTH</h2>
+                  <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest font-mono mt-0.5">Terminal Protocol</p>
                 </div>
                 <button 
                   onClick={() => setShowLoginModal(false)}
-                  className="text-[#8d90a0] hover:text-[#dce1fb] p-1.5 rounded bg-[#151828] border border-[#2a2f45] transition-colors cursor-pointer hover:border-[#67E8F9]/50"
+                  className="text-blue-800 hover:text-black p-1.5 rounded-md bg-blue-50 border-2 border-blue-200 transition-colors cursor-pointer hover:border-blue-400"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
               <form className="space-y-4" onSubmit={handleLoginSubmit}>
                 <div className="space-y-1.5">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-[#8d90a0] font-mono">User ID</label>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-blue-950 font-mono">User ID</label>
                   <input 
                     type="email" 
-                    className="w-full bg-[#0f111a] border border-[#2a2f45] rounded-md px-3 py-2 text-[#dce1fb] outline-none focus:border-[#67E8F9] focus:shadow-[0_0_10px_rgba(103,232,249,0.15)] transition-all font-mono text-xs"
+                    className="w-full bg-white border-2 border-blue-200 rounded-md px-3 py-2.5 text-black font-black outline-none focus:border-blue-700 focus:shadow-[0_0_0_3px_rgba(29,78,216,0.2)] transition-all font-mono text-xs"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     readOnly
@@ -490,10 +490,10 @@ export default function LandingPage() {
                 </div>
                 
                 <div className="space-y-1.5">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-[#8d90a0] font-mono">Auth Token</label>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-blue-950 font-mono">Auth Token</label>
                   <input 
                     type="password" 
-                    className="w-full bg-[#0f111a] border border-[#2a2f45] rounded-md px-3 py-2 text-[#dce1fb] outline-none focus:border-[#67E8F9] focus:shadow-[0_0_10px_rgba(103,232,249,0.15)] transition-all font-mono text-xs"
+                    className="w-full bg-white border-2 border-blue-200 rounded-md px-3 py-2.5 text-black font-black outline-none focus:border-blue-700 focus:shadow-[0_0_0_3px_rgba(29,78,216,0.2)] transition-all font-mono text-xs"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     readOnly
@@ -503,7 +503,7 @@ export default function LandingPage() {
                 <button 
                   type="submit" 
                   disabled={isLoading}
-                  className="w-full py-2.5 bg-[#2563EB] hover:bg-[#1d4ed8] border border-[#60A5FA]/30 text-white rounded-md shadow-[0_0_15px_rgba(37,99,235,0.4)] transition-all mt-4 text-[11px] font-bold uppercase tracking-widest font-mono cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-3 bg-blue-700 hover:bg-blue-800 border-2 border-blue-800 text-white rounded-md shadow-md transition-all mt-6 text-[12px] font-black uppercase tracking-widest font-mono cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                 >
                   {isLoading ? 'Verifying...' : `Connect to ${targetRoute === '/dna-simulator' ? 'Simulator' : targetRoute === '/stock/dashboard' ? 'Dashboard' : targetRoute.split('/').pop()}`}
                 </button>

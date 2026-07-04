@@ -76,7 +76,7 @@ export const getRelevanceBadgeClass = (score: number) => {
   if (score >= 1000) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
   if (score >= 500) return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
   if (score >= 200) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-  return 'bg-white/5 text-slate-300 border-white/10';
+  return 'bg-white/5 text-blue-300 border-white/10';
 };
 
 export const getRelevanceLabel = (score: number) => {

@@ -24,7 +24,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
   onShowDetails
 }) => {
   return (
-    <tr key={`${part.id}-${part.distributor}`} className="hover:bg-slate-50/70 transition-colors">
+    <tr key={`${part.id}-${part.distributor}`} className="hover:bg-blue-50/70 transition-colors">
       <td className="px-4 py-4">
         <div className="flex flex-col gap-1.5">
           <span className={`distributor-badge ${getDistributorBadgeClass(part.distributor)}`}>
@@ -41,35 +41,35 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
         <div className="flex items-center gap-3">
           {getBrandIcon(part.manufacturer)}
           <div className="flex flex-col">
-            <span className="text-base font-extrabold text-slate-900 font-mono">{part.mpn}</span>
+            <span className="text-base font-extrabold text-blue-900 font-mono">{part.mpn}</span>
             {part.is_alternative && (
               <span className="family-tag mt-1">Family Match</span>
             )}
-            <span className="text-xs font-semibold text-slate-500 uppercase mt-0.5">{part.manufacturer}</span>
+            <span className="text-xs font-semibold text-blue-500 uppercase mt-0.5">{part.manufacturer}</span>
           </div>
         </div>
       </td>
       <td className="px-4 py-4">
-        <span className="text-sm font-semibold text-slate-700">{(part as any).package || 'N/A'}</span>
+        <span className="text-sm font-semibold text-blue-700">{(part as any).package || 'N/A'}</span>
       </td>
       <td className="px-4 py-4">
         <span className={`text-sm font-extrabold ${getStockClass(part.stock)}`}>
           {part.stock > 0 ? part.stock.toLocaleString() : 'Check'}
         </span>
       </td>
-      <td className="px-4 py-4 font-black text-slate-900">
+      <td className="px-4 py-4 font-black text-blue-900">
         <div className="flex flex-col relative group">
-          <span className={`text-base font-black font-mono w-fit ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-slate-300' : ''}`}>
+          <span className={`text-base font-black font-mono w-fit ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-blue-300' : ''}`}>
             {part.price > 0 ? `${part.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${part.currency}` : 'Quote'}
           </span>
           {part.priceBreaks && part.priceBreaks.length > 0 && (
             <div className="absolute left-0 top-full mt-2 hidden group-hover:block z-50">
-              <div className="bg-slate-900 text-slate-50 text-xs rounded-xl p-3 shadow-xl border border-slate-700 min-w-[160px]">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 border-b border-slate-700 pb-1">Tiered Pricing</p>
+              <div className="bg-blue-900 text-blue-50 text-xs rounded-xl p-3 shadow-xl border border-blue-700 min-w-[160px]">
+                <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-2 border-b border-blue-700 pb-1">Tiered Pricing</p>
                 <div className="space-y-1">
                   {part.priceBreaks.map((pb, idx) => (
                     <div key={idx} className="flex justify-between items-center gap-4">
-                      <span className="text-slate-300">{pb.quantity.toLocaleString()}+</span>
+                      <span className="text-blue-300">{pb.quantity.toLocaleString()}+</span>
                       <span className="font-mono font-bold">{pb.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                     </div>
                   ))}
@@ -86,9 +86,9 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
       </td>
       <td className="px-4 py-4">
         <div className="flex flex-col">
-          <span className="text-slate-700 text-sm font-medium">{part.delivery}</span>
+          <span className="text-blue-700 text-sm font-medium">{part.delivery}</span>
           {part.market_notes && (
-            <span className="text-xs text-slate-500 mt-1 italic truncate max-w-[120px]" title={part.market_notes}>
+            <span className="text-xs text-blue-500 mt-1 italic truncate max-w-[120px]" title={part.market_notes}>
               {part.market_notes}
             </span>
           )}
@@ -101,7 +101,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
               href={part.datasheet}
               target="_blank"
               rel="noreferrer noopener"
-              className="p-2 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
+              className="p-2 text-blue-500 hover:text-rose-600 hover:bg-blue-100 rounded-lg transition-all cursor-pointer"
               title="데이터시트 (PDF)"
             >
               <FileText className="w-4 h-4" />
@@ -111,14 +111,14 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
             href={getDistributorUrl(part)}
             target="_blank"
             rel="noreferrer noopener"
-            className="p-2 text-slate-500 hover:text-cyan-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
+            className="p-2 text-blue-500 hover:text-cyan-600 hover:bg-blue-100 rounded-lg transition-all cursor-pointer"
             title="판매 사이트 방문"
           >
             <Globe className="w-4 h-4" />
           </a>
           <button
             onClick={() => onShowDetails(part)}
-            className="p-2 text-slate-500 hover:text-cyan-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
+            className="p-2 text-blue-500 hover:text-cyan-600 hover:bg-blue-100 rounded-lg transition-all cursor-pointer"
             title="상세 정보 (Specs)"
           >
             <Info className="w-4 h-4" />
@@ -128,10 +128,10 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
             disabled={part.is_locked || part.is_processing}
             className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer ${
               part.is_locked 
-                ? 'bg-slate-100 text-slate-500 border border-slate-200/80 cursor-default' 
+                ? 'bg-blue-100 text-blue-500 border border-blue-200/80 cursor-default' 
                 : part.is_processing
                 ? 'bg-cyan-50 text-cyan-700 border border-cyan-200/50 cursor-wait'
-                : 'bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-black shadow-cyan-500/10'
+                : 'bg-cyan-500 hover:bg-cyan-600 text-blue-950 font-black shadow-cyan-500/10'
             }`}
           >
             {part.is_locked ? 'LOCKED' : part.is_processing ? 'Processing...' : 'LOCK'}

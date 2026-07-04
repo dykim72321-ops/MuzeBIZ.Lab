@@ -9,7 +9,7 @@ export const Skeleton = ({ className, variant = 'rectangular' }: Props) => {
   return (
     <div
       className={clsx(
-        'animate-pulse bg-slate-800/50',
+        'animate-pulse bg-blue-800/50',
         {
           'rounded': variant === 'rectangular',
           'rounded-full': variant === 'circular',

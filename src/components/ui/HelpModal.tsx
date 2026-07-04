@@ -49,12 +49,12 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-slate-950/60 backdrop-blur-md transition-opacity"
+                className="absolute inset-0 bg-blue-950/60 backdrop-blur-md transition-opacity"
                 onClick={onClose}
             />
 
             {/* Modal Content */}
-            <Card className="relative w-full max-w-2xl bg-slate-900 border-white/5 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <Card className="relative w-full max-w-2xl bg-blue-900 border-white/5 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
                 <div className="p-6 border-b border-white/5 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-indigo-500/20 rounded-lg">
@@ -62,12 +62,12 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                         </div>
                         <div>
                             <h2 className="text-xl font-bold text-white">MuzeBIZ.Lab 터미널 가이드</h2>
-                            <p className="text-xs text-slate-500 font-medium">실전 퀀트 시스템 핵심 활용 4단계 튜토리얼</p>
+                            <p className="text-xs text-blue-500 font-medium">실전 퀀트 시스템 핵심 활용 4단계 튜토리얼</p>
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white"
+                        className="p-2 hover:bg-white/5 rounded-full transition-colors text-blue-400 hover:text-white"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -83,7 +83,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                 </div>
                                 <div>
                                     <h3 className="text-sm font-bold text-white mb-1">{step.title}</h3>
-                                    <p className="text-xs text-slate-400 leading-relaxed font-medium">
+                                    <p className="text-xs text-blue-400 leading-relaxed font-medium">
                                         {step.description}
                                     </p>
                                 </div>
@@ -100,25 +100,25 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div className="bg-white/5 p-3 rounded-lg border border-white/5">
                                 <p className="text-[10px] font-black text-white uppercase mb-1">Win Rate (승률)</p>
-                                <p className="text-[10px] text-slate-400 font-medium leading-normal">
+                                <p className="text-[10px] text-blue-400 font-medium leading-normal">
                                     전체 종료된 매매 중 수익으로 마감된 비율입니다. 50% 이상을 유지하는 것이 전략의 기본 목표입니다.
                                 </p>
                             </div>
                             <div className="bg-white/5 p-3 rounded-lg border border-white/5">
                                 <p className="text-[10px] font-black text-white uppercase mb-1">Profit Factor</p>
-                                <p className="text-[10px] text-slate-400 font-medium leading-normal">
+                                <p className="text-[10px] text-blue-400 font-medium leading-normal">
                                     총 이익을 총 손실로 나눈 값입니다. 1.5x 이상이면 매우 효율적인 전략으로 간주됩니다.
                                 </p>
                             </div>
                             <div className="bg-white/5 p-3 rounded-lg border border-white/5">
                                 <p className="text-[10px] font-black text-rose-400 uppercase mb-1">Drawdown (낙폭)</p>
-                                <p className="text-[10px] text-slate-400 font-medium leading-normal">
+                                <p className="text-[10px] text-blue-400 font-medium leading-normal">
                                     자산 최고점 대비 현재 하락률입니다. -10%를 넘지 않도록 리스크 슬라이더를 조절하세요.
                                 </p>
                             </div>
                             <div className="bg-white/5 p-3 rounded-lg border border-white/5">
                                 <p className="text-[10px] font-black text-amber-400 uppercase mb-1">Panic Liquidate</p>
-                                <p className="text-[10px] text-slate-400 font-medium leading-normal">
+                                <p className="text-[10px] text-blue-400 font-medium leading-normal">
                                     시장 급변 시 모든 포지션을 즉시 정리하는 마스터 킬스위치입니다. 위급 상황에서만 사용하세요.
                                 </p>
                             </div>
@@ -131,14 +131,14 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                         </div>
                         <div className="flex-1">
                             <p className="text-xs font-bold text-indigo-300">💡 핵심 활용 루틴</p>
-                            <p className="text-[11px] text-slate-400 mt-1">
+                            <p className="text-[11px] text-blue-400 mt-1">
                             장 시작 시 [퀀트 펄스] 우상단의 **"🚀 딥 헌팅 실행"** 버튼을 눌러 스캔 루프를 동작시키는 것이 오퍼레이션의 시작입니다.
                             </p>
                         </div>
                     </div>
                 </div>
 
-                <div className="p-4 bg-slate-800/50 border-t border-white/5 flex justify-end">
+                <div className="p-4 bg-blue-800/50 border-t border-white/5 flex justify-end">
                     <button
                         onClick={onClose}
                         className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all active:scale-95 flex items-center gap-2 shadow-lg shadow-indigo-600/20"

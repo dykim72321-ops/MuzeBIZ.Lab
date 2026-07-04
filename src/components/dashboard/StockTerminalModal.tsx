@@ -50,7 +50,7 @@ const CandlestickChart = ({
     const xLabelIndices = [0, Math.floor(data.length / 3), Math.floor((2 * data.length) / 3), data.length - 1];
 
     return (
-        <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-slate-800/80 overflow-hidden">
+        <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-blue-800/80 overflow-hidden">
             <svg width="100%" height="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="xMidYMid meet">
                 {/* Grid lines */}
                 {yTickValues.map((v, i) => (
@@ -148,14 +148,14 @@ const PriceTrajectoryChart = ({
 
     if (chartData.length < 2) {
         return (
-            <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-slate-800/80 flex items-center justify-center">
-                <span className="text-xs font-semibold text-slate-400 font-sans">장 개장 후 가격 데이터가 수집됩니다</span>
+            <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-blue-800/80 flex items-center justify-center">
+                <span className="text-xs font-semibold text-blue-400 font-sans">장 개장 후 가격 데이터가 수집됩니다</span>
             </div>
         );
     }
 
     return (
-        <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-slate-800/80 overflow-hidden">
+        <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-blue-800/80 overflow-hidden">
             <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 12, right: 12, bottom: 4, left: 4 }}>
                     <defs>
@@ -275,12 +275,12 @@ const QuantIndicatorBar = ({
     return (
         <div className="space-y-2">
             <div className="flex justify-between items-center text-[11px] font-bold uppercase tracking-widest">
-                <span className="text-slate-400">{label}</span>
+                <span className="text-blue-400">{label}</span>
                 <span className={clsx("font-mono font-black", colorClass.replace('bg-', 'text-'))}>
-                    {displayValue}{unit && <span className="text-slate-500 ml-0.5">{unit}</span>}
+                    {displayValue}{unit && <span className="text-blue-500 ml-0.5">{unit}</span>}
                 </span>
             </div>
-            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden border border-white/5">
+            <div className="w-full h-1.5 bg-blue-800 rounded-full overflow-hidden border border-white/5">
                 <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${pct}%` }}
@@ -448,12 +448,12 @@ export const StockTerminalModal = ({
 
     // ADX (0~100 그대로)
     const adxVal = displayData.adx ?? 0;
-    const adxColor = adxVal > 25 ? 'bg-emerald-400' : adxVal > 20 ? 'bg-amber-400' : 'bg-slate-500';
+    const adxColor = adxVal > 25 ? 'bg-emerald-400' : adxVal > 20 ? 'bg-amber-400' : 'bg-blue-500';
 
     // RVOL → 정규화 (0~10 범위를 0~100으로)
     const rvolVal = displayData.rvol ?? 1.0;
     const rvolNorm = Math.min(100, (rvolVal / 10) * 100);
-    const rvolColor = rvolVal > 3 ? 'bg-emerald-400' : rvolVal > 2 ? 'bg-cyan-400' : 'bg-slate-500';
+    const rvolColor = rvolVal > 3 ? 'bg-emerald-400' : rvolVal > 2 ? 'bg-cyan-400' : 'bg-blue-500';
 
     const chartHistory = displayData.history || [];
 
@@ -468,10 +468,10 @@ export const StockTerminalModal = ({
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
                         transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-                        className="relative w-full max-w-4xl bg-[#0A0F1C]/95 backdrop-blur-3xl border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-[0_0_100px_rgba(34,211,238,0.1)] flex flex-col"
+                        className="relative w-full max-w-4xl bg-[#0A0F1C]/95 backdrop-blur-3xl border border-blue-800 rounded-[2.5rem] overflow-hidden shadow-[0_0_100px_rgba(34,211,238,0.1)] flex flex-col"
                     >
                         {/* ─── 1. Header ─────────────────────────────────────────── */}
-                        <div className="p-8 border-b border-slate-800/80 flex justify-between items-start bg-gradient-to-b from-slate-900/50 to-transparent relative z-10">
+                        <div className="p-8 border-b border-blue-800/80 flex justify-between items-start bg-gradient-to-b from-blue-900/50 to-transparent relative z-10">
                             <div className="flex items-center gap-6">
                                 <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-center shadow-[inset_0_0_20px_rgba(99,102,241,0.2)]">
                                     <Dna className="w-8 h-8 text-indigo-400" />
@@ -484,13 +484,13 @@ export const StockTerminalModal = ({
                                         )}
                                     </div>
                                     <h1 className="text-4xl font-black text-white tracking-tighter flex items-center gap-4">
-                                        <span className="text-slate-500 opacity-40">/</span>
+                                        <span className="text-blue-500 opacity-40">/</span>
                                         {displayData.ticker}
                                     </h1>
                                 </div>
                             </div>
                             <button onClick={onClose} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all duration-300 group">
-                                <X className="w-5 h-5 text-slate-400 group-hover:text-white" />
+                                <X className="w-5 h-5 text-blue-400 group-hover:text-white" />
                             </button>
                         </div>
 
@@ -511,8 +511,8 @@ export const StockTerminalModal = ({
                                         ohlcData={displayData.ohlcData}
                                     />
                                     <div className="grid grid-cols-3 gap-3 mt-4">
-                                        <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800/60 font-mono">
-                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1 font-sans">현재가</span>
+                                        <div className="bg-blue-950/50 p-3.5 rounded-xl border border-blue-800/60 font-mono">
+                                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block mb-1 font-sans">현재가</span>
                                             <span className="text-lg font-black text-white">{formatPrice(displayData.price || 0)}</span>
                                             {displayData.changePercent !== undefined && (
                                                 <span className={clsx(
@@ -523,16 +523,16 @@ export const StockTerminalModal = ({
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800/60 font-mono">
-                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1 font-sans">고가 (Day)</span>
+                                        <div className="bg-blue-950/50 p-3.5 rounded-xl border border-blue-800/60 font-mono">
+                                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block mb-1 font-sans">고가 (Day)</span>
                                             <span className="text-lg font-black text-white">
                                                 {displayData.dayHigh && displayData.dayHigh > 0
                                                     ? formatPrice(displayData.dayHigh)
                                                     : '—'}
                                             </span>
                                         </div>
-                                        <div className="bg-slate-950/50 p-3.5 rounded-xl border border-slate-800/60 font-mono">
-                                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block mb-1">거래량</span>
+                                        <div className="bg-blue-950/50 p-3.5 rounded-xl border border-blue-800/60 font-mono">
+                                            <span className="text-[9px] font-bold text-blue-500 uppercase tracking-widest block mb-1">거래량</span>
                                             <span className="text-lg font-black text-white">
                                                 {displayData.volume && displayData.volume > 0
                                                     ? formatVolume(displayData.volume)
@@ -543,7 +543,7 @@ export const StockTerminalModal = ({
                                 </div>
 
                                 {/* RIGHT: 퀀트 분석 매트릭스 */}
-                                <div className="bg-[#020617]/40 rounded-2xl border border-slate-800/80 p-7 flex flex-col justify-center relative overflow-hidden group">
+                                <div className="bg-[#020617]/40 rounded-2xl border border-blue-800/80 p-7 flex flex-col justify-center relative overflow-hidden group">
                                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                                         <Fingerprint className="w-24 h-24" />
                                     </div>
@@ -551,7 +551,7 @@ export const StockTerminalModal = ({
                                         <div className="flex justify-between items-end mb-6">
                                             <div>
                                                 <h3 className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-1 font-sans">퀀트 분석 매트릭스</h3>
-                                                <p className="text-[11px] text-slate-400 font-bold tracking-tight font-sans font-sans">RSI · MACD · ADX · RVOL 실측 기반</p>
+                                                <p className="text-[11px] text-blue-400 font-bold tracking-tight font-sans font-sans">RSI · MACD · ADX · RVOL 실측 기반</p>
                                             </div>
                                             <span className="text-5xl font-black text-white font-mono tracking-tighter drop-shadow-[0_0_15px_rgba(34,211,238,0.4)]">
                                                 {displayData.dnaScore}
@@ -597,17 +597,17 @@ export const StockTerminalModal = ({
                                 <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-3 font-sans">
                                     <Zap className="w-4 h-4 text-indigo-400 fill-indigo-400/10" /> 투자 판단 근거
                                 </h3>
-                                <p className="text-sm text-slate-300 font-medium leading-relaxed mb-5">
+                                <p className="text-sm text-blue-300 font-medium leading-relaxed mb-5">
                                     {finalVerdict}
                                 </p>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5 border-t border-slate-800/50">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5 border-t border-blue-800/50">
                                     <div className="space-y-3">
                                         <span className="text-[11px] font-black text-emerald-400 uppercase tracking-wider block mb-2 font-sans">
                                             강세 요인 (Bull Case)
                                         </span>
                                         <ul className="space-y-2.5">
                                             {finalBullPoints.slice(0, 4).map((pt, i) => (
-                                                <li key={i} className="flex gap-2.5 text-xs text-slate-300 font-medium items-start leading-relaxed">
+                                                <li key={i} className="flex gap-2.5 text-xs text-blue-300 font-medium items-start leading-relaxed">
                                                     <TrendingUp className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" /> {pt}
                                                 </li>
                                             ))}
@@ -619,7 +619,7 @@ export const StockTerminalModal = ({
                                         </span>
                                         <ul className="space-y-2.5">
                                             {finalBearPoints.slice(0, 4).map((pt, i) => (
-                                                <li key={i} className="flex gap-2.5 text-xs text-slate-400 font-medium items-start leading-relaxed">
+                                                <li key={i} className="flex gap-2.5 text-xs text-blue-400 font-medium items-start leading-relaxed">
                                                     <TrendingDown className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" /> {pt}
                                                 </li>
                                             ))}
@@ -631,9 +631,9 @@ export const StockTerminalModal = ({
 
 
 
-                        <div className="p-8 pt-4 border-t border-slate-800/80 bg-[#020617] flex justify-between items-center relative z-10 font-mono">
+                        <div className="p-8 pt-4 border-t border-blue-800/80 bg-[#020617] flex justify-between items-center relative z-10 font-mono">
                             <div className="flex items-center gap-4">
-                                <button onClick={onClose} className="text-[10px] font-black text-slate-400 hover:text-white uppercase tracking-[0.2em] transition-all bg-white/5 px-6 py-3 rounded-xl border border-white/5">
+                                <button onClick={onClose} className="text-[10px] font-black text-blue-400 hover:text-white uppercase tracking-[0.2em] transition-all bg-white/5 px-6 py-3 rounded-xl border border-white/5">
                                     Close
                                 </button>
 
@@ -656,7 +656,7 @@ export const StockTerminalModal = ({
 
                             <div className="flex items-center gap-4">
                                 <div className="hidden md:flex flex-col items-end mr-2 text-right">
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-sans">Kelly 적정 비중</span>
+                                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest font-sans">Kelly 적정 비중</span>
                                     <span className="text-xs font-black text-indigo-400">{displayData.kellyWeight?.toFixed(1) ?? '—'}%</span>
                                 </div>
                                 <button

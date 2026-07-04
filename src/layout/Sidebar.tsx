@@ -56,25 +56,25 @@ export const Sidebar = () => {
                 animate={{ x: 0, opacity: 1 }}
                 transition={{ duration: 0.5, ease: "circOut" }}
                 // 글래스모피즘 베이스 레이어 최적화
-                className="flex flex-col w-64 h-screen shrink-0 bg-[#020617]/60 backdrop-blur-2xl border-r border-slate-800/80 shadow-2xl z-50"
+                className="flex flex-col w-64 h-screen shrink-0 bg-[#020617]/60 backdrop-blur-2xl border-r border-blue-800/80 shadow-2xl z-50"
             >
                 {/* Brand Header */}
-                <div className="p-6 pb-8 border-b border-slate-800/50">
+                <div className="p-6 pb-8 border-b border-blue-800/50">
                     <div className="flex items-center gap-3 mb-2">
-                        <div className="relative group flex items-center justify-center w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 shadow-inner overflow-hidden">
+                        <div className="relative group flex items-center justify-center w-10 h-10 rounded-xl bg-blue-900 border border-blue-700 shadow-inner overflow-hidden">
                             {/* 날카로운 네온 백라이트 효과 */}
                             <div className="absolute inset-0 bg-gradient-to-tr from-blue-600/20 to-cyan-400/20 group-hover:opacity-100 opacity-50 transition-opacity"></div>
                             <Dna className="w-6 h-6 text-blue-400 relative z-10" />
                         </div>
                         <div>
-                            <h1 className="text-xl font-black tracking-tighter text-slate-100">
+                            <h1 className="text-xl font-black tracking-tighter text-blue-100">
                                 MuzeStock<span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300">.Lab</span>
                             </h1>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 pl-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)] animate-pulse"></span>
-                        <p className="text-[10px] text-slate-400 font-mono font-bold tracking-widest">TERMINAL V3.0 LIVE</p>
+                        <p className="text-[10px] text-blue-400 font-mono font-bold tracking-widest">TERMINAL V3.0 LIVE</p>
                     </div>
                 </div>
 
@@ -83,7 +83,7 @@ export const Sidebar = () => {
                     {NAVIGATION.map((group) => (
                         <div key={group.section}>
                             {/* Section Title */}
-                            <h3 className="px-3 mb-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-l-2 border-blue-500/30">
+                            <h3 className="px-3 mb-3 text-[10px] font-black text-blue-500 uppercase tracking-widest border-l-2 border-blue-500/30">
                                 {group.section}
                             </h3>
 
@@ -98,7 +98,7 @@ export const Sidebar = () => {
                                             "relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 font-medium text-sm group overflow-hidden",
                                             isActive
                                                 ? "text-blue-50"
-                                                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                                                : "text-blue-400 hover:text-blue-200 hover:bg-blue-800/50"
                                         )}
                                     >
                                         {({ isActive }) => (
@@ -120,13 +120,13 @@ export const Sidebar = () => {
                                                 {/* Icon */}
                                                 <item.icon className={clsx(
                                                     "w-5 h-5 relative z-10 transition-colors",
-                                                    isActive ? "text-blue-400" : "text-slate-500 group-hover:text-slate-400"
+                                                    isActive ? "text-blue-400" : "text-blue-500 group-hover:text-blue-400"
                                                 )} />
 
                                                 {/* Label */}
                                                 <span className={clsx(
                                                     "relative z-10 flex-1 text-[13px] font-semibold tracking-tight transition-colors",
-                                                    isActive ? "text-slate-50" : "text-slate-400 group-hover:text-slate-200"
+                                                    isActive ? "text-blue-50" : "text-blue-400 group-hover:text-blue-200"
                                                 )}>
                                                     {item.name}
                                                 </span>
@@ -148,10 +148,10 @@ export const Sidebar = () => {
                 </nav>
 
                 {/* Bottom Actions (Guide & Profile) */}
-                <div className="p-4 mt-auto border-t border-slate-800/50 bg-slate-900/30">
+                <div className="p-4 mt-auto border-t border-blue-800/50 bg-blue-900/30">
                     <button
                         onClick={() => setIsHelpOpen(true)}
-                        className="flex items-center gap-3 w-full px-3 py-2.5 mb-4 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-slate-800/50 transition-colors"
+                        className="flex items-center gap-3 w-full px-3 py-2.5 mb-4 rounded-xl text-blue-400 hover:text-blue-400 hover:bg-blue-800/50 transition-colors"
                     >
                         <LifeBuoy className="w-5 h-5" />
                         <span className="text-sm font-semibold tracking-tight">System Guide</span>
@@ -159,12 +159,12 @@ export const Sidebar = () => {
 
                     <div className="flex items-center gap-3 px-2">
                         <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-cyan-400 p-[2px] shadow-[0_0_10px_rgba(59,130,246,0.3)]">
-                            <div className="w-full h-full rounded-full bg-slate-950 flex items-center justify-center">
-                                <span className="text-xs font-black text-slate-200">OP</span>
+                            <div className="w-full h-full rounded-full bg-blue-950 flex items-center justify-center">
+                                <span className="text-xs font-black text-blue-200">OP</span>
                             </div>
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-sm font-bold text-slate-200 leading-tight">Quant Operator</span>
+                            <span className="text-sm font-bold text-blue-200 leading-tight">Quant Operator</span>
                             <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1.5 mt-0.5">
                                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
                                 SECURE LINK

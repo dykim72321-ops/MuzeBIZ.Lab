@@ -142,18 +142,18 @@ export const CommandSettings: React.FC = () => {
   };
 
   return (
-    <div className="w-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mt-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+    <div className="w-full bg-white rounded-2xl border border-blue-200 shadow-sm overflow-hidden mt-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
       {/* Header */}
-      <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <h3 className="text-sm font-black text-slate-800 flex items-center gap-2 uppercase tracking-tight font-mono">
-          <Settings className="w-4 h-4 text-slate-400" />
+      <div className="bg-blue-50 px-6 py-4 border-b border-blue-100 flex items-center justify-between">
+        <h3 className="text-sm font-black text-blue-800 flex items-center gap-2 uppercase tracking-tight font-mono">
+          <Settings className="w-4 h-4 text-blue-400" />
           System Control Panel
         </h3>
         {/* ARMED 상태 뱃지 */}
         <span className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border transition-colors font-mono ${
           isArmed
             ? 'bg-rose-50 text-rose-600 border-rose-200'
-            : 'bg-slate-100 text-slate-500 border-slate-200'
+            : 'bg-blue-100 text-blue-500 border-blue-200'
         }`}>
           {isArmed
             ? <ShieldCheck className="w-3 h-3 animate-pulse" />
@@ -167,21 +167,21 @@ export const CommandSettings: React.FC = () => {
 
         {/* 0. SYSTEM_ARMED 토글 — 최상단 배치 */}
         <div className="space-y-4">
-          <h4 className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 font-mono">
+          <h4 className="text-xs font-bold text-blue-400 uppercase flex items-center gap-2 font-mono">
             <Shield className="w-4 h-4 text-indigo-400" /> Autonomous Trading Control
           </h4>
 
-          <div className="pl-6 border-l-2 border-slate-100">
+          <div className="pl-6 border-l-2 border-blue-100">
             <div className={`flex items-center justify-between p-5 rounded-xl border-2 transition-all ${
               isArmed
                 ? 'bg-rose-50/50 border-rose-200'
-                : 'bg-slate-50/50 border-slate-200'
+                : 'bg-blue-50/50 border-blue-200'
             }`}>
               <div>
-                <p className={`text-sm font-black ${isArmed ? 'text-rose-600' : 'text-slate-700'}`}>
+                <p className={`text-sm font-black ${isArmed ? 'text-rose-600' : 'text-blue-700'}`}>
                   {isArmed ? '🔴 COMBAT MODE — 자동 매매 활성' : '🟣 SAFE MODE — 관제 전용'}
                 </p>
-                <p className="text-[10px] text-slate-500 mt-1 max-w-sm">
+                <p className="text-[10px] text-blue-500 mt-1 max-w-sm">
                   {isArmed
                     ? 'DNA≥80 STRONG BUY 시 자동 진입 · RSI>60 Scale-Out · Trailing Stop 자동 청산'
                     : '스캐닝 및 시그널 수신은 계속되지만 실제 주문은 실행되지 않습니다.'
@@ -212,13 +212,13 @@ export const CommandSettings: React.FC = () => {
 
         {/* 1. 알림 시스템 설정 */}
         <div className="space-y-4">
-          <h4 className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 font-mono">
+          <h4 className="text-xs font-bold text-blue-400 uppercase flex items-center gap-2 font-mono">
             <Bell className="w-4 h-4 text-indigo-400" /> Alert & Webhook Setup
           </h4>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pl-6 border-l-2 border-slate-100">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pl-6 border-l-2 border-blue-100">
             <div className="space-y-2">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider font-mono">DNA Score Threshold (Target)</label>
+              <label className="text-[11px] font-black text-blue-500 uppercase tracking-wider font-mono">DNA Score Threshold (Target)</label>
               <div className="flex items-center gap-4">
                 <input
                   type="range"
@@ -231,22 +231,22 @@ export const CommandSettings: React.FC = () => {
                   {dnaThreshold}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-500">이 점수 이상을 획득한 종목만 Webhook으로 알림을 전송합니다.</p>
+              <p className="text-[10px] text-blue-500">이 점수 이상을 획득한 종목만 Webhook으로 알림을 전송합니다.</p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider font-mono">Discord Webhook URL</label>
+              <label className="text-[11px] font-black text-blue-500 uppercase tracking-wider font-mono">Discord Webhook URL</label>
               <input
                 type="password"
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
                 placeholder="https://discord.com/api/webhooks/..."
-                className="w-full text-sm px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all text-slate-800 font-mono shadow-sm"
+                className="w-full text-sm px-3 py-2 bg-white border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all text-blue-800 font-mono shadow-sm"
               />
               <button
                 onClick={handleTestWebhook}
                 disabled={isTesting || !webhookUrl}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-[11px] font-bold hover:bg-slate-50 hover:border-indigo-300 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-lg text-[11px] font-bold hover:bg-blue-50 hover:border-indigo-300 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono shadow-sm"
               >
                 {isTesting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                 {isTesting ? 'Sending...' : 'Test Webhook'}
@@ -257,14 +257,14 @@ export const CommandSettings: React.FC = () => {
 
         {/* 2. 시스템 유지보수 (Cache Control) */}
         <div className="space-y-4">
-          <h4 className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2 font-mono">
+          <h4 className="text-xs font-bold text-blue-400 uppercase flex items-center gap-2 font-mono">
             <Database className="w-4 h-4 text-indigo-400" /> System Maintenance
           </h4>
 
-          <div className="pl-6 border-l-2 border-slate-100 flex items-center justify-between bg-slate-50 border border-slate-200 p-4 rounded-lg">
+          <div className="pl-6 border-l-2 border-blue-100 flex items-center justify-between bg-blue-50 border border-blue-200 p-4 rounded-lg">
             <div>
-              <p className="text-sm font-bold text-slate-800 font-mono">Backtest Matrix Cache</p>
-              <p className="text-[10px] text-slate-500 mt-1">알고리즘 v4 업데이트 후 즉각적인 재연산이 필요할 때 캐시를 초기화합니다.</p>
+              <p className="text-sm font-bold text-blue-800 font-mono">Backtest Matrix Cache</p>
+              <p className="text-[10px] text-blue-500 mt-1">알고리즘 v4 업데이트 후 즉각적인 재연산이 필요할 때 캐시를 초기화합니다.</p>
             </div>
             <button
               onClick={handleClearCache}
@@ -278,7 +278,7 @@ export const CommandSettings: React.FC = () => {
         </div>
 
         {/* Footer Actions */}
-        <div className="pt-4 border-t border-slate-100 flex justify-end">
+        <div className="pt-4 border-t border-blue-100 flex justify-end">
           <button
             onClick={handleSaveSettings}
             disabled={isSaving}
