@@ -603,97 +603,76 @@ async def delete_paper_history(history_id: str, _api_key: str = Security(get_api
 async def manual_paper_sell(
     req: PaperSellRequest, api_key: str = Security(get_api_key)
 ):
-    """사령관 수동 페이퍼 트레이딩 포지션 청산"""
-    from paper_engine import _apply_slippage
+    """사령관 수동 페이퍼/실거래 포지션 청산 — TRADE_MODE=LIVE면 Alpaca에 실제 매도 주문을 제출한다."""
+    engine = app_state.active_engine
 
-    paper_engine = app_state.paper_engine
-    supabase = app_state.supabase
-
-    if not paper_engine:
-        raise HTTPException(status_code=503, detail="Paper engine not initialized")
+    if not engine:
+        raise HTTPException(status_code=503, detail="Trading engine not initialized")
 
     ticker = req.ticker.upper()
-    pos = await paper_engine.get_position(ticker)
-    if not pos:
-        raise HTTPException(status_code=404, detail=f"No open position for {ticker}")
 
-    entry_price = float(pos["entry_price"])
-    units = float(pos["units"])
+    async with engine._get_lock(ticker):
+        pos = await engine.get_position(ticker)
+        if not pos:
+            raise HTTPException(
+                status_code=404, detail=f"No open position for {ticker}"
+            )
 
-    signal_price = float(pos.get("current_price") or entry_price)
-    try:
-        tick = yf.Ticker(ticker)
-        hist = tick.history(period="1d", interval="1m")
-        if not hist.empty:
-            signal_price = float(hist["Close"].iloc[-1])
-    except Exception:
-        pass
+        entry_price = float(pos["entry_price"])
+        signal_price = float(pos.get("current_price") or entry_price)
+        try:
+            tick = yf.Ticker(ticker)
+            hist = tick.history(period="1d", interval="1m")
+            if not hist.empty:
+                signal_price = float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
 
-    is_penny = entry_price <= 1.0
-    fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
-    slippage_pct = (fill_price / signal_price - 1) * 100
+        acc = await engine.get_account()
+        if not acc:
+            raise HTTPException(status_code=503, detail="Paper account not initialized")
 
-    pnl_pct = (fill_price / entry_price - 1) * 100
-    profit_amt = (fill_price - entry_price) * units
-    proceeds = fill_price * units
+        # paper_engine.py의 공통 청산 경로 재사용: 슬리피지 적용 → 실주문 제출/체결 확인 →
+        # 현금 갱신 → paper_history 기록 → paper_positions 삭제 → watchlist EXITED 동기화.
+        result = await engine._close_position(pos, acc, signal_price, "Manual Sell")
+        if result is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{ticker} 실거래 매도 주문 실패/미확인 — 포지션을 유지합니다",
+            )
 
-    acc = await paper_engine.get_account()
-    if acc:
-        new_cash = float(acc["cash_available"]) + proceeds
-        await asyncio.to_thread(
-            supabase.table("paper_account")
-            .update({"cash_available": new_cash})
-            .eq("id", acc["id"])
-            .execute
+        status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
+        slippage_pct = (result["fill_price"] / signal_price - 1) * 100
+        await engine.webhook.send_alert(
+            title=f"{status_emoji} [PAPER MANUAL EXIT] {ticker}",
+            description=(
+                f"시장가: ${signal_price:.4f} → 체결가: ${result['fill_price']:.4f} "
+                f"(슬리피지 {slippage_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n사유: 사령관 수동 매도"
+            ),
+            color=0x2ECC71 if result["pnl_pct"] > 0 else 0xE74C3C,
         )
 
-    history_data = {
-        "ticker": ticker,
-        "entry_price": entry_price,
-        "exit_price": fill_price,
-        "signal_price": signal_price,
-        "slippage_pct": round(slippage_pct, 4),
-        "pnl_pct": round(pnl_pct, 2),
-        "profit_amt": round(profit_amt, 2),
-        "exit_reason": "Manual Sell",
-    }
-    await asyncio.to_thread(
-        supabase.table("paper_history").insert(history_data).execute
-    )
-    await asyncio.to_thread(
-        supabase.table("paper_positions").delete().eq("ticker", ticker).execute
-    )
-
-    status_emoji = "✅" if pnl_pct > 0 else "🛑"
-    await paper_engine.webhook.send_alert(
-        title=f"{status_emoji} [PAPER MANUAL EXIT] {ticker}",
-        description=(
-            f"시장가: ${signal_price:.4f} → 체결가: ${fill_price:.4f} "
-            f"(슬리피지 {slippage_pct:+.2f}%) | 수익률: {pnl_pct:.2f}%\n사유: 사령관 수동 매도"
-        ),
-        color=0x2ECC71 if pnl_pct > 0 else 0xE74C3C,
-    )
-
-    return {
-        "status": "success",
-        "ticker": ticker,
-        "exit_price": round(fill_price, 4),
-        "pnl_pct": round(pnl_pct, 2),
-        "profit_amt": round(profit_amt, 2),
-    }
+        return {
+            "status": "success",
+            "ticker": ticker,
+            "exit_price": round(result["fill_price"], 4),
+            "pnl_pct": round(result["pnl_pct"], 2),
+            "profit_amt": round(result["profit_amt"], 2),
+        }
 
 
 @router.post("/paper/emergency-liquidate")
 async def emergency_liquidate(api_key: str = Security(get_api_key)):
-    """Watchdog 트리거: SYSTEM_ARMED 해제 + 모든 paper 포지션을 DB에서 정리."""
+    """Watchdog 트리거: SYSTEM_ARMED 해제 + 모든 포지션 청산.
+    TRADE_MODE=LIVE면 각 포지션마다 Alpaca 매도 주문을 제출해 실제로 청산한 뒤 DB를 정리한다."""
     app_state.SYSTEM_ARMED = False
 
-    paper_engine = app_state.paper_engine
+    engine = app_state.active_engine
     supabase = app_state.supabase
     webhook = app_state.webhook
 
-    if not paper_engine:
-        return {"status": "error", "detail": "Paper engine not initialized"}
+    if not engine:
+        return {"status": "error", "detail": "Trading engine not initialized"}
 
     if supabase:
         try:
@@ -706,54 +685,41 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
         except Exception as e:
             print(f"⚠️ [Emergency] ARM DB persist failed: {e}")
 
-    positions = await paper_engine.get_all_positions()
+    positions = await engine.get_all_positions()
     if not positions:
         return {"status": "success", "closed": 0, "message": "포지션 없음"}
 
-    acc = await paper_engine.get_account()
-    total_proceeds = 0.0
+    acc = await engine.get_account()
     closed_tickers = []
+    failed_tickers = []
 
     for pos in positions:
         ticker = pos["ticker"]
-        entry_price = float(pos["entry_price"])
-        units = float(pos["units"])
-        exit_price = float(pos.get("current_price") or entry_price)
-        pnl_pct = (exit_price / entry_price - 1) * 100 if entry_price > 0 else 0.0
-        profit_amt = (exit_price - entry_price) * units
-        proceeds = exit_price * units
+        exit_price = float(pos.get("current_price") or pos["entry_price"])
 
-        try:
-            history_data = {
-                "ticker": ticker,
-                "entry_price": entry_price,
-                "exit_price": exit_price,
-                "pnl_pct": round(pnl_pct, 2),
-                "profit_amt": round(profit_amt, 2),
-                "exit_reason": "Watchdog Emergency Liquidation",
-            }
-            await asyncio.to_thread(
-                supabase.table("paper_history").insert(history_data).execute
-            )
-            await asyncio.to_thread(
-                supabase.table("paper_positions").delete().eq("ticker", ticker).execute
-            )
-            closed_tickers.append(ticker)
-            total_proceeds += proceeds
-        except Exception as e:
-            print(f"⚠️ [Emergency] Failed to close {ticker}: {e}")
-
-    if acc and total_proceeds > 0:
-        try:
-            new_cash = float(acc["cash_available"]) + total_proceeds
-            await asyncio.to_thread(
-                supabase.table("paper_account")
-                .update({"cash_available": new_cash})
-                .eq("id", acc["id"])
-                .execute
-            )
-        except Exception as e:
-            print(f"⚠️ [Emergency] Cash update failed: {e}")
+        async with engine._get_lock(ticker):
+            try:
+                # paper_engine.py의 공통 청산 경로 재사용 — 실주문 제출/체결 확인은
+                # _close_position 내부에서 처리하며, 실패 시 None을 반환해 포지션을 유지한다.
+                # _close_position이 acc["cash_available"]를 매 종목마다 갱신하므로
+                # 다음 반복에서 최신 잔고를 쓰도록 acc를 다시 조회한다.
+                result = await engine._close_position(
+                    pos, acc, exit_price, "Watchdog Emergency Liquidation"
+                )
+                if result is None:
+                    failed_tickers.append(ticker)
+                    if webhook:
+                        await webhook.send_alert(
+                            title=f"🚨 [Emergency 청산 실패] {ticker}",
+                            description="실거래 매도 주문이 실패/미확인되어 포지션을 유지합니다. 수동으로 확인하세요.",
+                            color=0xFF0000,
+                        )
+                    continue
+                acc = await engine.get_account()
+                closed_tickers.append(ticker)
+            except Exception as e:
+                print(f"⚠️ [Emergency] Failed to close {ticker}: {e}")
+                failed_tickers.append(ticker)
 
     for t in closed_tickers:
         app_state._held_tickers.discard(t)
@@ -772,9 +738,10 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
     )
 
     return {
-        "status": "success",
+        "status": "success" if not failed_tickers else "partial",
         "closed": len(closed_tickers),
         "tickers": closed_tickers,
+        "failed_tickers": failed_tickers,
         "is_armed": False,
     }
 

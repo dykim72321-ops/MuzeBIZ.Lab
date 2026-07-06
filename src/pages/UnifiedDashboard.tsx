@@ -249,17 +249,14 @@ export default function UnifiedDashboard() {
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#bfdbfe" />
-                      <XAxis dataKey="date" stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => {
-                        const d = new Date(val);
-                        return `${d.getMonth()+1}/${d.getDate()}`;
-                      }}/>
+                      <XAxis dataKey="displayName" stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} />
                       <YAxis domain={['auto', 'auto']} stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${(val/1000).toFixed(1)}k`}/>
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#ffffff', border: '2px solid #bfdbfe', borderRadius: '4px', fontSize: '11px', color: '#000000', fontWeight: 'bold' }}
-                        labelFormatter={(l) => new Date(l).toLocaleDateString()}
+                        labelFormatter={(label, payload) => payload?.[0]?.payload?.name ?? label}
                         formatter={(val: any) => [`$${Number(val).toLocaleString()}`, 'Total Assets']}
                       />
-                      <Area type="monotone" dataKey="total" stroke="#1d4ed8" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" />
+                      <Area type="monotone" dataKey="value" stroke="#1d4ed8" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" />
                     </ComposedChart>
                   </ResponsiveContainer>
                 )}

@@ -78,6 +78,16 @@ class PaperTradingManager:
         self.supabase = supabase_client
         self.webhook = WebhookManager()
         self.webhook.set_supabase_client(supabase_client)
+        self._ticker_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, ticker: str) -> asyncio.Lock:
+        """티커별 락 — 동일 종목에 대한 청산/재진입/수동매도가 겹쳐 실행되며
+        watchlist 상태를 서로 덮어쓰는 경합을 방지한다."""
+        lock = self._ticker_locks.get(ticker)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._ticker_locks[ticker] = lock
+        return lock
 
     async def _log_decision(
         self,
@@ -214,16 +224,27 @@ class PaperTradingManager:
             )
         except Exception as e:
             print(f"⚠️ [Watchlist Sync EXIT] {ticker}: {e}")
+            # 포지션은 이미 청산됐는데 watchlist만 HOLDING에 갇히는 것을 방지하기 위해
+            # 실패를 조용히 삼키지 않고 알림으로 노출 (재시도 로직은 없음 — 수동 확인 유도)
+            await self.webhook.send_alert(
+                title=f"⚠️ [Watchlist Sync 실패] {ticker}",
+                description=f"청산 후 watchlist EXITED 반영 실패: {e}\n수동으로 status를 확인하세요.",
+                color=0xE67E22,
+            )
 
-    async def _on_order_buy(self, _ticker: str, _qty: float, _price: float) -> bool:
-        """매수 실행 훅 — LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
-        return True
+    async def _on_order_buy(
+        self, _ticker: str, qty: float, _price: float
+    ) -> float | None:
+        """매수 실행 훅 — 반환값은 실제 체결 수량(실패 시 None).
+        LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
+        return qty
 
     async def _on_order_sell(
-        self, _ticker: str, _qty: float, _price: float, _reason: str
-    ) -> bool:
-        """매도 실행 훅 — LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
-        return True
+        self, _ticker: str, qty: float, _price: float, _reason: str
+    ) -> float | None:
+        """매도 실행 훅 — 반환값은 실제 체결 수량(실패 시 None).
+        LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
+        return qty
 
     async def _sync_watchlist_stop_loss(self, ticker: str, stop_loss: float):
         """트레일링 스탑 이동 시 관심종목 stop_loss 동기화."""
@@ -237,6 +258,73 @@ class PaperTradingManager:
             )
         except Exception as e:
             print(f"⚠️ [Watchlist Sync SL] {ticker}: {e}")
+            await self.webhook.send_alert(
+                title=f"⚠️ [Watchlist SL Sync 실패] {ticker}",
+                description=f"stop_loss 반영 실패: {e}",
+                color=0xE67E22,
+            )
+
+    async def _close_position(
+        self,
+        pos: dict,
+        acc: dict,
+        signal_price: float,
+        exit_reason: str,
+    ) -> dict | None:
+        """
+        포지션 전량 청산 공통 경로 — 슬리피지 적용 → 실주문 제출(LIVE 모드는 체결 확인까지) →
+        현금 갱신 → paper_history 기록 → paper_positions 삭제 → watchlist EXITED 동기화.
+
+        실주문 실패/체결 미확인 시 None 반환 — 포지션은 그대로 유지되며 DB는 기록되지 않는다.
+        """
+        ticker = pos["ticker"]
+        entry_price = float(pos["entry_price"])
+        units = float(pos["units"])
+        is_penny = entry_price <= PENNY_MAX_PRICE
+
+        fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
+        executed_units = await self._on_order_sell(
+            ticker, units, fill_price, exit_reason
+        )
+        if executed_units is None:
+            return None
+        units = executed_units
+
+        pnl_pct = (fill_price / entry_price - 1) * 100
+        profit_amt = (fill_price - entry_price) * units
+        proceeds = units * fill_price
+
+        new_cash = float(acc["cash_available"]) + proceeds
+        await asyncio.to_thread(
+            self.supabase.table("paper_account")
+            .update({"cash_available": new_cash})
+            .eq("id", acc["id"])
+            .execute
+        )
+        history_data = {
+            "ticker": ticker,
+            "entry_price": entry_price,
+            "exit_price": fill_price,
+            "signal_price": signal_price,
+            "slippage_pct": (fill_price / signal_price - 1) * 100,
+            "pnl_pct": pnl_pct,
+            "profit_amt": profit_amt,
+            "exit_reason": exit_reason,
+        }
+        await asyncio.to_thread(
+            self.supabase.table("paper_history").insert(history_data).execute
+        )
+        await asyncio.to_thread(
+            self.supabase.table("paper_positions").delete().eq("ticker", ticker).execute
+        )
+        await self._sync_watchlist_exit(ticker)
+
+        return {
+            "fill_price": fill_price,
+            "units": units,
+            "pnl_pct": pnl_pct,
+            "profit_amt": profit_amt,
+        }
 
     REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간
     # PDT Rule은 마진 계좌 $25k 미만에만 적용 — $100k 가상 계좌에서는 불필요
@@ -273,6 +361,34 @@ class PaperTradingManager:
             return False
 
     async def process_signal(
+        self,
+        ticker: str,
+        price: float,
+        signal_type: str,
+        strength: str,
+        rsi: float,
+        ai_report: str = "",
+        is_armed: bool = False,
+        dna_score: float = 85.0,
+        recommended_weight: float = 0.0,
+        atr: float = 0.0,
+    ):
+        """동일 티커에 대한 진입/청산이 겹쳐 실행되지 않도록 락으로 직렬화."""
+        async with self._get_lock(ticker):
+            await self._process_signal_locked(
+                ticker,
+                price,
+                signal_type,
+                strength,
+                rsi,
+                ai_report=ai_report,
+                is_armed=is_armed,
+                dna_score=dna_score,
+                recommended_weight=recommended_weight,
+                atr=atr,
+            )
+
+    async def _process_signal_locked(
         self,
         ticker: str,
         price: float,
@@ -425,10 +541,12 @@ class PaperTradingManager:
             fill_price = _apply_slippage(price, is_buy=True, is_penny=is_penny_signal)
             units = buy_budget / fill_price
 
-            # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출. 실패 시 DB 기록 차단.
-            if not await self._on_order_buy(ticker, units, fill_price):
+            # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 체결 수량 반환. 실패 시 DB 기록 차단.
+            executed_units = await self._on_order_buy(ticker, units, fill_price)
+            if executed_units is None:
                 print(f"⚠️ [{ticker}] Live buy order rejected — DB write skipped")
                 return
+            units = executed_units
             ts_init = PENNY_TS_INIT_PCT if is_penny_signal else TS_INIT_PCT
             ts_threshold = fill_price * ts_init
 
@@ -530,50 +648,16 @@ class PaperTradingManager:
                     )
                     return
 
-                fill_exit_price = _apply_slippage(
-                    price, is_buy=False, is_penny=is_penny
-                )
-                if not await self._on_order_sell(
-                    ticker, units, fill_exit_price, "EOD Force Exit"
-                ):
+                result = await self._close_position(pos, acc, price, "EOD Force Exit")
+                if result is None:
                     print(
                         f"⚠️ [{ticker}] Live EOD sell order rejected — retaining position"
                     )
                     return
-                profit_cash = units * fill_exit_price
-                pnl_pct = (fill_exit_price / entry_price - 1) * 100
-                profit_amt = (fill_exit_price - entry_price) * units
-
-                new_cash = acc["cash_available"] + profit_cash
-                await asyncio.to_thread(
-                    self.supabase.table("paper_account")
-                    .update({"cash_available": new_cash})
-                    .eq("id", acc["id"])
-                    .execute
-                )
-                history_data = {
-                    "ticker": ticker,
-                    "entry_price": entry_price,
-                    "exit_price": fill_exit_price,
-                    "signal_price": price,
-                    "slippage_pct": (fill_exit_price / price - 1) * 100,
-                    "pnl_pct": pnl_pct,
-                    "profit_amt": profit_amt,
-                    "exit_reason": "EOD Force Exit",
-                }
-                await asyncio.to_thread(
-                    self.supabase.table("paper_history").insert(history_data).execute
-                )
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .delete()
-                    .eq("ticker", ticker)
-                    .execute
-                )
                 await self.webhook.send_alert(
                     title=f"🛑 [PAPER EOD EXIT] {ticker}",
                     description=(
-                        f"청산가: ${fill_exit_price:.4f} | 수익률: {pnl_pct:.2f}%\n"
+                        f"청산가: ${result['fill_price']:.4f} | 수익률: {result['pnl_pct']:.2f}%\n"
                         f"사유: 장 마감 손실 포지션 강제 청산 (15:30 ET)"
                     ),
                     color=0x95A5A6,
@@ -615,52 +699,18 @@ class PaperTradingManager:
                         elapsed_minutes > decay_threshold
                         and -2.0 <= unrealized_pnl_pct <= 2.0
                     ):
-                        fill_exit_price = _apply_slippage(
-                            price, is_buy=False, is_penny=is_penny
+                        result = await self._close_position(
+                            pos, acc, price, "Time-Decay Exit"
                         )
-                        if not await self._on_order_sell(
-                            ticker, units, fill_exit_price, "Time-Decay Exit"
-                        ):
+                        if result is None:
                             print(
                                 f"⚠️ [{ticker}] Live time-decay sell order rejected — retaining position"
                             )
                             return
-                        profit_cash = units * fill_exit_price
-                        pnl_pct = (fill_exit_price / entry_price - 1) * 100
-                        profit_amt = (fill_exit_price - entry_price) * units
-
-                        new_cash = acc["cash_available"] + profit_cash
-                        await asyncio.to_thread(
-                            self.supabase.table("paper_account")
-                            .update({"cash_available": new_cash})
-                            .eq("id", acc["id"])
-                            .execute
-                        )
-                        history_data = {
-                            "ticker": ticker,
-                            "entry_price": entry_price,
-                            "exit_price": fill_exit_price,
-                            "signal_price": price,
-                            "slippage_pct": (fill_exit_price / price - 1) * 100,
-                            "pnl_pct": pnl_pct,
-                            "profit_amt": profit_amt,
-                            "exit_reason": "Time-Decay Exit",
-                        }
-                        await asyncio.to_thread(
-                            self.supabase.table("paper_history")
-                            .insert(history_data)
-                            .execute
-                        )
-                        await asyncio.to_thread(
-                            self.supabase.table("paper_positions")
-                            .delete()
-                            .eq("ticker", ticker)
-                            .execute
-                        )
                         await self.webhook.send_alert(
                             title=f"⏳ [PAPER TIME-DECAY] {ticker}",
                             description=(
-                                f"청산가: ${fill_exit_price:.4f} | 수익률: {pnl_pct:.2f}%\n"
+                                f"청산가: ${result['fill_price']:.4f} | 수익률: {result['pnl_pct']:.2f}%\n"
                                 f"보유 시간: {int(elapsed_minutes)}분 (기준: {decay_threshold}분)\n"
                                 f"사유: 방향성 상실 (횡보 ±2%) — 슬롯 반납"
                             ),
@@ -728,13 +778,15 @@ class PaperTradingManager:
                 fill_sell_price = _apply_slippage(
                     price, is_buy=False, is_penny=is_penny
                 )
-                if not await self._on_order_sell(
+                executed_units = await self._on_order_sell(
                     ticker, sell_units, fill_sell_price, "Scale-Out"
-                ):
+                )
+                if executed_units is None:
                     print(
                         f"⚠️ [{ticker}] Live scale-out order rejected — retaining position"
                     )
                     return
+                sell_units = executed_units
                 profit_cash = sell_units * fill_sell_price
 
                 # 가상 계좌 업데이트 (cash_available만 갱신 — total_assets는 /api/broker/paper/account에서
@@ -773,6 +825,8 @@ class PaperTradingManager:
                     .eq("ticker", ticker)
                     .execute
                 )
+                # 관심종목 stop_loss 동기화 (TS 상향)
+                await self._sync_watchlist_stop_loss(ticker, new_ts_val)
 
                 slip_sell_pct = (fill_sell_price / price - 1) * 100
                 price_str = (
@@ -807,8 +861,6 @@ class PaperTradingManager:
                     )
                     .execute
                 )
-                # 관심종목 stop_loss 동기화 (TS 이동)
-                # 같은 봉에서 Scale-Out과 Trailing Stop이 동시에 발동하는 것을 방지
                 return
 
             # C. TRAILING STOP 체크 (ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)
@@ -832,63 +884,22 @@ class PaperTradingManager:
 
             if price < ts_threshold:
                 # [Guide-3] 손절 매도 슬리피지 적용 (패닉 셀 상황 → 불리한 체결)
-                fill_exit_price = _apply_slippage(
-                    price, is_buy=False, is_penny=is_penny
-                )
-                if not await self._on_order_sell(
-                    ticker, units, fill_exit_price, "Trailing Stop"
-                ):
+                result = await self._close_position(pos, acc, price, "Trailing Stop")
+                if result is None:
                     print(
                         f"⚠️ [{ticker}] Live trailing stop order rejected — retaining position"
                     )
                     return
-                profit_cash = units * fill_exit_price
-                pnl_pct = (fill_exit_price / entry_price - 1) * 100
-                profit_amt = (fill_exit_price - entry_price) * units
-
-                # 가상 계좌 업데이트
-                new_cash = acc["cash_available"] + profit_cash
-                await asyncio.to_thread(
-                    self.supabase.table("paper_account")
-                    .update({"cash_available": new_cash})
-                    .eq("id", acc["id"])
-                    .execute
-                )
-
-                # 히스토리 저장
-                history_data = {
-                    "ticker": ticker,
-                    "entry_price": entry_price,
-                    "exit_price": fill_exit_price,
-                    "signal_price": price,
-                    "slippage_pct": (fill_exit_price / price - 1) * 100,
-                    "pnl_pct": pnl_pct,
-                    "profit_amt": profit_amt,
-                    "exit_reason": "Trailing Stop",
-                }
-                await asyncio.to_thread(
-                    self.supabase.table("paper_history").insert(history_data).execute
-                )
-
-                # 포지션 삭제
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .delete()
-                    .eq("ticker", ticker)
-                    .execute
-                )
-
-                status_emoji = "✅" if pnl_pct > 0 else "🛑"
-                slip_exit_pct = (fill_exit_price / price - 1) * 100
+                status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
+                slip_exit_pct = (result["fill_price"] / price - 1) * 100
                 await self.webhook.send_alert(
                     title=f"{status_emoji} [PAPER EXIT] {ticker}",
                     description=(
-                        f"청산가: ${fill_exit_price:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {pnl_pct:.2f}%\n"
+                        f"청산가: ${result['fill_price']:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n"
                         f"사유: 트레일링 스탑 발동"
                     ),
                     color=0x34495E,
                 )
-                # 관심종목 상태 → EXITED
             else:
                 # 일반 업데이트
                 await asyncio.to_thread(
@@ -903,3 +914,6 @@ class PaperTradingManager:
                     .eq("ticker", ticker)
                     .execute
                 )
+                # TS가 상향된 경우에만 watchlist stop_loss 동기화 (매 봉 불필요한 쓰기 방지)
+                if ts_threshold > pos["ts_threshold"]:
+                    await self._sync_watchlist_stop_loss(ticker, ts_threshold)

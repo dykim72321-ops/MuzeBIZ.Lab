@@ -45,48 +45,50 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
     });
   };
   return (
-    <div className="sfdc-card">
-      <div className="sfdc-card-header flex justify-between items-center bg-blue-50/50 border-b border-blue-200/80 p-4">
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-cyan-600" />
-          <h3 className="text-base font-extrabold text-blue-900 uppercase tracking-tight">Intelligence Filters</h3>
+    <div className="bg-white/95 backdrop-blur-xl border border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-[20px] overflow-hidden">
+      <div className="flex justify-between items-center bg-slate-50/50 border-b border-slate-100 p-5">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 bg-white border border-slate-200 rounded-lg shadow-sm">
+            <Filter className="w-4 h-4 text-indigo-600" />
+          </div>
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Intelligence Filters</h3>
         </div>
         <button 
           onClick={resetFilters}
-          className="text-xs font-bold text-cyan-600 hover:text-cyan-700 hover:underline cursor-pointer"
+          className="text-[11px] font-black text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-wider cursor-pointer"
         >
-          Reset
+          Reset All
         </button>
       </div>
       
-      <div className="p-4 space-y-6">
+      <div className="p-5 space-y-7">
         {/* Availability */}
         <div>
-          <label className="flex items-center gap-2 text-sm font-extrabold text-blue-700 uppercase mb-3 px-1">
-            <AlertCircle className="w-3.5 h-3.5 text-cyan-600" />
+          <label className="flex items-center gap-2 text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3 px-1">
+            <AlertCircle className="w-3.5 h-3.5 text-indigo-400" />
             Stock Status
           </label>
           <div 
             onClick={() => setFilterInStock(!filterInStock)}
-            className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all ${filterInStock ? 'border-cyan-500 bg-cyan-50/70' : 'border-blue-200 hover:border-blue-300 bg-white'}`}
+            className={`flex items-center justify-between p-3.5 rounded-xl border-2 cursor-pointer transition-all duration-300 ${filterInStock ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-100 hover:border-indigo-200 bg-white'}`}
           >
-            <span className={`text-sm font-bold ${filterInStock ? 'text-cyan-700' : 'text-blue-655'}`}>In Stock Only</span>
-            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${filterInStock ? 'border-cyan-500 bg-cyan-500' : 'border-blue-300'}`}>
-              {filterInStock && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+            <span className={`text-[13px] font-black tracking-wide ${filterInStock ? 'text-indigo-700' : 'text-slate-600'}`}>In Stock Only</span>
+            <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${filterInStock ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'}`}>
+              {filterInStock && <div className="w-1.5 h-1.5 bg-white rounded-full shadow-sm" />}
             </div>
           </div>
         </div>
 
         {/* Manufacturers */}
-        <div>
-          <label className="flex items-center gap-2 text-sm font-extrabold text-blue-700 uppercase mb-3 px-1">
-            <Factory className="w-3.5 h-3.5 text-cyan-600" />
+        <div className="pt-2">
+          <label className="flex items-center gap-2 text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3 px-1">
+            <Factory className="w-3.5 h-3.5 text-indigo-400" />
             Manufacturers
           </label>
-          <div className="space-y-1 max-h-40 overflow-y-auto pr-1 sfdc-scrollbar">
+          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300">
             <button
               onClick={() => setFilterManufacturer('all')}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${filterManufacturer === 'all' ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+              className={`w-full text-left px-3.5 py-2.5 rounded-xl text-[13px] transition-all cursor-pointer font-bold ${filterManufacturer === 'all' ? 'bg-indigo-600 text-white shadow-[0_4px_15px_rgba(79,70,229,0.3)] border-none' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600 border border-transparent'}`}
             >
               All Manufacturers
             </button>
@@ -94,7 +96,7 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
               <button
                 key={m}
                 onClick={() => setFilterManufacturer(m)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors truncate cursor-pointer ${filterManufacturer === m ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+                className={`w-full text-left px-3.5 py-2.5 rounded-xl text-[13px] transition-all truncate cursor-pointer font-bold ${filterManufacturer === m ? 'bg-indigo-600 text-white shadow-[0_4px_15px_rgba(79,70,229,0.3)] border-none' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600 border border-transparent'}`}
               >
                 {m}
               </button>
@@ -104,15 +106,15 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
 
         {/* Packages */}
         {uniquePackages.length > 0 && (
-          <div>
-            <label className="flex items-center gap-2 text-sm font-extrabold text-blue-700 uppercase mb-3 px-1">
-              <Box className="w-3.5 h-3.5 text-cyan-600" />
+          <div className="pt-2">
+            <label className="flex items-center gap-2 text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3 px-1">
+              <Box className="w-3.5 h-3.5 text-indigo-400" />
               Package / Case
             </label>
-            <div className="space-y-1 max-h-40 overflow-y-auto pr-1 sfdc-scrollbar">
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300">
               <button
                 onClick={() => setFilterPackage('all')}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${filterPackage === 'all' ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+                className={`w-full text-left px-3.5 py-2.5 rounded-xl text-[13px] transition-all cursor-pointer font-bold ${filterPackage === 'all' ? 'bg-indigo-600 text-white shadow-[0_4px_15px_rgba(79,70,229,0.3)] border-none' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600 border border-transparent'}`}
               >
                 All Packages
               </button>
@@ -120,7 +122,7 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
                 <button
                   key={p}
                   onClick={() => setFilterPackage(p)}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors truncate cursor-pointer ${filterPackage === p ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl text-[13px] transition-all truncate cursor-pointer font-bold ${filterPackage === p ? 'bg-indigo-600 text-white shadow-[0_4px_15px_rgba(79,70,229,0.3)] border-none' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600 border border-transparent'}`}
                 >
                   {p}
                 </button>
@@ -131,15 +133,15 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
 
         {/* Dynamic Parametric Filters */}
         {specKeys.map(key => (
-          <div key={key} className="pt-4 border-t border-blue-200/80">
-            <label className="flex items-center gap-2 text-xs font-black text-blue-700 uppercase mb-3 px-1 tracking-wider">
-              <Box className="w-3.5 h-3.5 text-cyan-600" />
+          <div key={key} className="pt-6 border-t border-slate-100">
+            <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1">
+              <Box className="w-3.5 h-3.5 text-indigo-300" />
               {key}
             </label>
-            <div className="space-y-1 max-h-32 overflow-y-auto pr-1 sfdc-scrollbar">
+            <div className="space-y-1.5 max-h-32 overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300">
               <button
                 onClick={() => handleDynamicFilterChange(key, 'all')}
-                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${(!dynamicFilters[key] || dynamicFilters[key] === 'all') ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+                className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all cursor-pointer font-bold ${(!dynamicFilters[key] || dynamicFilters[key] === 'all') ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600'}`}
               >
                 All {key}
               </button>
@@ -147,7 +149,7 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
                 <button
                   key={val}
                   onClick={() => handleDynamicFilterChange(key, val)}
-                  className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-all truncate cursor-pointer ${dynamicFilters[key] === val ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all truncate cursor-pointer font-bold ${dynamicFilters[key] === val ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600'}`}
                 >
                   {val}
                 </button>
@@ -157,15 +159,15 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
         ))}
 
         {/* Distributors */}
-        <div className="pt-4 border-t border-blue-200/80">
-          <label className="flex items-center gap-2 text-xs font-black text-blue-700 uppercase mb-3 px-1 tracking-wider">
-            <Filter className="w-3.5 h-3.5 text-cyan-600" />
+        <div className="pt-6 border-t border-slate-100">
+          <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-1">
+            <Filter className="w-3.5 h-3.5 text-indigo-300" />
             Distributors
           </label>
-          <div className="space-y-1 max-h-32 overflow-y-auto pr-1 sfdc-scrollbar">
+          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300">
             <button
               onClick={() => setFilterDistributor('all')}
-              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${filterDistributor === 'all' ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+              className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all cursor-pointer font-bold ${filterDistributor === 'all' ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600'}`}
             >
               All Channels
             </button>
@@ -173,7 +175,7 @@ export const MuzepartFacets: React.FC<MuzepartFacetsProps> = ({
               <button
                 key={d}
                 onClick={() => setFilterDistributor(d)}
-                className={`w-full text-left px-3 py-1.5 rounded-lg text-xs transition-all truncate cursor-pointer ${filterDistributor === d ? 'bg-cyan-500 text-blue-950 font-black shadow-sm shadow-cyan-950/5' : 'text-blue-700 hover:bg-blue-50'}`}
+                className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all truncate cursor-pointer font-bold ${filterDistributor === d ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600 bg-white hover:bg-slate-50 hover:text-indigo-600'}`}
               >
                 {d}
               </button>

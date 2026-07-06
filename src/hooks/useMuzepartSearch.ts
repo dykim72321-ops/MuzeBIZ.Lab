@@ -1,19 +1,109 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { create } from 'zustand';
+import { useQuery } from '@tanstack/react-query';
 import type { ComponentPart, JourneyPhase, SortField, SortOrder, IntelData } from '../types/muzepart';
 
 const QC_PRICE = 72500;
 
+interface MuzepartState {
+  phase: JourneyPhase;
+  query: string;
+  activeSearchQuery: string;
+  results: ComponentPart[];
+  history: string[];
+  logs: string[];
+  error: string | null;
+  isBackendConnected: boolean;
+  connectionError: string | null;
+  sortField: SortField;
+  sortOrder: SortOrder;
+  filterInStock: boolean;
+  filterDistributor: string;
+  filterManufacturer: string;
+  filterPackage: string;
+  dynamicFilters: Record<string, string>;
+  currentPage: number;
+  
+  setPhase: (phase: JourneyPhase) => void;
+  setQuery: (query: string) => void;
+  setActiveSearchQuery: (query: string) => void;
+  setResults: (results: ComponentPart[] | ((prev: ComponentPart[]) => ComponentPart[])) => void;
+  setHistory: (history: string[]) => void;
+  setLogs: (logs: string[] | ((prev: string[]) => string[])) => void;
+  setError: (error: string | null) => void;
+  setIsBackendConnected: (status: boolean) => void;
+  setConnectionError: (error: string | null) => void;
+  setSortField: (field: SortField) => void;
+  setSortOrder: (order: SortOrder | ((prev: SortOrder) => SortOrder)) => void;
+  setFilterInStock: (filter: boolean) => void;
+  setFilterDistributor: (filter: string) => void;
+  setFilterManufacturer: (filter: string) => void;
+  setFilterPackage: (filter: string) => void;
+  setDynamicFilters: (filters: Record<string, string>) => void;
+  setCurrentPage: (page: number | ((prev: number) => number)) => void;
+}
+
+export const useMuzepartStore = create<MuzepartState>((set) => ({
+  phase: 'IDLE',
+  query: '',
+  activeSearchQuery: '',
+  results: [],
+  history: [],
+  logs: [],
+  error: null,
+  isBackendConnected: true,
+  connectionError: null,
+  sortField: 'none',
+  sortOrder: 'asc',
+  filterInStock: false,
+  filterDistributor: 'all',
+  filterManufacturer: 'all',
+  filterPackage: 'all',
+  dynamicFilters: {},
+  currentPage: 1,
+
+  setPhase: (phase) => set({ phase }),
+  setQuery: (query) => set({ query }),
+  setActiveSearchQuery: (activeSearchQuery) => set({ activeSearchQuery }),
+  setResults: (results) => set((state) => ({ results: typeof results === 'function' ? results(state.results) : results })),
+  setHistory: (history) => set({ history }),
+  setLogs: (logs) => set((state) => ({ logs: typeof logs === 'function' ? logs(state.logs) : logs })),
+  setError: (error) => set({ error }),
+  setIsBackendConnected: (isBackendConnected) => set({ isBackendConnected }),
+  setConnectionError: (connectionError) => set({ connectionError }),
+  setSortField: (sortField) => set({ sortField }),
+  setSortOrder: (sortOrder) => set((state) => ({ sortOrder: typeof sortOrder === 'function' ? sortOrder(state.sortOrder) : sortOrder })),
+  setFilterInStock: (filterInStock) => set({ filterInStock }),
+  setFilterDistributor: (filterDistributor) => set({ filterDistributor }),
+  setFilterManufacturer: (filterManufacturer) => set({ filterManufacturer }),
+  setFilterPackage: (filterPackage) => set({ filterPackage }),
+  setDynamicFilters: (dynamicFilters) => set({ dynamicFilters }),
+  setCurrentPage: (currentPage) => set((state) => ({ currentPage: typeof currentPage === 'function' ? currentPage(state.currentPage) : currentPage })),
+}));
+
 export const useMuzepartSearch = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [phase, setPhase] = useState<JourneyPhase>('IDLE');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<ComponentPart[]>([]);
-  const [history, setHistory] = useState<string[]>([]);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [isBackendConnected, setIsBackendConnected] = useState<boolean>(true);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const {
+    phase, setPhase,
+    query, setQuery,
+    activeSearchQuery, setActiveSearchQuery,
+    results, setResults,
+    history, setHistory,
+    logs, setLogs,
+    error, setError,
+    isBackendConnected, setIsBackendConnected,
+    connectionError, setConnectionError,
+    sortField, setSortField,
+    sortOrder, setSortOrder,
+    filterInStock, setFilterInStock,
+    filterDistributor, setFilterDistributor,
+    filterManufacturer, setFilterManufacturer,
+    filterPackage, setFilterPackage,
+    dynamicFilters, setDynamicFilters,
+    currentPage, setCurrentPage
+  } = useMuzepartStore();
+  const itemsPerPage = 10;
 
   const handleRetryConnection = useCallback(async () => {
     setConnectionError(null);
@@ -24,17 +114,7 @@ export const useMuzepartSearch = () => {
       setIsBackendConnected(false);
       setConnectionError('서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인하세요.');
     }
-  }, []);
-
-  const [sortField, setSortField] = useState<SortField>('none');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  const [filterInStock, setFilterInStock] = useState(false);
-  const [filterDistributor, setFilterDistributor] = useState<string>('all');
-  const [filterManufacturer, setFilterManufacturer] = useState<string>('all');
-  const [filterPackage, setFilterPackage] = useState<string>('all');
-  const [dynamicFilters, setDynamicFilters] = useState<Record<string, string>>({});
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  }, [setConnectionError, setIsBackendConnected]);
 
   // Reset filters when new search
   const resetFilters = useCallback(() => {
@@ -60,17 +140,22 @@ export const useMuzepartSearch = () => {
     setHistory(newHistory);
     localStorage.setItem('search_history', JSON.stringify(newHistory));
     
-    // Update URL params
+    // Update URL params and trigger query
     setSearchParams({ q: targetQuery });
+    resetFilters();
+    setActiveSearchQuery(targetQuery);
+  }, [query, history, setSearchParams, setActiveSearchQuery, setPhase, setError, setLogs, setHistory, resetFilters]);
 
-    try {
-      const response = await fetch(`/py-api/api/parts/search?q=${encodeURIComponent(targetQuery)}`);
-      
+  const { data: queryData, isFetching: isSearchFetching, isError, error: queryError } = useQuery({
+    queryKey: ['partsSearch', activeSearchQuery],
+    queryFn: async () => {
+      if (!activeSearchQuery.trim()) return [];
+      const response = await fetch(`/py-api/api/parts/search?q=${encodeURIComponent(activeSearchQuery)}`);
       if (!response.ok) throw new Error('System link failure');
       const data = await response.json();
       
       if (Array.isArray(data)) {
-        setResults(data.map((item: any) => {
+        return data.map((item: any) => {
           const baseP = item.price;
           return {
             ...item,
@@ -81,19 +166,32 @@ export const useMuzepartSearch = () => {
             is_processing: false,
             relevance_score: item.relevance_score || 0,
           };
-        }));
+        });
       } else {
         console.error("Malformed search data:", data);
-        setError(data.error || 'Unexpected data format from server');
-        setResults([]);
+        throw new Error(data.error || 'Unexpected data format from server');
       }
-      resetFilters(); 
+    },
+    enabled: !!activeSearchQuery,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Sync React Query data to Zustand for local mutation (toggleQC, handleLock)
+  useEffect(() => {
+    if (queryData && !isSearchFetching) {
+      setResults(queryData);
       setPhase('RESULTS');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown System Error');
+    }
+  }, [queryData, isSearchFetching, setResults, setPhase]);
+
+  // Handle Query Errors
+  useEffect(() => {
+    if (isError) {
+      setError(queryError instanceof Error ? queryError.message : 'Unknown System Error');
+      setResults([]);
       setPhase('IDLE');
     }
-  }, [query, history, setSearchParams, resetFilters]);
+  }, [isError, queryError, setError, setResults, setPhase]);
 
   const toggleQC = useCallback((id: string, current: boolean) => {
     setResults(prev => prev.map(item => {
@@ -390,6 +488,8 @@ export const useMuzepartSearch = () => {
     fetchPartDetails,
     handleRetryConnection,
     setIsBackendConnected,
-    setConnectionError
+    setConnectionError,
+    activeSearchQuery,
+    isSearchFetching
   };
 };

@@ -3,6 +3,7 @@ import { useMuzepartSearch } from '../hooks/useMuzepartSearch';
 import { MuzepartMarketIntel } from '../components/muzepart/MuzepartMarketIntel';
 import { MuzepartResultRow } from '../components/muzepart/MuzepartResultRow';
 import { MuzepartResultCard } from '../components/muzepart/MuzepartResultCard';
+import { MuzepartSkeletonRow } from '../components/muzepart/MuzepartSkeletonRow';
 import { getSortClass } from '../components/muzepart/MuzepartUI';
 import { MuzepartFacets } from '../components/muzepart/MuzepartFacets';
 import { 
@@ -32,7 +33,8 @@ export const MuzepartSearchPage: React.FC = () => {
     trackingId, handleSearch,
     handleSort, handleLock,
     fetchPartDetails,
-    handleRetryConnection, resetFilters
+    handleRetryConnection, resetFilters,
+    isSearchFetching
   } = useMuzepartSearch();
 
   const [detailPart, setDetailPart] = useState<any | null>(null);
@@ -294,41 +296,52 @@ export const MuzepartSearchPage: React.FC = () => {
 
               {/* Table View */}
               {viewMode === 'table' ? (
-                <div className="dark-glass-panel rounded-xl border border-blue-200/85 shadow-sm overflow-hidden">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
                   <table className="w-full text-sm text-left">
-                    <thead className="bg-blue-50 border-b border-blue-200/60">
+                    <thead className="bg-slate-100/80 border-b border-slate-200">
                       <tr>
-                        <th className={`px-4 py-3 font-bold text-blue-700 uppercase tracking-wider cursor-pointer ${getSortClass(sortField, 'distributor', sortOrder)}`} onClick={() => handleSort('distributor')}>Distributor</th>
-                        <th className="px-4 py-3 font-bold text-blue-700 uppercase tracking-wider">MPN / Manufacturer</th>
-                        <th className="px-4 py-3 font-bold text-blue-700 uppercase tracking-wider">Package</th>
-                        <th className={`px-4 py-3 font-bold text-blue-700 uppercase tracking-wider cursor-pointer ${getSortClass(sortField, 'stock', sortOrder)}`} onClick={() => handleSort('stock')}>Stock</th>
-                        <th className={`px-4 py-3 font-bold text-blue-700 uppercase tracking-wider cursor-pointer ${getSortClass(sortField, 'price', sortOrder)}`} onClick={() => handleSort('price')}>Price</th>
-                        <th className="px-4 py-3 font-bold text-blue-700 uppercase tracking-wider">Delivery</th>
-                        <th className="px-4 py-3 font-bold text-blue-700 uppercase tracking-wider">Actions</th>
+                        <th className={`px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'distributor', sortOrder)}`} onClick={() => handleSort('distributor')}>Distributor</th>
+                        <th className="px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">MPN / Manufacturer</th>
+                        <th className={`px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'stock', sortOrder)}`} onClick={() => handleSort('stock')}>Stock</th>
+                        <th className={`px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'price', sortOrder)}`} onClick={() => handleSort('price')}>Price</th>
+                        <th className="px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">Delivery</th>
+                        <th className="px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-blue-100 text-blue-800">
-                      {paginatedResults.map((part: any) => (
-                        <MuzepartResultRow 
-                          key={`${part.id}-${part.distributor}`}
-                          part={part}
-                          handleLock={handleLock}
-                          onShowDetails={onShowDetails}
-                        />
-                      ))}
+                    <tbody className="divide-y divide-slate-100 text-slate-800">
+                      {isSearchFetching ? (
+                        Array.from({ length: 5 }).map((_, idx) => (
+                          <MuzepartSkeletonRow key={`skeleton-${idx}`} />
+                        ))
+                      ) : (
+                        paginatedResults.map((part: any) => (
+                          <MuzepartResultRow 
+                            key={`${part.id}-${part.distributor}`}
+                            part={part}
+                            handleLock={handleLock}
+                            onShowDetails={onShowDetails}
+                          />
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {paginatedResults.map((part: any) => (
-                    <MuzepartResultCard 
-                      key={`${part.id}-${part.distributor}`}
-                      part={part}
-                      handleLock={handleLock}
-                      onShowDetails={onShowDetails}
-                    />
-                  ))}
+                  {isSearchFetching ? (
+                    Array.from({ length: 4 }).map((_, idx) => (
+                      <div key={`skeleton-card-${idx}`} className="h-[280px] bg-slate-100 rounded-2xl animate-pulse"></div>
+                    ))
+                  ) : (
+                    paginatedResults.map((part: any) => (
+                      <MuzepartResultCard 
+                        key={`${part.id}-${part.distributor}`}
+                        part={part}
+                        handleLock={handleLock}
+                        onShowDetails={onShowDetails}
+                      />
+                    ))
+                  )}
                 </div>
               )}
 

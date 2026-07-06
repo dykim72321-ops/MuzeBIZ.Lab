@@ -44,14 +44,14 @@ export const getBrandIcon = (mfr: string) => {
 
 export const getDistributorBadgeClass = (name: string) => {
   const n = name.toLowerCase();
-  if (n.includes('mouser')) return 'dist-mouser';
-  if (n.includes('digi-key') || n.includes('digikey')) return 'dist-digikey';
-  if (n.includes('arrow')) return 'dist-arrow';
-  if (n.includes('future')) return 'dist-future';
-  if (n.includes('rs components')) return 'dist-rs';
-  if (n.includes('tme')) return 'dist-tme';
-  if (n.includes('eol') || n.includes('rochester') || n.includes('flip')) return 'dist-eol';
-  return 'dist-general';
+  if (n.includes('mouser')) return 'text-blue-700 bg-blue-50/80 border-blue-200/60 shadow-[0_2px_8px_rgba(59,130,246,0.15)]';
+  if (n.includes('digi-key') || n.includes('digikey')) return 'text-red-700 bg-red-50/80 border-red-200/60 shadow-[0_2px_8px_rgba(239,68,68,0.15)]';
+  if (n.includes('arrow')) return 'text-teal-700 bg-teal-50/80 border-teal-200/60 shadow-[0_2px_8px_rgba(20,184,166,0.15)]';
+  if (n.includes('future')) return 'text-amber-700 bg-amber-50/80 border-amber-200/60 shadow-[0_2px_8px_rgba(245,158,11,0.15)]';
+  if (n.includes('rs components')) return 'text-rose-700 bg-rose-50/80 border-rose-200/60 shadow-[0_2px_8px_rgba(225,29,72,0.15)]';
+  if (n.includes('tme')) return 'text-indigo-700 bg-indigo-50/80 border-indigo-200/60 shadow-[0_2px_8px_rgba(99,102,241,0.15)]';
+  if (n.includes('eol') || n.includes('rochester') || n.includes('flip')) return 'text-slate-700 bg-slate-100 border-slate-300 shadow-[0_2px_8px_rgba(100,116,139,0.15)]';
+  return 'text-slate-600 bg-slate-50 border-slate-200 shadow-sm';
 };
 
 export const getStockClass = (stock: number) => {
