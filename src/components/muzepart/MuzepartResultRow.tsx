@@ -1,9 +1,8 @@
 import React from 'react';
 import type { ComponentPart } from '../../types/muzepart';
 import { 
-  getBrandIcon, 
-  getDistributorBadgeClass, 
-  getStockClass, 
+  getBrandIcon,
+  getDistributorBadgeClass,
   getDistributorUrl,
   getRiskScoreClass,
   getRiskLabel,

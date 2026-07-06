@@ -1,5 +1,5 @@
 import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 import { Globe, ShieldCheck, TrendingUp } from 'lucide-react';
