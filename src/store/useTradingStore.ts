@@ -15,16 +15,15 @@ import type {
   DiscoveryStock,
   PaperPosition,
   PaperHistory,
-  AlpacaAccount,
   TerminalData,
 } from '../types/dashboard';
 
-import type { BrokerPositionRaw, ClosedTradeRaw, PennyScanStatusResponse } from '../types/api';
+import type { PaperPositionRaw, PaperHistoryRaw, PaperAccountResponse, PennyScanStatusResponse } from '../types/api';
 import {
-  fetchBrokerAccount,
   fetchBrokerStatus,
-  fetchBrokerPositions,
-  fetchClosedTrades,
+  fetchPaperAccount,
+  fetchPaperPositions,
+  fetchPaperHistory,
   fetchPennyScanStatus,
 } from '../services/pythonApiService';
 
@@ -54,7 +53,7 @@ interface TradingState {
   discoveryStocks: DiscoveryStock[];
   livePositions: PaperPosition[];
   liveHistory: PaperHistory[];
-  alpacaAccount: AlpacaAccount | null;
+  paperAccount: PaperAccountResponse | null;
   pennyScanStatus: PennyScanStatusResponse | null;
   edgeAlert: EdgeAlert;
   terminalData: TerminalData | null;
@@ -77,45 +76,48 @@ interface TradingState {
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
-function mapBrokerPositions(raw: BrokerPositionRaw[]): PaperPosition[] {
-  return raw.map((bp) => {
-    const entry = Number(bp.entry_price);
-    const current = bp.current_price != null ? Number(bp.current_price) : entry;
-    const units = Number(bp.quantity);
-    const isPenny = entry <= PENNY_THRESHOLD;
-    const highestPrice = Math.max(entry, current);
-    const tsInitPct = isPenny ? 0.90 : 0.95;
-    const estimatedTsThreshold = highestPrice * tsInitPct;
+function mapPaperPositions(raw: PaperPositionRaw[]): PaperPosition[] {
+  return raw.map((pp) => {
+    const entry = Number(pp.entry_price);
+    const current = pp.current_price != null ? Number(pp.current_price) : entry;
+    const units = Number(pp.units);
+    const isPenny = pp.is_penny ?? entry <= PENNY_THRESHOLD;
+    const highestPrice = pp.highest_price != null ? Number(pp.highest_price) : Math.max(entry, current);
+    const tsThreshold = pp.ts_threshold != null ? Number(pp.ts_threshold) : highestPrice * (isPenny ? 0.90 : 0.95);
 
     return {
-      ticker: bp.ticker,
+      ticker: pp.ticker,
       units,
       entry_price: entry,
       current_price: current,
-      ts_threshold: estimatedTsThreshold,
-      trailing_stop: estimatedTsThreshold,
+      ts_threshold: tsThreshold,
+      trailing_stop: tsThreshold,
       highest_price: highestPrice,
-      status: 'HOLDING',
+      status: pp.status ?? 'HOLDING',
       is_penny: isPenny,
+      created_at: pp.created_at,
       unrealized_pl: (current - entry) * units,
-      unrealized_plpc: (current / entry - 1) * 100,
+      unrealized_plpc: entry > 0 ? (current / entry - 1) * 100 : 0,
       isPenny,
     };
   });
 }
 
-function mapClosedTrades(raw: ClosedTradeRaw[]): PaperHistory[] {
+function mapPaperHistory(raw: PaperHistoryRaw[]): PaperHistory[] {
   return raw.map((th) => ({
     id: th.id,
     ticker: th.ticker,
     units: Number(th.units ?? 0),
     entry_price: Number(th.entry_price ?? 0),
     exit_price: Number(th.exit_price ?? 0),
-    pnl: Number(th.profit_amt ?? 0),
+    pnl: Number(th.profit_amt ?? th.pnl ?? 0),
     pnl_pct: Number(th.pnl_pct ?? 0),
     profit_amt: Number(th.profit_amt ?? 0),
-    exit_reason: th.exit_reason ?? 'Alpaca Order',
-    created_at: th.created_at,
+    exit_reason: th.exit_reason ?? 'trailing_stop',
+    is_penny: th.is_penny,
+    isPenny: th.is_penny,
+    created_at: th.created_at ?? th.closed_at,
+    closed_at: th.closed_at,
   }));
 }
 
@@ -133,7 +135,7 @@ export const useTradingStore = create<TradingState>((set) => ({
   discoveryStocks: [],
   livePositions: [],
   liveHistory: [],
-  alpacaAccount: null,
+  paperAccount: null,
   pennyScanStatus: null,
   edgeAlert: { active: false, message: null },
   terminalData: null,
@@ -171,13 +173,13 @@ export const useTradingStore = create<TradingState>((set) => ({
   loadDashboardData: async () => {
     try {
       const [
-        alpaca,
+        paperAccount,
         discoveryResult,
         scanStatus,
-        brokerPositions,
-        alpacaClosedTrades,
+        paperPositions,
+        paperHistory,
       ] = await Promise.all([
-        fetchBrokerAccount().catch(() => null),
+        fetchPaperAccount().catch(() => null),
         supabaseClient
           .from('daily_discovery')
           .select('*')
@@ -187,12 +189,12 @@ export const useTradingStore = create<TradingState>((set) => ({
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
-        fetchBrokerPositions().catch(() => []),
-        fetchClosedTrades(1000).catch(() => []),
+        fetchPaperPositions(),
+        fetchPaperHistory(),
       ]);
 
-      const mappedPositions = mapBrokerPositions(brokerPositions);
-      const mappedHistory = mapClosedTrades(alpacaClosedTrades);
+      const mappedPositions = mapPaperPositions(paperPositions);
+      const mappedHistory = mapPaperHistory(paperHistory);
 
       const updates: Partial<TradingState> = {
         discoveryStocks: ((discoveryResult.data || []) as DiscoveryStock[]).filter(
@@ -205,8 +207,8 @@ export const useTradingStore = create<TradingState>((set) => ({
       };
 
       if (scanStatus) updates.pennyScanStatus = scanStatus;
-      if (alpaca && !('error' in alpaca && alpaca.error)) {
-        updates.alpacaAccount = alpaca as unknown as AlpacaAccount;
+      if (paperAccount && !('error' in paperAccount)) {
+        updates.paperAccount = paperAccount;
       }
 
       set(updates);

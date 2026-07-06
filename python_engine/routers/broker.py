@@ -485,7 +485,7 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
             asyncio.to_thread(
                 supabase.table("paper_history")
                 .select("profit_amt")
-                .gte("created_at", today_start.isoformat())
+                .gte("closed_at", today_start.isoformat())
                 .execute
             ),
         )
@@ -554,7 +554,7 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
         res = await asyncio.to_thread(
             supabase.table("paper_history")
             .select("*")
-            .order("created_at", desc=True)
+            .order("closed_at", desc=True)
             .limit(30)
             .execute
         )

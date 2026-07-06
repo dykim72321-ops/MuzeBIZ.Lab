@@ -1574,6 +1574,36 @@ async def auto_quant_scan_scheduler():
         await asyncio.sleep(2 * 3600)
 
 
+async def auto_paper_history_cleanup_scheduler():
+    """paper_history 누적 방지 스케줄러.
+    HISTORY_RETENTION_DAYS 경과한 청산 이력을 매일 1회 삭제한다.
+    """
+    HISTORY_RETENTION_DAYS = 90
+    print("🧹 [Scheduler] Paper History Cleanup Scheduler started.")
+
+    while True:
+        try:
+            if app_state.supabase:
+                threshold = (
+                    datetime.now(timezone.utc) - timedelta(days=HISTORY_RETENTION_DAYS)
+                ).isoformat()
+                res = await asyncio.to_thread(
+                    app_state.supabase.table("paper_history")
+                    .delete()
+                    .lt("closed_at", threshold)
+                    .execute
+                )
+                deleted = len(res.data) if res and res.data else 0
+                if deleted > 0:
+                    print(
+                        f"🧹 [Auto-Cleanup] paper_history 정리 완료: {HISTORY_RETENTION_DAYS}일 경과 {deleted}건 삭제"
+                    )
+        except Exception as e:
+            print(f"⚠️ [Auto-Cleanup] paper_history 정리 오류: {e}")
+
+        await asyncio.sleep(24 * 3600)
+
+
 async def _stop_current_stream():
     """현재 실행 중인 Alpaca 스트림 태스크를 취소하고 종료를 기다린다."""
     task: asyncio.Task = app_state._current_stream_task  # type: ignore[assignment]
@@ -1867,6 +1897,9 @@ async def run_startup_sequence():
 
     # MTF 캐시 주기적 갱신 스케줄러 시작 (프리워밍은 1-2 단계에서 완료)
     asyncio.create_task(mtf_cache_scheduler())
+
+    # paper_history 누적 방지 자동 정리 스케줄러 시작
+    asyncio.create_task(auto_paper_history_cleanup_scheduler())
 
     # 실거래 모드: Alpaca Trade Update 스트림 기동
     if app_state.TRADE_MODE == "LIVE" and app_state.live_engine is not None:

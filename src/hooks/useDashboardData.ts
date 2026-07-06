@@ -40,7 +40,7 @@ export function useDashboardData() {
   const discoveryStocks = useTradingStore((s) => s.discoveryStocks);
   const livePositions = useTradingStore((s) => s.livePositions);
   const liveHistory = useTradingStore((s) => s.liveHistory);
-  const alpacaAccount = useTradingStore((s) => s.alpacaAccount);
+  const paperAccount = useTradingStore((s) => s.paperAccount);
   const pennyScanStatus = useTradingStore((s) => s.pennyScanStatus);
   const edgeAlert = useTradingStore((s) => s.edgeAlert);
   const terminalData = useTradingStore((s) => s.terminalData);
@@ -93,12 +93,12 @@ export function useDashboardData() {
   // ── Derived: Displayed Account ──
   const displayedAccount = useMemo(
     () => ({
-      total_assets: alpacaAccount?.equity ?? 0,
-      cash_available: alpacaAccount?.buying_power ?? 0,
-      today_pnl: alpacaAccount?.today_pnl ?? 0,
-      today_pnl_pct: alpacaAccount?.today_pnl_pct ?? 0,
+      total_assets: paperAccount?.total_assets ?? 0,
+      cash_available: paperAccount?.cash_available ?? 0,
+      today_pnl: paperAccount?.today_pnl ?? 0,
+      today_pnl_pct: paperAccount?.today_pnl_pct ?? 0,
     }),
-    [alpacaAccount],
+    [paperAccount],
   );
 
   // ── Derived: Win Rate & Total Trades ──

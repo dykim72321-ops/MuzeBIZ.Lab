@@ -235,9 +235,17 @@ export default function UnifiedDashboard() {
               </div>
               <div className="flex-1 px-4 pb-4 bg-white relative">
                 {chartData.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-blue-200 rounded-md text-blue-800 font-bold bg-blue-50/50">
-                    <AreaChart className="w-8 h-8 mb-2 opacity-50" />
-                    데이터 수집 중...
+                  <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-blue-200 rounded-md text-blue-800 font-bold bg-blue-50/20 relative overflow-hidden">
+                    {/* Skeleton Chart SVG */}
+                    <svg className="absolute inset-0 w-full h-full opacity-20 animate-pulse text-blue-400" preserveAspectRatio="none" viewBox="0 0 1440 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M0 256L48 245.3C96 235 192 213 288 218.7C384 224 480 256 576 250.7C672 245 768 203 864 192C960 181 1056 203 1152 208C1248 213 1344 203 1392 197.3L1440 192V320H1392C1344 320 1248 320 1152 320C1056 320 960 320 864 320C768 320 672 320 576 320C480 320 384 320 288 320C192 320 96 320 48 320H0V256Z" fill="currentColor"/>
+                    </svg>
+                    <div className="z-10 flex flex-col items-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shadow-sm">
+                        <AreaChart className="w-5 h-5 text-blue-600 animate-pulse" />
+                      </div>
+                      <span className="text-[11px] font-black uppercase tracking-widest text-blue-600 bg-white/80 px-2 py-0.5 rounded shadow-sm backdrop-blur-sm">Awaiting Data</span>
+                    </div>
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
@@ -275,7 +283,8 @@ export default function UnifiedDashboard() {
                 </div>
               </div>
               <div className="flex-1 overflow-auto bg-white">
-                <table className="w-full text-left border-collapse">
+                {/* Desktop Table View */}
+                <table className="hidden md:table w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b-2 border-blue-200 text-[10px] font-mono font-black text-blue-900 uppercase bg-blue-50 sticky top-0 shadow-sm z-10">
                       <th className="py-2 px-4">종목</th>
@@ -294,10 +303,13 @@ export default function UnifiedDashboard() {
                       livePositions.map((pos: any) => {
                         const hasPnl = pos.unrealized_pl != null;
                         const isProfit = hasPnl && pos.unrealized_pl >= 0;
+                        const pnlPct = hasPnl ? pos.unrealized_plpc * 100 : 0;
+                        const isHighTension = Math.abs(pnlPct) >= 5; // 5% 이상 변동 시 텐션
                         const dec = pos.isPenny ? 4 : 2;
                         return (
-                          <tr key={pos.ticker} className="hover:bg-blue-50/50 transition-colors bg-white">
-                            <td className="py-3 px-4">
+                          <tr key={pos.ticker} className={clsx("transition-colors bg-white", isHighTension ? (isProfit ? "bg-emerald-50/30 hover:bg-emerald-50/50 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 hover:bg-rose-50/50 animate-[pulse_3s_ease-in-out_infinite]") : "hover:bg-blue-50/50")}>
+                            <td className="py-3 px-4 relative">
+                              {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
                               <span className="text-sm font-black text-black block">{pos.ticker}</span>
                               <span className="text-[10px] font-bold block text-blue-900 mt-0.5">{pos.isPenny ? 'Penny' : 'Standard'}</span>
                             </td>
@@ -311,7 +323,7 @@ export default function UnifiedDashboard() {
                             </td>
                             <td className={clsx("py-3 px-4 text-right font-mono text-xs font-black", hasPnl ? (isProfit ? "text-emerald-700" : "text-rose-700") : "text-blue-900")}>
                               <span className="block">{hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl).toFixed(2)}` : '-'}</span>
-                              <span className="block text-[10px] mt-0.5">{hasPnl ? `${isProfit ? '+' : ''}${Number(pos.unrealized_plpc * 100).toFixed(2)}%` : '-'}</span>
+                              <span className="block text-[10px] mt-0.5">{hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}</span>
                             </td>
                             <td className="py-3 px-4 text-center">
                               <button
@@ -327,6 +339,56 @@ export default function UnifiedDashboard() {
                     )}
                   </tbody>
                 </table>
+
+                {/* Mobile Card View Fallback */}
+                <div className="flex flex-col md:hidden divide-y-2 divide-blue-50">
+                  {livePositions.length === 0 ? (
+                    <div className="py-12 text-center text-blue-800 text-xs font-bold bg-white">보유 포지션 없음</div>
+                  ) : (
+                    livePositions.map((pos: any) => {
+                      const hasPnl = pos.unrealized_pl != null;
+                      const isProfit = hasPnl && pos.unrealized_pl >= 0;
+                      const pnlPct = hasPnl ? pos.unrealized_plpc * 100 : 0;
+                      const isHighTension = Math.abs(pnlPct) >= 5;
+                      const dec = pos.isPenny ? 4 : 2;
+                      return (
+                        <div key={pos.ticker} className={clsx("p-4 bg-white relative transition-colors", isHighTension ? (isProfit ? "bg-emerald-50/30 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 animate-[pulse_3s_ease-in-out_infinite]") : "")}>
+                          {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
+                          <div className="flex justify-between items-start mb-3">
+                            <div>
+                              <span className="text-base font-black text-black">{pos.ticker}</span>
+                              <span className="text-[10px] font-bold block text-blue-900">{pos.isPenny ? 'Penny' : 'Standard'} • {Number(pos.units).toFixed(2)} Shares</span>
+                            </div>
+                            <div className="text-right">
+                              <span className={clsx("text-sm font-mono font-black block", hasPnl ? (isProfit ? "text-emerald-700" : "text-rose-700") : "text-blue-900")}>
+                                {hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl).toFixed(2)}` : '-'}
+                              </span>
+                              <span className={clsx("text-[10px] font-mono font-black block", hasPnl ? (isProfit ? "text-emerald-700" : "text-rose-700") : "text-blue-900")}>
+                                {hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-center text-[11px] font-mono mb-3 bg-blue-50/50 p-2 rounded">
+                            <div className="flex flex-col">
+                              <span className="text-blue-800">진입가</span>
+                              <span className="font-bold text-black">${Number(pos.entry_price).toFixed(dec)}</span>
+                            </div>
+                            <div className="flex flex-col text-right">
+                              <span className="text-blue-800">현재가</span>
+                              <span className="font-bold text-black">${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleClosePosition(pos.ticker)}
+                            className="w-full btn-ghost-rose text-xs font-black py-2 rounded-md"
+                          >
+                            정산하기
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -336,18 +398,18 @@ export default function UnifiedDashboard() {
             <RiskAnalyticsPanel history={liveHistory} strategyStats={null} />
             <PositionAnalyticsPanel positions={livePositions} totalEquity={displayedAccount.total_assets} />
 
-            <div className="sfdc-card flex-1 flex flex-col min-h-[250px]">
+            <div className="sfdc-card flex-1 flex flex-col min-h-[250px] max-h-[420px]">
               <div className="sfdc-card-header">
                 <h2 className="text-sm font-black flex items-center gap-2">
                   <Clock className="w-4 h-4 text-blue-700" /> Recent Exits
                 </h2>
               </div>
-              <div className="p-3 flex-1 overflow-y-auto bg-blue-50/50">
+              <div className="p-3 flex-1 min-h-0 overflow-y-auto bg-blue-50/50">
                 {liveHistory.length === 0 ? (
                   <div className="text-center py-8 text-blue-800 text-xs font-bold">기록 없음</div>
                 ) : (
                   <div className="space-y-2">
-                    {liveHistory.slice(0, 10).map((trade: any, idx: number) => {
+                    {liveHistory.slice(0, 30).map((trade: any, idx: number) => {
                       const isWin = Number(trade.profit_amt) >= 0;
                       return (
                         <div key={idx} className="bg-white p-2.5 rounded-md border-2 border-blue-200 flex justify-between items-center shadow-sm">
