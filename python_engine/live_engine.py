@@ -38,6 +38,19 @@ _DEAD_STATUSES = {
     OrderStatus.DONE_FOR_DAY,
 }
 
+# Alpaca가 "실계좌에 없는 수량을 매도하려 함(공매도 취급)"으로 거절할 때의 시그니처.
+# DB(paper_positions)와 실계좌 보유 상태가 어긋난 phantom position을 나타낸다.
+_PHANTOM_POSITION_ERROR_CODE = "42210000"
+_PHANTOM_POSITION_ERROR_TEXT = "cannot be sold short"
+
+
+def _is_phantom_position_error(error: Exception) -> bool:
+    msg = str(error)
+    return (
+        _PHANTOM_POSITION_ERROR_CODE in msg
+        or _PHANTOM_POSITION_ERROR_TEXT in msg.lower()
+    )
+
 
 class LiveTradingManager(PaperTradingManager):
     """
@@ -129,12 +142,53 @@ class LiveTradingManager(PaperTradingManager):
             return filled_qty
         except Exception as e:
             print(f"❌ [LIVE ORDER FAILED] {ticker} {side}: {e}")
+            if side == OrderSide.SELL and _is_phantom_position_error(e):
+                await self._reconcile_phantom_position(ticker, e)
+            else:
+                await self.webhook.send_alert(
+                    title=f"🚨 [LIVE ORDER ERROR] {ticker}",
+                    description=f"주문 실패: {e}",
+                    color=0xFF0000,
+                )
+            return None
+
+    async def _reconcile_phantom_position(self, ticker: str, error: Exception) -> None:
+        """
+        Alpaca가 "실제 보유하지 않은 주식"이라는 이유로 매도를 거절한 경우(42210000 등),
+        DB(paper_positions/watchlist)가 실계좌와 어긋난 phantom position이다.
+        방치하면 매 봉마다 동일한 매도 주문이 재시도·재거절되며 알림이 반복 발생하므로
+        DB 쪽을 EXITED로 정리해 재시도 루프를 끊는다. (실제 체결이 없었으므로
+        paper_history/현금 기록은 남기지 않는다 — 회계상 실제 거래가 아님)
+        """
+        try:
+            await asyncio.to_thread(
+                self.supabase.table("paper_positions")
+                .delete()
+                .eq("ticker", ticker)
+                .execute
+            )
+            await self._sync_watchlist_exit(ticker)
+            print(
+                f"🧹 [PHANTOM POSITION 정리] {ticker} — DB 포지션 삭제 + watchlist EXITED"
+            )
             await self.webhook.send_alert(
-                title=f"🚨 [LIVE ORDER ERROR] {ticker}",
-                description=f"주문 실패: {e}",
+                title=f"🧹 [Phantom Position 정리] {ticker}",
+                description=(
+                    f"Alpaca가 매도를 거절했습니다 (실계좌에 실제 보유 없음): `{error}`\n"
+                    f"DB의 paper_positions 기록을 삭제하고 watchlist를 EXITED로 동기화했습니다."
+                ),
+                color=0xE67E22,
+            )
+        except Exception as sync_err:
+            print(f"⚠️ [Phantom Position 정리 실패] {ticker}: {sync_err}")
+            await self.webhook.send_alert(
+                title=f"🚨 [Phantom Position 정리 실패] {ticker}",
+                description=(
+                    f"원인: `{error}`\nDB 정리 중 추가 오류: `{sync_err}`\n"
+                    f"수동으로 paper_positions/watchlist를 확인하세요."
+                ),
                 color=0xFF0000,
             )
-            return None
 
     # ── 훅 오버라이드 ─────────────────────────────────────────────────────────
 
