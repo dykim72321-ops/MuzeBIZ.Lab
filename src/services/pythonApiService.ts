@@ -239,26 +239,16 @@ export async function fetchPaperAccount(): Promise<PaperAccountResponse> {
  * 페이퍼 트레이딩 현재 포지션 조회
  */
 export async function fetchPaperPositions(): Promise<PaperPositionRaw[]> {
-  try {
-    const data = await apiClient.broker.get<PaperPositionRaw[]>('/api/broker/paper/positions');
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Paper positions fetch error:', error);
-    return [];
-  }
+  const data = await apiClient.broker.get<PaperPositionRaw[]>('/api/broker/paper/positions');
+  return Array.isArray(data) ? data : [];
 }
 
 /**
  * 페이퍼 트레이딩 매매 이력 조회
  */
 export async function fetchPaperHistory(): Promise<PaperHistoryRaw[]> {
-  try {
-    const data = await apiClient.broker.get<PaperHistoryRaw[]>('/api/broker/paper/history');
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Paper history fetch error:', error);
-    return [];
-  }
+  const data = await apiClient.broker.get<PaperHistoryRaw[]>('/api/broker/paper/history');
+  return Array.isArray(data) ? data : [];
 }
 
 /**

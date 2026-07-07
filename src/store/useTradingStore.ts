@@ -47,6 +47,7 @@ interface TradingState {
   isSettingsOpen: boolean;
   loading: boolean;
   lastFetchedTime: string;
+  connectionError: boolean;
 
   // ── Data ──
 
@@ -96,8 +97,9 @@ function mapPaperPositions(raw: PaperPositionRaw[]): PaperPosition[] {
       status: pp.status ?? 'HOLDING',
       is_penny: isPenny,
       created_at: pp.created_at,
-      unrealized_pl: (current - entry) * units,
-      unrealized_plpc: entry > 0 ? (current / entry - 1) * 100 : 0,
+      // 백엔드(Decimal 정밀도)에서 계산된 값을 그대로 사용 — 프론트엔드에서 재계산하지 않는다.
+      unrealized_pl: Number(pp.unrealized_pl ?? 0),
+      unrealized_plpc: Number(pp.unrealized_plpc ?? 0),
       isPenny,
     };
   });
@@ -130,6 +132,7 @@ export const useTradingStore = create<TradingState>((set) => ({
   isSettingsOpen: false,
   loading: true,
   lastFetchedTime: '--:--:--',
+  connectionError: false,
 
 
   discoveryStocks: [],
@@ -179,7 +182,7 @@ export const useTradingStore = create<TradingState>((set) => ({
         paperPositions,
         paperHistory,
       ] = await Promise.all([
-        fetchPaperAccount().catch(() => null),
+        fetchPaperAccount(),
         supabaseClient
           .from('daily_discovery')
           .select('*')
@@ -204,11 +207,15 @@ export const useTradingStore = create<TradingState>((set) => ({
         liveHistory: mappedHistory,
         lastFetchedTime: new Date().toISOString().substring(11, 19),
         loading: false,
+        connectionError: false,
       };
 
       if (scanStatus) updates.pennyScanStatus = scanStatus;
       if (paperAccount && !('error' in paperAccount)) {
         updates.paperAccount = paperAccount;
+      } else {
+        // 계좌 응답이 에러 페이로드를 담고 있으면 이전 값(stale)을 유지하고 배지로만 알린다.
+        updates.connectionError = true;
       }
 
       set(updates);
@@ -230,7 +237,7 @@ export const useTradingStore = create<TradingState>((set) => ({
       }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
-      set({ loading: false });
+      set({ loading: false, connectionError: true });
     }
   },
 }));

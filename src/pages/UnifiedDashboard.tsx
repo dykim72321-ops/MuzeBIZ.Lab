@@ -26,7 +26,7 @@ const PENNY_ENGINE_THRESHOLD = 1.0;
 
 export default function UnifiedDashboard() {
   const {
-    loading, isArmed, isMarketOpen, isSettingsOpen, lastFetchedTime, discoveryStocks,
+    loading, connectionError, isArmed, isMarketOpen, isSettingsOpen, lastFetchedTime, discoveryStocks,
     livePositions, liveHistory, pennyScanStatus, edgeAlert, terminalData, chartRange,
     displayedAccount, displayedWinRate, displayedTotalTrades, totalPnl, investedCapital,
     concentrationPct, chartData, setIsSettingsOpen, setChartRange, setTerminalData,
@@ -44,6 +44,16 @@ export default function UnifiedDashboard() {
         <div className="fixed top-20 right-6 z-[100] flex items-center gap-3 bg-white/95 backdrop-blur-md px-4 py-2 border-2 border-blue-300 rounded-md shadow-lg animate-in fade-in">
           <div className="w-2.5 h-2.5 bg-blue-700 rounded-full animate-pulse shadow-[0_0_8px_rgba(29,78,216,0.6)]" />
           <span className="text-[12px] font-black text-blue-900 uppercase tracking-widest font-mono">Syncing Data...</span>
+        </div>
+      )}
+
+      {/* CONNECTION ERROR BADGE (Top Right) — 최신 데이터 fetch 실패 시 기존 화면을 그대로 유지하되 명시적으로 경고 */}
+      {!loading && connectionError && (
+        <div className="fixed top-20 right-6 z-[100] flex items-center gap-3 bg-red-50/95 backdrop-blur-md px-4 py-2 border-2 border-red-400 rounded-md shadow-lg animate-in fade-in">
+          <div className="w-2.5 h-2.5 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_rgba(220,38,38,0.6)]" />
+          <span className="text-[12px] font-black text-red-700 uppercase tracking-widest font-mono">
+            🔴 연결 끊김: 최신 데이터를 불러오지 못했습니다 (마지막 갱신 {lastFetchedTime})
+          </span>
         </div>
       )}
 

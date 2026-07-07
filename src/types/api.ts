@@ -153,6 +153,7 @@ export interface PaperAccountResponse {
   total_pnl: number;
   total_pnl_pct: number;
   current_drawdown: number;
+  high_water_mark: number;
   currency: string;
 }
 
@@ -162,6 +163,8 @@ export interface PaperPositionRaw {
   units: number | string;
   entry_price: number | string;
   current_price?: number | string | null;
+  unrealized_pl?: number | string | null;
+  unrealized_plpc?: number | string | null;
   trailing_stop?: number | string;
   ts_threshold?: number | string;
   highest_price?: number | string;

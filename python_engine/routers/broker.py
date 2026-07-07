@@ -7,6 +7,7 @@ Alpaca 실계좌 + Paper Trading 양쪽 모두 포함.
 import asyncio
 import os
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Optional, List
 
 import yfinance as yf
@@ -499,7 +500,23 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
         total_pnl_pct = (
             (total_pnl / INITIAL_CAPITAL * 100) if INITIAL_CAPITAL > 0 else 0
         )
-        current_drawdown = round(min(total_pnl_pct, 0), 2)
+
+        # High-Water Mark 기반 MDD: 역대 최고 자산 대비 현재 하락폭.
+        # (원금 대비 손익만 보면 50%→10% 수익 구간 하락이 0%로 표시되는 오류가 있었음)
+        high_water_mark = float(acc.get("high_water_mark") or INITIAL_CAPITAL)
+        if total_assets > high_water_mark:
+            high_water_mark = total_assets
+            await asyncio.to_thread(
+                supabase.table("paper_account")
+                .update({"high_water_mark": high_water_mark})
+                .eq("id", acc["id"])
+                .execute
+            )
+        current_drawdown = (
+            round((total_assets - high_water_mark) / high_water_mark * 100, 2)
+            if high_water_mark > 0
+            else 0.0
+        )
 
         today_pnl = sum(
             float(r.get("profit_amt") or 0) for r in (history_res.data or [])
@@ -517,12 +534,42 @@ async def get_paper_account(api_key: str = Security(get_api_key)):
             "total_pnl": round(total_pnl, 2),
             "total_pnl_pct": round(total_pnl_pct, 2),
             "current_drawdown": current_drawdown,
+            "high_water_mark": round(high_water_mark, 2),
             "currency": "USD",
             "status": "ACTIVE",
             "is_paper_trading": True,
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+def _dec(value) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError):
+        return Decimal("0")
+
+
+def _with_unrealized_pl(position: dict) -> dict:
+    """entry_price/current_price/units로 unrealized_pl(pl%)을 Decimal 정밀도로 계산해 부착한다.
+
+    프론트엔드는 이 값을 그대로 표시만 해야 한다 (부동소수점 오차로 인한
+    금액 불일치를 막기 위해 P&L 연산은 백엔드 단일 소스에서만 수행).
+    """
+    entry = _dec(position.get("entry_price"))
+    current = _dec(
+        position.get("current_price")
+        if position.get("current_price") is not None
+        else position.get("entry_price")
+    )
+    units = _dec(position.get("units"))
+
+    unrealized_pl = (current - entry) * units
+    unrealized_plpc = ((current / entry - 1) * 100) if entry > 0 else Decimal("0")
+
+    position["unrealized_pl"] = float(unrealized_pl.quantize(Decimal("0.01")))
+    position["unrealized_plpc"] = float(unrealized_plpc.quantize(Decimal("0.01")))
+    return position
 
 
 @router.get("/paper/positions")
@@ -537,7 +584,7 @@ async def get_paper_positions(api_key: str = Security(get_api_key)):
         res = await asyncio.to_thread(
             supabase.table("paper_positions").select("*").execute
         )
-        return res.data
+        return [_with_unrealized_pl(p) for p in (res.data or [])]
     except Exception:
         return []
 

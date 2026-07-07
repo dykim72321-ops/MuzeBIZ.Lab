@@ -33,6 +33,7 @@ export function useDashboardData() {
 
   // Zustand Store — Selector 기반 구독으로 최소한의 리렌더링
   const loading = useTradingStore((s) => s.loading);
+  const connectionError = useTradingStore((s) => s.connectionError);
   const isArmed = useTradingStore((s) => s.isArmed);
   const isMarketOpen = useTradingStore((s) => s.isMarketOpen);
   const isSettingsOpen = useTradingStore((s) => s.isSettingsOpen);
@@ -218,16 +219,13 @@ export function useDashboardData() {
       ...maPoints,
     ];
 
-    const lastTs = maPoints.length > 0 ? maPoints[maPoints.length - 1].ts : startTs;
-    if (now - lastTs > 60_000) {
-      const currentVal =
-        currentActualValue != null
-          ? currentActualValue
-          : maPoints.length > 0
-            ? maPoints[maPoints.length - 1].value
-            : startValue;
-      series.push({ name: '현재', value: currentVal, ts: now, ma: currentVal });
-    }
+    const currentVal =
+      currentActualValue != null
+        ? currentActualValue
+        : maPoints.length > 0
+          ? maPoints[maPoints.length - 1].value
+          : startValue;
+    series.push({ name: '현재', value: currentVal, ts: now, ma: currentVal });
 
     // Duplicate string labels removal logic: 
     // Recharts uses 'name' for XAxis ticks if dataKey='name'.
@@ -390,6 +388,7 @@ export function useDashboardData() {
   return {
     // State
     loading,
+    connectionError,
     isArmed,
     isMarketOpen,
     isSettingsOpen,
