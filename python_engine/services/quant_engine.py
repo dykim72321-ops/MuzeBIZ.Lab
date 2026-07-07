@@ -148,11 +148,15 @@ def calculate_advanced_signals(
 
     df["DNA_Score"] = score.clip(0.0, 100.0).round(1)
 
+    # RSI 과매수 상한 게이트: 다른 항목(MACD/ADX/RVOL) 보상으로 DNA가 높아도
+    # 이미 소진된 급등(RSI≥70)은 진입 직후 되돌림에 걸려 Trailing Stop을 유발하므로 차단
+    is_not_overbought = df["RSI"] < 70.0
+
     is_penny = df["Close"] <= 1.0
     tier1 = (~is_penny) & (df["DNA_Score"] >= 80.0)
     tier2 = (~is_penny) & (df["DNA_Score"] >= 75.0) & (df["RVOL"] > 1.5)
     tier_penny = is_penny & (df["DNA_Score"] >= 65.0)
-    df["Strong_Buy"] = tier1 | tier2 | tier_penny
+    df["Strong_Buy"] = (tier1 | tier2 | tier_penny) & is_not_overbought
     df["Strong_Sell"] = df["DNA_Score"] <= 40.0
 
     return df

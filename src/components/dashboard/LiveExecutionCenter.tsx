@@ -23,6 +23,8 @@ interface AccountStatus {
   today_pnl: number;
   today_pnl_pct: number;
   current_drawdown: number;
+  total_pnl?: number;
+  total_pnl_pct?: number;
 }
 
 export const LiveExecutionCenter = () => {
@@ -107,6 +109,7 @@ export const LiveExecutionCenter = () => {
           today_pnl: data.today_pnl ?? 0,
           today_pnl_pct: data.today_pnl_pct ?? 0,
           current_drawdown: data.current_drawdown ?? 0,
+          total_pnl_pct: data.today_pnl_pct ?? 0,
         } as any);
         setBrokerConnected(true);
       } else if (data?.error) {
@@ -304,9 +307,22 @@ export const LiveExecutionCenter = () => {
               {account ? `${(account.today_pnl ?? 0) >= 0 ? '+' : ''}$${(account.today_pnl ?? 0).toLocaleString()}` : '---'}
             </p>
           </div>
-          <div className="bg-rose-50 border border-rose-200 p-6 rounded-3xl shadow-sm">
-            <p className="text-rose-500 text-[9px] font-black uppercase tracking-[0.3em] mb-3">Drawdown</p>
-            <p className="text-3xl font-black text-rose-600 tabular-nums tracking-tighter">{account ? `${account.current_drawdown}%` : '---'}</p>
+          <div className={clsx(
+            "border p-6 rounded-3xl shadow-sm",
+            (account?.total_pnl_pct ?? 0) >= 0 ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200"
+          )}>
+            <p className={clsx(
+              "text-[9px] font-black uppercase tracking-[0.3em] mb-3",
+              (account?.total_pnl_pct ?? 0) >= 0 ? "text-emerald-500" : "text-rose-500"
+            )}>
+              평가 손익률
+            </p>
+            <p className={clsx(
+              "text-3xl font-black tabular-nums tracking-tighter",
+              (account?.total_pnl_pct ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600"
+            )}>
+              {account ? `${(account.total_pnl_pct ?? 0) >= 0 ? '+' : ''}${account.total_pnl_pct}%` : '---'}
+            </p>
           </div>
         </div>
         <div className="bg-blue-50 border border-blue-200 p-6 rounded-3xl shadow-sm flex flex-col justify-center">

@@ -153,10 +153,13 @@ def _calc_dna(
         return_deltas=True,
     )
 
-    # Tier 판정
-    is_penny_buy = is_penny and final_score >= 70
-    is_tier1 = not is_penny and final_score >= 85
-    is_tier2 = not is_penny and final_score >= 82 and rvol > 2.0
+    # Tier 판정 — 임계값은 services/quant_engine.py의 tier1/tier2/tier_penny와 동일
+    is_not_overbought = (
+        rsi < 70
+    )  # quant_engine.py: RSI≥70은 이미 소진된 급등으로 간주해 차단
+    is_penny_buy = is_penny and final_score >= 65 and is_not_overbought
+    is_tier1 = not is_penny and final_score >= 80 and is_not_overbought
+    is_tier2 = not is_penny and final_score >= 75 and rvol > 1.5 and is_not_overbought
     is_sell = final_score <= 40
 
     tier = "HOLD"
@@ -170,9 +173,11 @@ def _calc_dna(
         tier, tier_color, signal = "Tier-2", "text-teal-700", "BUY"
     elif is_sell:
         tier, tier_color, signal = "SELL", "text-rose-700", "STRONG SELL"
+    elif not is_not_overbought and final_score >= 65:
+        tier, tier_color, signal = "HOLD", "text-amber-700", "HOLD (RSI 과매수 차단)"
 
-    # Momentum Interceptor (main.py)
-    if signal == "STRONG BUY" and rvol < 3.0:
+    # Momentum Interceptor (main.py MomentumValidator, rvol_threshold=1.5) — 모든 BUY 등급에 적용
+    if signal in ("STRONG BUY", "BUY") and rvol < 1.5:
         signal = "HOLD (Momentum Blocked)"
         tier_color = "text-amber-700"
 
@@ -225,7 +230,9 @@ def _calc_chandelier(
     atr_abs = entry_price * atr_pct
     floor_pct = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
     floor = entry_price * floor_pct
-    ts_fixed = highest * floor_pct
+    # ATR 미공급 폴백은 paper_engine.py에서 TRAIL_PCT(최고가 추종 비율)를 쓴다 — INIT_PCT(초기 스탑)와 다름
+    trail_pct = PENNY_TS_TRAIL_PCT if is_penny else TS_TRAIL_PCT
+    ts_fixed = highest * trail_pct
     ts_chandelier = max(floor, highest - k * atr_abs)
 
     return ChandelierResult(

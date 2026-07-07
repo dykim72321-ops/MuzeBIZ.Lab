@@ -88,10 +88,12 @@ class TickerDataState:
                 client = None
 
             if client:
-                for ticker in tickers:
+                chunk_size = 50
+                for i in range(0, len(tickers), chunk_size):
+                    chunk = tickers[i : i + chunk_size]
                     try:
                         request_params = StockBarsRequest(
-                            symbol_or_symbols=ticker,
+                            symbol_or_symbols=chunk,
                             timeframe=TimeFrame.Minute,
                             limit=self.max_bars,
                             feed=DataFeed.IEX,
@@ -99,10 +101,31 @@ class TickerDataState:
                         bars = await asyncio.to_thread(
                             client.get_stock_bars, request_params
                         )
-                        df = bars.df
-                        if not df.empty:
-                            if isinstance(df.index, pd.MultiIndex):
-                                df = df.xs(ticker, level=0)
+                        all_df = bars.df
+                    except Exception as e:
+                        print(f"⚠️ [Alpaca batch warm-up] chunk failed: {e}")
+                        if "too many requests" in str(e).lower() or "429" in str(e):
+                            await asyncio.sleep(5)
+                        continue
+
+                    if all_df.empty:
+                        continue
+
+                    for ticker in chunk:
+                        try:
+                            if isinstance(all_df.index, pd.MultiIndex):
+                                if ticker in all_df.index.get_level_values(0):
+                                    df = all_df.xs(ticker, level=0).copy()
+                                else:
+                                    continue
+                            else:
+                                if len(chunk) == 1:
+                                    df = all_df.copy()
+                                else:
+                                    continue
+
+                            if df.empty:
+                                continue
                             df = df[["open", "high", "low", "close", "volume"]].rename(
                                 columns={
                                     "open": "Open",
@@ -203,8 +226,8 @@ class TickerDataState:
                             print(
                                 f"✅ [Alpaca/IEX] {ticker} warmed up ({len(df)} bars, calibrated={calibrated})"
                             )
-                    except Exception as e:
-                        print(f"⚠️ [Alpaca warm-up] {ticker} failed: {e}")
+                        except Exception as e:
+                            print(f"⚠️ [Alpaca warm-up] {ticker} failed: {e}")
 
         print("🌐 [Warm-up] Falling back to yfinance (1m interval)...")
         for ticker in tickers:

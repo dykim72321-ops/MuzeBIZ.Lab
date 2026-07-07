@@ -303,7 +303,7 @@ export default function UnifiedDashboard() {
                       livePositions.map((pos: any) => {
                         const hasPnl = pos.unrealized_pl != null;
                         const isProfit = hasPnl && pos.unrealized_pl >= 0;
-                        const pnlPct = hasPnl ? pos.unrealized_plpc * 100 : 0;
+                        const pnlPct = hasPnl ? pos.unrealized_plpc : 0;
                         const isHighTension = Math.abs(pnlPct) >= 5; // 5% 이상 변동 시 텐션
                         const dec = pos.isPenny ? 4 : 2;
                         return (
@@ -348,7 +348,7 @@ export default function UnifiedDashboard() {
                     livePositions.map((pos: any) => {
                       const hasPnl = pos.unrealized_pl != null;
                       const isProfit = hasPnl && pos.unrealized_pl >= 0;
-                      const pnlPct = hasPnl ? pos.unrealized_plpc * 100 : 0;
+                      const pnlPct = hasPnl ? pos.unrealized_plpc : 0;
                       const isHighTension = Math.abs(pnlPct) >= 5;
                       const dec = pos.isPenny ? 4 : 2;
                       return (

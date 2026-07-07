@@ -120,10 +120,11 @@ function calcDna(p: DnaParams): DnaResult {
 
   const finalScore = Math.min(100, Math.max(0, +score.toFixed(1)));
 
-  // Tier 판정
-  const isPennyBuy = p.isPenny && finalScore >= 70;
-  const isTier1 = !p.isPenny && finalScore >= 85;
-  const isTier2 = !p.isPenny && finalScore >= 82 && rvol > 2.0;
+  // Tier 판정 — 임계값은 services/quant_engine.py의 tier1/tier2/tier_penny와 동일
+  const isNotOverbought = rsi < 70; // quant_engine.py: RSI≥70은 이미 소진된 급등으로 간주해 차단
+  const isPennyBuy = p.isPenny && finalScore >= 65 && isNotOverbought;
+  const isTier1 = !p.isPenny && finalScore >= 80 && isNotOverbought;
+  const isTier2 = !p.isPenny && finalScore >= 75 && rvol > 1.5 && isNotOverbought;
   const isSell = finalScore <= 40;
 
   let tier = 'HOLD';
@@ -133,9 +134,10 @@ function calcDna(p: DnaParams): DnaResult {
   else if (isTier1) { tier = 'Tier-1'; tierColor = 'text-emerald-700'; signal = 'STRONG BUY'; }
   else if (isTier2) { tier = 'Tier-2'; tierColor = 'text-teal-700'; signal = 'BUY'; }
   else if (isSell) { tier = 'SELL'; tierColor = 'text-rose-700'; signal = 'STRONG SELL'; }
+  else if (!isNotOverbought && finalScore >= 65) { tier = 'HOLD'; tierColor = 'text-amber-700'; signal = 'HOLD (RSI 과매수 차단)'; }
 
-  // ── Momentum Interceptor 동기화 (main.py) ──
-  if (signal === 'STRONG BUY' && rvol < 3.0) {
+  // ── Momentum Interceptor 동기화 (main.py MomentumValidator, rvol_threshold=1.5) ──
+  if ((signal === 'STRONG BUY' || signal === 'BUY') && rvol < 1.5) {
     signal = 'HOLD (Momentum Blocked)';
     tierColor = 'text-amber-700';
   }
@@ -161,12 +163,14 @@ function calcSizing(p: SizingParams): SizingResult {
 }
 
 function calcChandelier(highest: number, atrPct: number, isPenny: boolean, entryPrice: number): ChandelierResult {
-  const k = isPenny ? 6.5 : 3.0;
+  const k = isPenny ? 4.0 : 2.0; // paper_engine.py: CHANDELIER_K_PENNY / CHANDELIER_K_NORMAL
   // 백엔드 ATR(14)은 현재가(≈진입가) 기준 절댓값. highest 기준으로 계산하면 상승 후 과대 추정됨.
   const atrAbs = entryPrice * atrPct;
   const floorPct = isPenny ? 0.85 : 0.90;
   const floor = entryPrice * floorPct;
-  const tsFixed = highest * floorPct;
+  // ATR 미공급 폴백은 paper_engine.py에서 TRAIL_PCT(최고가 추종 비율)를 쓴다 — INIT_PCT(초기 스탑)와 다름
+  const trailPct = isPenny ? 0.90 : 0.95;
+  const tsFixed = highest * trailPct;
   const tsChandelier = Math.max(floor, highest - k * atrAbs);
   return { k, floor, tsFixed, tsChandelier, effective: tsChandelier };
 }
@@ -237,7 +241,7 @@ function ScoreArc({ score }: { score: number }) {
   const cx = 90; const cy = 90;
   const circumference = Math.PI * r;
   const offset = circumference * (1 - score / 100);
-  const color = score >= 85 ? '#10b981' : score >= 70 ? '#06b6d4' : score >= 50 ? '#6366f1' : score >= 40 ? '#f59e0b' : '#f43f5e';
+  const color = score >= 80 ? '#10b981' : score >= 65 ? '#06b6d4' : score >= 50 ? '#6366f1' : score >= 40 ? '#f59e0b' : '#f43f5e';
   return (
     <svg width="180" height="110" viewBox="0 0 180 110">
       <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke="#e2e8f0" strokeWidth="12" strokeLinecap="round" />
@@ -261,13 +265,13 @@ interface Preset {
 const PRESETS: Preset[] = [
   {
     label: 'Tier-1 경계',
-    desc: 'DNA ≈ 85',
+    desc: 'DNA ≥ 80, RSI < 70',
     color: 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
     values: { rsi: 68, rvol: 3.5, macdStatus: 'golden', adx: 20, diPositive: true, isExtended: false, isPenny: false, entryPrice: 10 },
   },
   {
     label: 'Tier-2 경계',
-    desc: 'DNA ≈ 82, RVOL>2',
+    desc: 'DNA ≥ 75, RVOL>1.5',
     color: 'border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100',
     values: { rsi: 58, rvol: 2.5, macdStatus: 'golden', adx: 25, diPositive: true, isExtended: false, isPenny: false, entryPrice: 10 },
   },
@@ -818,7 +822,7 @@ export function DnaSimulatorPage() {
               {[
                 { label: '진입가', value: `$${entryPrice.toFixed(isPenny ? 3 : 2)}` },
                 { label: '최고가', value: `$${highest.toFixed(isPenny ? 3 : 2)}` },
-                { label: '고정 % TS', value: `$${activeChandelier.tsFixed.toFixed(isPenny ? 3 : 2)}`, sub: `${isPenny ? '-15%' : '-10%'} (기존)` },
+                { label: '고정 % TS', value: `$${activeChandelier.tsFixed.toFixed(isPenny ? 3 : 2)}`, sub: `최고가 × ${isPenny ? '90%' : '95%'} (ATR 미공급 폴백)` },
                 { label: 'Chandelier TS', value: `$${activeChandelier.tsChandelier.toFixed(isPenny ? 3 : 2)}`, sub: `k=${activeChandelier.k}×ATR`, highlight: true },
               ].map(item => (
                 <div key={item.label} className={`rounded-xl border p-3 text-center ${item.highlight ? 'border-indigo-200 bg-indigo-50' : 'border-blue-100 bg-blue-50'}`}>

@@ -134,7 +134,7 @@ _candle_state = TickerDataState(max_bars=100)
 _db = DBManager()
 _webhook = WebhookManager()
 _mtf_cache = MTFCache()
-_momentum_validator = MomentumValidator(mtf_cache=_mtf_cache, rvol_threshold=1.2)
+_momentum_validator = MomentumValidator(mtf_cache=_mtf_cache, rvol_threshold=1.5)
 
 # AppState에 주입
 app_state.manager = _manager
@@ -1345,7 +1345,10 @@ async def start_rest_polling(tickers: Optional[List[str]] = None):
 
     active_tickers = tickers
     if not active_tickers:
-        active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=30)
+        discovery_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=30)
+        # HOLD 중인 포지션이 daily_discovery 순위 밖으로 밀려나도 반드시 폴링 대상에
+        # 포함해야 한다 — 그렇지 않으면 current_price가 진입가에 고정된다.
+        active_tickers = list(set(discovery_tickers) | app_state._held_tickers)
 
     if not active_tickers:
         print("⚠️ [REST Polling] No active tickers. Standby.")
@@ -1415,7 +1418,13 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
 
     try:
         if not active_tickers:
-            active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=30)
+            discovery_tickers = await asyncio.to_thread(
+                _db.get_active_tickers, limit=30
+            )
+            # 현재 HOLD 중인 포지션은 daily_discovery 순위 밖으로 밀려나도
+            # 반드시 구독을 유지해야 current_price가 갱신된다 (그렇지 않으면
+            # 평가 손익이 진입가에 고정되어 항상 +$0.00으로 표시됨).
+            active_tickers = list(set(discovery_tickers) | app_state._held_tickers)
 
         if not active_tickers:
             print("⚠️ No active tickers to monitor. Pulse engine standby.")
@@ -1523,16 +1532,25 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
         if "connection limit" in str(e).lower():
             print("⏳ Connection limit — REST Polling 폴백으로 즉시 전환...")
             if is_market_hours():
-                asyncio.create_task(start_rest_polling(active_tickers))
+                # _current_stream_task를 갱신하지 않으면 _stop_current_stream()이
+                # 이 폴링 루프를 절대 취소할 수 없어 재시도할 때마다 폴링 루프가
+                # 고아 상태로 누적되고, 결국 Alpaca Data API 요청이 겹쳐 429가 발생한다.
+                app_state._current_stream_task = asyncio.create_task(
+                    start_rest_polling(active_tickers)
+                )
             await asyncio.sleep(300)
             if is_market_hours():
-                asyncio.create_task(start_alpaca_stream(active_tickers))
+                app_state._current_stream_task = asyncio.create_task(
+                    start_alpaca_stream(active_tickers)
+                )
         else:
             wait_sec = 60
             print(f"⏳ {wait_sec}초 후 재연결 시도...")
             await asyncio.sleep(wait_sec)
             if is_market_hours():
-                asyncio.create_task(start_alpaca_stream(active_tickers))
+                app_state._current_stream_task = asyncio.create_task(
+                    start_alpaca_stream(active_tickers)
+                )
             else:
                 print("🌙 [Pulse] 시장 폐장 — 스트림 재시작 스킵 (스냅샷 모드 유지)")
 
@@ -1646,6 +1664,92 @@ async def stream_scheduler():
         await asyncio.sleep(60)
 
 
+async def paper_portfolio_updater():
+    """주기적으로 paper_portfolio (Alpha Fund 수동 포트폴리오)의 현재가와 PnL을 업데이트하는 백그라운드 태스크"""
+    import yfinance as yf
+
+    print("📈 [Portfolio Updater] Started paper_portfolio live sync task.")
+    while True:
+        try:
+            if not app_state.supabase:
+                await asyncio.sleep(15)
+                continue
+
+            if not is_market_hours():
+                # 장외 시간엔 폴링 주기를 길게 (60초)
+                await asyncio.sleep(60)
+                continue
+
+            res = await asyncio.to_thread(
+                app_state.supabase.table("paper_portfolio")
+                .select("*")
+                .eq("status", "OPEN")
+                .execute
+            )
+            positions = res.data
+            if not positions:
+                await asyncio.sleep(15)
+                continue
+
+            tickers = list(set([p["ticker"] for p in positions]))
+            tickers_str = " ".join(tickers)
+
+            tickers_data = await asyncio.to_thread(
+                yf.download,
+                tickers_str,
+                period="1d",
+                interval="1m",
+                progress=False,
+                threads=True,
+            )
+
+            if tickers_data is not None and not tickers_data.empty:
+                close_col = tickers_data.get("Close")
+                if close_col is not None and not close_col.empty:
+                    last_prices = {}
+                    if isinstance(close_col, pd.Series):
+                        if len(tickers) == 1:
+                            last_prices[tickers[0]] = float(close_col.iloc[-1])
+                    else:
+                        last_row = close_col.iloc[-1]
+                        for ticker in tickers:
+                            if ticker in last_row.index and pd.notna(last_row[ticker]):
+                                last_prices[ticker] = float(last_row[ticker])
+
+                    for pos in positions:
+                        ticker = pos["ticker"]
+                        if ticker in last_prices:
+                            current_price = last_prices[ticker]
+                            entry_price = float(pos["entry_price"])
+                            pnl_percent = round(
+                                (current_price / entry_price - 1) * 100, 2
+                            )
+
+                            # Only update if the price has changed
+                            if (
+                                abs(
+                                    float(pos.get("current_price") or 0) - current_price
+                                )
+                                > 0.0001
+                            ):
+                                await asyncio.to_thread(
+                                    app_state.supabase.table("paper_portfolio")
+                                    .update(
+                                        {
+                                            "current_price": round(current_price, 4),
+                                            "pnl_percent": pnl_percent,
+                                            "updated_at": datetime.now().isoformat(),
+                                        }
+                                    )
+                                    .eq("id", pos["id"])
+                                    .execute
+                                )
+        except Exception as e:
+            print(f"⚠️ [Portfolio Updater] Error: {e}")
+
+        await asyncio.sleep(10)  # 10초 주기 업데이트
+
+
 async def stream_liveness_watchdog():
     """3분 주기로 Alpaca WebSocket 생존 여부를 확인."""
     STALE_THRESHOLD_SEC = 300
@@ -1667,9 +1771,10 @@ async def stream_liveness_watchdog():
                     await app_state._current_ws_stream.close()
                 except Exception:
                     pass
-            active_tickers = list(app_state._held_tickers) or await asyncio.to_thread(
+            discovery_tickers = await asyncio.to_thread(
                 _db.get_active_tickers, limit=15
             )
+            active_tickers = list(set(discovery_tickers) | app_state._held_tickers)
             if active_tickers:
                 asyncio.create_task(start_alpaca_stream(active_tickers))
 
@@ -1749,6 +1854,7 @@ async def startup_event():
     _spawn_watchdog_if_not_running()
     asyncio.create_task(run_startup_sequence())
     asyncio.create_task(stream_liveness_watchdog())
+    asyncio.create_task(paper_portfolio_updater())
 
 
 @app.on_event("shutdown")

@@ -23,7 +23,7 @@ import { useNavigate } from 'react-router-dom';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 5_000;
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
