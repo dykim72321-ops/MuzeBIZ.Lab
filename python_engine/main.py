@@ -1085,11 +1085,7 @@ async def on_minute_bar_closed(bar):
                 dna_score=0.0,
                 recommended_weight=0.0,
                 atr=atr_val,
-                smoothed_er=(
-                    payload.get("smoothed_er", 0.5)
-                    if "payload" in locals() and isinstance(payload, dict)
-                    else 0.5
-                ),
+                smoothed_er=0.5,
             )
             if app_state.supabase:
                 try:
