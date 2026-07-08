@@ -3,12 +3,13 @@ import { NavLink } from 'react-router-dom';
 import {
   Search,
   LayoutDashboard,
-  Bell,
   Menu,
   X,
   BarChart3
 } from 'lucide-react';
 import clsx from 'clsx';
+import { useSystemStatus } from '../../hooks/useSystemStatus';
+import { toast } from 'sonner';
 
 const NAVIGATION = [
   { name: '통합 지휘소', icon: LayoutDashboard, path: '/stock/dashboard' },
@@ -18,6 +19,15 @@ const NAVIGATION = [
 
 export const TopNav = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { isOnline, lastChecked } = useSystemStatus();
+
+  const handleStatusClick = () => {
+    if (isOnline) {
+      toast.success(`System is Online (Last checked: ${lastChecked.toLocaleTimeString()})`);
+    } else {
+      toast.error(`System is Offline. Engine connection failed! (Last checked: ${lastChecked.toLocaleTimeString()})`);
+    }
+  };
 
   return (
     <>
@@ -55,14 +65,24 @@ export const TopNav = () => {
 
         {/* Right: Actions */}
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2.5 px-4 py-2 bg-blue-50 rounded-full border border-blue-200 shadow-sm">
-             <div className="w-2 h-2 bg-emerald-600 rounded-full animate-pulse shadow-[0_0_10px_rgba(5,150,105,0.5)]" />
-             <span className="text-[10px] font-black text-blue-900 uppercase tracking-widest leading-none">System Online</span>
-          </div>
-
-          <button className="p-2 text-blue-800 hover:text-blue-900 hover:bg-blue-50 group rounded-lg transition-all relative cursor-pointer">
-            <Bell className="w-5 h-5 group-hover:animate-swing origin-top" />
-            <span className="absolute top-2 right-2 w-2 h-2 bg-rose-600 rounded-full"></span>
+          <button 
+            onClick={handleStatusClick}
+            className={clsx(
+              "flex items-center gap-2.5 px-4 py-2 rounded-full border shadow-sm transition-all cursor-pointer hover:scale-105",
+              isOnline ? "bg-blue-50 border-blue-200" : "bg-red-50 border-red-200"
+            )}
+            title="Click to view detailed system status"
+          >
+             <div className={clsx(
+               "w-2 h-2 rounded-full animate-pulse",
+               isOnline ? "bg-emerald-600 shadow-[0_0_10px_rgba(5,150,105,0.5)]" : "bg-red-600 shadow-[0_0_10px_rgba(220,38,38,0.5)]"
+             )} />
+             <span className={clsx(
+               "text-[10px] font-black uppercase tracking-widest leading-none",
+               isOnline ? "text-blue-900" : "text-red-900"
+             )}>
+               {isOnline ? "System Online" : "System Offline"}
+             </span>
           </button>
 
           <button

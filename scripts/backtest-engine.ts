@@ -14,6 +14,27 @@ interface Candle {
   volume: number;
 }
 
+interface Position {
+  entryPrice: number;
+  entryDate: string;
+  atr: number;
+  daysHeld: number;
+  amount: number;
+  highestHigh: number;
+  scaledOut: boolean;
+}
+
+interface Trade {
+  ticker: string;
+  entryDate: string;
+  exitDate: string;
+  entryPrice: number;
+  exitPrice: number;
+  pnl: number;
+  isWin: boolean;
+  reason: string;
+}
+
 /**
  * 1. [Math Engine] EMA True Range (지수 평활 실제 변동성)
  * 최근 데이터에 더 높은 가중치를 주어 폭등/폭락 변동성에 즉각적으로 반응합니다.
@@ -95,11 +116,11 @@ class RobustBacktestEngine {
   private balance = 10000;
   private peakBalance = 10000;
   private maxDrawdown = 0;
-  private trades: any[] = [];
+  private trades: Trade[] = [];
 
   public run(ticker: string, candles: Candle[]) {
     console.log(`\n[BACKTEST] Starting simulation for ${ticker}...`);
-    let position: any = null;
+    let position: Position | null = null;
     let pendingEntry: boolean = false;
     let emaAtr = 0; // 지수 평활 ATR 상태 저장
 
@@ -191,7 +212,7 @@ class RobustBacktestEngine {
     }
   }
 
-  private closePosition(ticker: string, date: string, price: number, pos: any, reason: string) {
+  private closePosition(ticker: string, date: string, price: number, pos: Position, reason: string) {
     let actualExitPrice = price;
     if (reason === 'TARGET' || reason === 'SCALE_OUT') actualExitPrice = price * 0.99;  // 1% 익절 슬리피지
     else if (reason === 'STOP' || reason === 'TIME_STOP') actualExitPrice = price * 0.985; // 1.5% 손절 슬리피지

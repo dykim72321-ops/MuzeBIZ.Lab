@@ -4,13 +4,13 @@ import { MuzepartMarketIntel } from '../components/muzepart/MuzepartMarketIntel'
 import { MuzepartResultRow } from '../components/muzepart/MuzepartResultRow';
 import { MuzepartResultCard } from '../components/muzepart/MuzepartResultCard';
 import { MuzepartSkeletonRow } from '../components/muzepart/MuzepartSkeletonRow';
-import { getSortClass } from '../components/muzepart/MuzepartUI';
+import { getSortClass } from '../components/muzepart/muzepartHelpers';
 import { MuzepartFacets } from '../components/muzepart/MuzepartFacets';
 import { 
   Search, ShieldCheck, 
   LayoutGrid, List, AlertTriangle, RefreshCw
 } from 'lucide-react';
-import type { SortField } from '../types/muzepart';
+import type { SortField, ComponentPart } from '../types/muzepart';
 import './MuzepartSearchPage.css';
 
 export const MuzepartSearchPage: React.FC = () => {
@@ -37,13 +37,15 @@ export const MuzepartSearchPage: React.FC = () => {
     isSearchFetching
   } = useMuzepartSearch();
 
-  const [detailPart, setDetailPart] = useState<any | null>(null);
+  const [detailPart, setDetailPart] = useState<ComponentPart | null>(null);
   const [isFetchingDetails, setIsFetchingDetails] = useState(false);
 
-  const onShowDetails = async (part: any) => {
+  const onShowDetails = async (part: ComponentPart) => {
     setDetailPart(part);
     setIsFetchingDetails(true);
-    await fetchPartDetails(part.product_url);
+    if (part.product_url) {
+      await fetchPartDetails(part.product_url);
+    }
     setIsFetchingDetails(false);
   };
 
@@ -314,7 +316,7 @@ export const MuzepartSearchPage: React.FC = () => {
                           <MuzepartSkeletonRow key={`skeleton-${idx}`} />
                         ))
                       ) : (
-                        paginatedResults.map((part: any) => (
+                        paginatedResults.map((part: ComponentPart) => (
                           <MuzepartResultRow 
                             key={`${part.id}-${part.distributor}`}
                             part={part}
@@ -333,7 +335,7 @@ export const MuzepartSearchPage: React.FC = () => {
                       <div key={`skeleton-card-${idx}`} className="h-[280px] bg-slate-100 rounded-2xl animate-pulse"></div>
                     ))
                   ) : (
-                    paginatedResults.map((part: any) => (
+                    paginatedResults.map((part: ComponentPart) => (
                       <MuzepartResultCard 
                         key={`${part.id}-${part.distributor}`}
                         part={part}
@@ -467,12 +469,12 @@ export const MuzepartSearchPage: React.FC = () => {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-xs text-blue-600">Package</span>
-                          <span className="text-xs font-bold text-blue-900">{detailPart.package || 'N/A'}</span>
+                          <span className="text-xs font-bold text-blue-900">{detailPart.specs?.package || 'N/A'}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-xs text-blue-600">RoHS</span>
-                          <span className={`text-xs font-bold ${detailPart.rohs ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {detailPart.rohs ? 'Compliant' : 'Non-Compliant'}
+                          <span className={`text-xs font-bold ${detailPart.specs?.rohs ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {detailPart.specs?.rohs ? 'Compliant' : 'Non-Compliant'}
                           </span>
                         </div>
                       </div>

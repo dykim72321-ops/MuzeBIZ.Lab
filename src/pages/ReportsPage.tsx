@@ -40,8 +40,8 @@ export default function ReportsPage() {
         } else {
           setReportData(data.buckets);
         }
-      } catch (err: any) {
-        setError(err.message || '리포트 데이터를 불러오는데 실패했습니다.');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '리포트 데이터를 불러오는데 실패했습니다.');
       } finally {
         setLoading(false);
       }

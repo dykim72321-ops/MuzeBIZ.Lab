@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ComponentPart } from '../../types/muzepart';
-import { 
+import {
   getBrandIcon,
   getDistributorBadgeClass,
   getDistributorUrl,
@@ -8,7 +8,7 @@ import {
   getRiskLabel,
   getRelevanceBadgeClass,
   getRelevanceLabel
-} from './MuzepartUI';
+} from './muzepartHelpers';
 import { Info, FileText } from 'lucide-react';
 
 interface MuzepartResultCardProps {

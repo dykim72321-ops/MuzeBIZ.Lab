@@ -35,9 +35,9 @@ export const PersonaPerformance = () => {
 
         if (dbError) throw dbError;
         setPersonas(data || []);
-      } catch (err: any) {
+      } catch (err) {
         console.error('Failed to fetch persona performance:', err);
-        setError(err?.message ?? 'Failed to load persona data');
+        setError(err instanceof Error ? err.message : 'Failed to load persona data');
       } finally {
         setLoading(false);
       }

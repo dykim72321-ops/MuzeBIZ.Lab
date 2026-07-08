@@ -3,10 +3,11 @@ import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { executeManualOrder } from '../../services/pythonApiService';
 import { toast } from 'sonner';
+import type { DiscoveryStock } from '../../types/dashboard';
 
 interface AlphaDiscoverySectionProps {
-  filteredDiscovery: any[];
-  handleDeepDive: (stock: any) => void;
+  filteredDiscovery: DiscoveryStock[];
+  handleDeepDive: (stock: DiscoveryStock) => void;
   lastFetchedTime?: string;
 }
 
@@ -54,7 +55,7 @@ export const AlphaDiscoverySection: React.FC<AlphaDiscoverySectionProps> = ({
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {filteredDiscovery.length > 0 ? filteredDiscovery.map((stock, idx) => {
           const changePercent = stock.change_percent || stock.changePercent || 0;
-          const dnaScore = stock.dna_score || stock.dnaScore || 0;
+          const dnaScore = stock.dna_score || 0;
 
           return (
             <motion.div
@@ -83,7 +84,7 @@ export const AlphaDiscoverySection: React.FC<AlphaDiscoverySectionProps> = ({
                   </div>
                 </div>
                 <span className="block text-[9px] text-blue-400 font-bold uppercase tracking-widest truncate max-w-full">
-                  {stock.name || `${stock.ticker} Asset`}
+                  {`${stock.ticker} Asset`}
                 </span>
               </div>
 

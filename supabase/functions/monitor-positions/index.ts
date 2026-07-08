@@ -161,8 +161,9 @@ async function monitorPositions() {
          }).eq('id', pos.id);
          results.updated++;
       }
-    } catch (err: any) {
-       console.error(`Error monitoring ${pos.ticker}:`, err.message);
+    } catch (err) {
+       const message = err instanceof Error ? err.message : String(err);
+       console.error(`Error monitoring ${pos.ticker}:`, message);
     }
   });
 
@@ -174,7 +175,8 @@ serve(async (req) => {
   try {
     const result = await monitorPositions();
     return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
-  } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({ error: message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 });
   }
 });

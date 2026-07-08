@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
 import clsx from 'clsx';
 import { ShieldCheck, AlertTriangle } from 'lucide-react';
+import type { PaperHistory } from '../../types/dashboard';
 
 interface RiskAnalyticsPanelProps {
-  history: any[];
-  strategyStats: any;
+  history: PaperHistory[];
+  strategyStats: unknown;
 }
 
 function stddev(values: number[]): number {

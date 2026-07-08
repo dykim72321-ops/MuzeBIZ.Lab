@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Loader2, PlayCircle, BarChart3, TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import clsx from 'clsx';
 import {
@@ -33,8 +33,8 @@ export const BacktestPanel = () => {
     try {
       const res = await runBacktest(params);
       setResult(res);
-    } catch (e: any) {
-      setError(e.message || '백테스트 실행 실패');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '백테스트 실행 실패');
     } finally {
       setLoading(false);
     }
@@ -213,8 +213,8 @@ export const BacktestPanel = () => {
                     <YAxis stroke="#94a3b8" fontSize={9} tickLine={false} axisLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
                     <Tooltip
                       contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '11px' }}
-                      formatter={(v: any) => [`$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, '자산']}
-                      labelFormatter={(l: any) => `Trade #${l}`}
+                      formatter={(v: number | undefined) => [`$${Number(v ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, '자산']}
+                      labelFormatter={(l: ReactNode) => `Trade #${l}`}
                     />
                     <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#btColorValue)" dot={false} />
                   </AreaChart>

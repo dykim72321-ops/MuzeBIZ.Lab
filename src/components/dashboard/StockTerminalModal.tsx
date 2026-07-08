@@ -190,7 +190,7 @@ const PriceTrajectoryChart = ({
                         labelFormatter={(label) => {
                             try { return new Date(label).toLocaleDateString('ko-KR'); } catch { return ''; }
                         }}
-                        formatter={(value: any) => [`$${Number(value).toFixed(4)}`, '가격']}
+                        formatter={(value: number | undefined) => [`$${Number(value ?? 0).toFixed(4)}`, '가격']}
                     />
                     {/* 매수가 기준선 */}
                     {buyPrice && buyPrice > 0 && (
@@ -330,7 +330,7 @@ interface StockTerminalModalProps {
         efficiencyRatio?: number;
         targetPrice?: number;
         stopPrice?: number;
-        quantData?: any;
+        quantData?: unknown;
         matchedLegend?: { ticker: string; similarity: number };
         quantSummary?: string;
         // ── 실측 데이터 확장 필드 ────────────────────────────────

@@ -79,7 +79,7 @@ function calculateDynamicDnaScore(
 /**
  * 3. [Webhook] Send alert to Discord
  */
-async function sendDiscordWebhook(url: string, payload: any) {
+async function sendDiscordWebhook(url: string, payload: Record<string, unknown>) {
   try {
     await fetch(url, {
       method: 'POST',
@@ -111,7 +111,7 @@ async function fetchHistory(ticker: string): Promise<Candle[] | null> {
   return timestamps.map((ts: number, i: number) => ({
     date: new Date(ts * 1000).toISOString().split('T')[0],
     open: opens[i], high: highs[i], low: lows[i], close: closes[i], volume: volumes[i] || 0
-  })).filter((c: any) => c.close != null && c.open != null && c.high != null && c.low != null);
+  })).filter((c: Candle) => c.close != null && c.open != null && c.high != null && c.low != null);
 }
 
 async function fetchNews(ticker: string): Promise<string[]> {
@@ -119,7 +119,7 @@ async function fetchNews(ticker: string): Promise<string[]> {
   const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!res.ok) return [];
   const data = await res.json();
-  return (data.news || []).map((item: any) => `${item.title}: ${item.publisher}`).slice(0, 5);
+  return (data.news || []).map((item: { title: string; publisher: string }) => `${item.title}: ${item.publisher}`).slice(0, 5);
 }
 
 async function analyzeSentiment(ticker: string, news: string[]): Promise<{ decision: 'PASS' | 'FAIL', reasoning: string }> {
@@ -307,9 +307,10 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, signals_found: signals.length, data: signals }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-  } catch (error: any) {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error('[SCANNER] Critical Error:', error);
-    await sendDiscordNotification(`Critical Error during scan: ${error.message}`, 'ERROR');
-    return new Response(JSON.stringify({ error: error.message }), { status: 400, headers: corsHeaders });
+    await sendDiscordNotification(`Critical Error during scan: ${message}`, 'ERROR');
+    return new Response(JSON.stringify({ error: message }), { status: 400, headers: corsHeaders });
   }
 })

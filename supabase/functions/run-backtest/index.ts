@@ -54,6 +54,23 @@ function calculateDNATargets(entryPrice: number, atr: number, daysHeld: number =
   return { targetPrice, stopPrice, effectiveATR };
 }
 
+interface Candle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+interface Position {
+  entryPrice: number;
+  atr: number;
+  daysHeld: number;
+  amount: number;
+  highestHigh: number;
+}
+
 async function fetchHistory(ticker: string, period: string) {
   const range = period === '1y' ? '1y' : '2y';
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=${range}`;
@@ -72,7 +89,7 @@ async function fetchHistory(ticker: string, period: string) {
   return timestamps.map((ts: number, i: number) => ({
     date: new Date(ts * 1000).toISOString().split('T')[0],
     open: opens[i], high: highs[i], low: lows[i], close: closes[i], volume: volumes[i] || 0
-  })).filter((c: any) => c.close != null && c.open != null && c.high != null && c.low != null);
+  })).filter((c: Candle) => c.close != null && c.open != null && c.high != null && c.low != null);
 }
 
 serve(async (req: Request) => {
@@ -115,10 +132,10 @@ serve(async (req: Request) => {
     let balance = initial_capital;
     let peakBalance = initial_capital;
     let maxDrawdown = 0;
-    const trades = [];
-    let position: any = null;
+    const trades: { result: string; pnl_pct: number }[] = [];
+    let position: Position | null = null;
     let pendingEntry = false;
-    const chart_data: any[] = [];
+    const chart_data: { date: string; strategy: number; benchmark: number }[] = [];
 
     for (let i = 20; i < candles.length; i++) {
       const current = candles[i];
@@ -167,10 +184,10 @@ serve(async (req: Request) => {
       }
 
       const change = ((current.close - prev.close) / prev.close) * 100;
-        const avgVol10 = candles.slice(i-10, i).reduce((sum: number, c: any) => sum + c.volume, 0) / 10;
+        const avgVol10 = candles.slice(i-10, i).reduce((sum: number, c: Candle) => sum + c.volume, 0) / 10;
       const score = calculateDnaScore(current.close, change, current.volume, avgVol10);
       const rvol = current.volume / Math.max(1, avgVol10);
-      const sma20 = candles.slice(i-20, i).reduce((sum: number, c: any) => sum + c.close, 0) / 20;
+      const sma20 = candles.slice(i-20, i).reduce((sum: number, c: Candle) => sum + c.close, 0) / 20;
 
       if (!position && score >= 80 && rvol > 2.0 && current.close > sma20) pendingEntry = true;
 
@@ -204,7 +221,8 @@ serve(async (req: Request) => {
     }, { onConflict: 'ticker,period' });
 
     return new Response(JSON.stringify(resultJson), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-  } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: corsHeaders });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ error: message }), { status: 400, headers: corsHeaders });
   }
 })

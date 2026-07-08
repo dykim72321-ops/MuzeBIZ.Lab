@@ -17,38 +17,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import ta
-from numba import njit
 
 
 # ── DNA Signal Engine (DataFrame 버전) ────────────────────────────────────────
-
-
-@njit(fastmath=True)
-def safe_rolling_percentile_numba(arr, window_size):
-    """
-    C-Type 레벨에서 분모 0 및 윈도우 부족 예외를 완벽 차단한 비모수 백분위수 연산 엔진
-    """
-    n = len(arr)
-    result = np.full(n, np.nan)
-
-    if window_size <= 1 or n < window_size:
-        return result
-
-    denom = float(window_size - 1)
-    for i in range(window_size - 1, n):
-        window = arr[i - window_size + 1 : i + 1]
-        current_val = arr[i]
-
-        if np.max(window) == np.min(window):
-            result[i] = 0.5
-            continue
-
-        less_count = 0
-        for j in range(window_size):
-            if window[j] < current_val:
-                less_count += 1
-        result[i] = float(less_count) / denom
-    return result
 
 
 def calculate_advanced_signals(
@@ -110,13 +81,6 @@ def calculate_advanced_signals(
         | (df["Close"] > df["Close"].shift(1) * 1.25)
         | (df["Close"] > ma20 * 1.30)
     )
-
-    # ── Kaufman Efficiency Ratio (ER) ──────────────────────────────────────────
-    er_lookback = 10
-    change = df["Close"].diff(er_lookback).abs()
-    volatility = df["Close"].diff(1).abs().rolling(window=er_lookback).sum()
-    df["ER"] = change / (volatility + 1e-8)
-    df["smoothed_er"] = df["ER"].ewm(span=15, adjust=False).mean()
 
     score = pd.Series(50.0, index=df.index)
 
@@ -188,37 +152,11 @@ def calculate_advanced_signals(
     # 이미 소진된 급등(RSI≥70)은 진입 직후 되돌림에 걸려 Trailing Stop을 유발하므로 차단
     is_not_overbought = df["RSI"] < 70.0
 
-    lookback = 60
-    # Numba 주입을 위한 NumPy 고속 차원 정렬
-    rsi_array = df["RSI"].to_numpy()
-    rvol_array = df["RVOL"].to_numpy()
-
-    # 랭킹 데이터 생성 및 매핑
-    df["rsi_rank"] = safe_rolling_percentile_numba(rsi_array, lookback)
-    df["rvol_rank"] = safe_rolling_percentile_numba(rvol_array, lookback)
-
-    # 불안정한 Z-Score 대신 통계적 백분위수 랭크를 조건문에 직접 대입
-    # tier1/tier2/tier_penny와 동일한 안전장치(과매수 상한·급등 제외·추세강도)를
-    # 반드시 함께 요구한다 — 그렇지 않으면 lookback 윈도우 전체가 과매수 상태였던
-    # 종목도 "상대적으로 낮은 5% 구간"이라는 이유만으로 매수 신호가 발생한다.
-    numba_strong_buy = (
-        (df["rsi_rank"] <= 0.05)  # 과거 lookback 기간 중 하위 5% 극단적 과매도
-        & (df["rvol_rank"] >= 0.95)  # 과거 lookback 기간 중 상위 5% 거래량 폭증
-        & (df["MACD_Line"] > df["MACD_Signal"])  # 골든크로스 조건 유지
-        & is_not_overbought  # RSI 절대값 과매수 상한 게이트 (동일 적용)
-        & (~df["Is_Extended"])  # 당일 급등(펌프) 종목 제외 (동일 적용)
-        & (df["ADX"] > 20)  # 추세 강도 최소 기준 (동일 적용)
-    )
-
     is_penny = df["Close"] <= 1.0
     tier1 = (~is_penny) & (df["DNA_Score"] >= 80.0)
     tier2 = (~is_penny) & (df["DNA_Score"] >= 75.0) & (df["RVOL"] > 1.5)
     tier_penny = is_penny & (df["DNA_Score"] >= 65.0)
-
-    # 기존 전략(DNA)과 새로운 Numba 과매도 포착 전략을 병합 (Or 조건)
-    df["Strong_Buy"] = (
-        (tier1 | tier2 | tier_penny) & is_not_overbought
-    ) | numba_strong_buy.fillna(False)
+    df["Strong_Buy"] = (tier1 | tier2 | tier_penny) & is_not_overbought
     df["Strong_Sell"] = df["DNA_Score"] <= 40.0
 
     return df

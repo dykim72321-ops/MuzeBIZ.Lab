@@ -3,6 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 import { Globe, ShieldCheck, TrendingUp } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { IntelData } from '../../types/muzepart';
 
 interface MarketIntelProps {
@@ -50,7 +51,7 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
                         stroke="#ffffff"
                         strokeWidth={2}
                       >
-                        {intelData.inventoryData.map((_entry: any, index: number) => (
+                        {intelData.inventoryData.map((_entry: { name: string; value: number }, index: number) => (
                           <Cell key={`cell-${index}`} fill={['#3b82f6', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#6366f1', '#ec4899', '#f97316'][index % 9]} />
                         ))}
                       </Pie>
@@ -74,7 +75,7 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
                 
                 <div className="flex-1 h-full overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-50 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300 transition-colors">
                   <div className="flex flex-col gap-2.5 justify-center min-h-full py-2">
-                    {intelData.inventoryData.map((entry: any, index: number) => {
+                    {intelData.inventoryData.map((entry: { name: string; value: number }, index: number) => {
                       const color = ['#3b82f6', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#06b6d4', '#6366f1', '#ec4899', '#f97316'][index % 9];
                       return (
                         <div key={index} className="flex items-center gap-2 group/legend cursor-default">
@@ -122,10 +123,10 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
                       <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]" />
                       재고 부족 <span className="text-slate-400 font-medium text-[10px] ml-1">(High Risk)</span>
                     </span>
-                    <span className="text-slate-600 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100 shadow-sm">{intelData.riskData.find((d: any) => d.name === 'High')?.value || 0} 판매처</span>
+                    <span className="text-slate-600 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100 shadow-sm">{intelData.riskData.find((d: { name: string; value: number }) => d.name === 'High')?.value || 0} 판매처</span>
                   </div>
                   <div className="h-3 bg-slate-100/80 rounded-full overflow-hidden border border-slate-200/50 shadow-inner p-[1px]">
-                    <div className="h-full bg-gradient-to-r from-rose-500 to-rose-400 rounded-full shadow-[0_0_12px_rgba(244,63,94,0.6)] transition-all duration-1000 ease-out" style={{ width: `${((intelData.riskData.find((d: any) => d.name === 'High')?.value || 0) / Math.max(1, resultsCount)) * 100}%` }} />
+                    <div className="h-full bg-gradient-to-r from-rose-500 to-rose-400 rounded-full shadow-[0_0_12px_rgba(244,63,94,0.6)] transition-all duration-1000 ease-out" style={{ width: `${((intelData.riskData.find((d: { name: string; value: number }) => d.name === 'High')?.value || 0) / Math.max(1, resultsCount)) * 100}%` }} />
                   </div>
                 </div>
                 <div className="relative group/bar">
@@ -134,10 +135,10 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
                       재고 한정 <span className="text-slate-400 font-medium text-[10px] ml-1">(Medium Risk)</span>
                     </span>
-                    <span className="text-slate-600 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100 shadow-sm">{intelData.riskData.find((d: any) => d.name === 'Medium')?.value || 0} 판매처</span>
+                    <span className="text-slate-600 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100 shadow-sm">{intelData.riskData.find((d: { name: string; value: number }) => d.name === 'Medium')?.value || 0} 판매처</span>
                   </div>
                   <div className="h-3 bg-slate-100/80 rounded-full overflow-hidden border border-slate-200/50 shadow-inner p-[1px]">
-                    <div className="h-full bg-gradient-to-r from-amber-400 to-yellow-400 rounded-full shadow-[0_0_12px_rgba(251,191,36,0.6)] transition-all duration-1000 ease-out" style={{ width: `${((intelData.riskData.find((d: any) => d.name === 'Medium')?.value || 0) / Math.max(1, resultsCount)) * 100}%` }} />
+                    <div className="h-full bg-gradient-to-r from-amber-400 to-yellow-400 rounded-full shadow-[0_0_12px_rgba(251,191,36,0.6)] transition-all duration-1000 ease-out" style={{ width: `${((intelData.riskData.find((d: { name: string; value: number }) => d.name === 'Medium')?.value || 0) / Math.max(1, resultsCount)) * 100}%` }} />
                   </div>
                 </div>
                 <div className="relative group/bar">
@@ -146,10 +147,10 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
                       재고 안정 <span className="text-slate-400 font-medium text-[10px] ml-1">(Low Risk)</span>
                     </span>
-                    <span className="text-slate-600 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100 shadow-sm">{intelData.riskData.find((d: any) => d.name === 'Low')?.value || 0} 판매처</span>
+                    <span className="text-slate-600 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100 shadow-sm">{intelData.riskData.find((d: { name: string; value: number }) => d.name === 'Low')?.value || 0} 판매처</span>
                   </div>
                   <div className="h-3 bg-slate-100/80 rounded-full overflow-hidden border border-slate-200/50 shadow-inner p-[1px]">
-                    <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.6)] transition-all duration-1000 ease-out" style={{ width: `${((intelData.riskData.find((d: any) => d.name === 'Low')?.value || 0) / Math.max(1, resultsCount)) * 100}%` }} />
+                    <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.6)] transition-all duration-1000 ease-out" style={{ width: `${((intelData.riskData.find((d: { name: string; value: number }) => d.name === 'Low')?.value || 0) / Math.max(1, resultsCount)) * 100}%` }} />
                   </div>
                 </div>
               </>
@@ -213,11 +214,11 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
                           padding: '8px 12px'
                         }}
                         itemStyle={{ color: '#334155', fontWeight: 'bold' }}
-                        formatter={(value: any, _name: any, props: any) => [
-                          `${Number(value).toLocaleString()} ${props.payload?.currency || 'USD'}`, 'Unit Price'
+                        formatter={(value: number | undefined, _name, props: { payload?: { currency?: string } }) => [
+                          `${Number(value ?? 0).toLocaleString()} ${props.payload?.currency || 'USD'}`, 'Unit Price'
                         ]}
-                        labelFormatter={(label: any) => {
-                          const item = intelData.priceData.find((d: any) => d.name === label);
+                        labelFormatter={(label: ReactNode) => {
+                          const item = intelData.priceData.find((d: { name: string }) => d.name === label);
                           return item?.fullName || String(label);
                         }}
                       />

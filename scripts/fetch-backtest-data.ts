@@ -20,6 +20,19 @@ const TICKERS = [
 
 const OUTPUT_DIR = path.join(__dirname, '../data/backtest');
 
+interface YahooChartQuote {
+  date: Date;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  volume: number | null;
+}
+
+interface YahooChartResult {
+  quotes: YahooChartQuote[];
+}
+
 async function downloadData() {
   if (!fs.existsSync(OUTPUT_DIR)) {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -31,13 +44,13 @@ async function downloadData() {
   for (const ticker of TICKERS) {
     console.log(`[DOWNLOAD] Fetching ${ticker} from Yahoo Finance...`);
     try {
-      const result = await (yahooFinance as any).chart(ticker, {
+      const result = await yahooFinance.chart(ticker, {
         period1,
         interval: '1d'
-      }) as any;
+      }) as YahooChartResult;
 
       if (result && result.quotes && result.quotes.length > 0) {
-        const candles = result.quotes.map((q: any) => ({
+        const candles = result.quotes.map((q: YahooChartQuote) => ({
           date: q.date.toISOString(),
           open: q.open,
           high: q.high,

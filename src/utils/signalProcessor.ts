@@ -20,19 +20,49 @@ export interface DisplaySignal {
 }
 
 /**
+ * processSignal의 입력은 WebSocket PulseData, DB Stock row, 혹은 알 수 없는 형식 중
+ * 하나일 수 있어 모든 필드를 optional로 둔 느슨한 형태로 표현한다.
+ */
+interface RawSignalData {
+  ticker?: string;
+  ai_metadata?: {
+    dna_score?: number;
+    bull_case?: string;
+    bear_case?: string;
+    reasoning_ko?: string;
+    tags?: string[];
+  };
+  ai_report?: string;
+  price?: number;
+  rsi?: number;
+  strength?: 'STRONG' | 'NORMAL';
+  signal?: string;
+  dnaScore?: number;
+  dna_score?: number;
+  stock_analysis_cache?: { analysis?: { bullCase?: string[] | string; bearCase?: string[] | string; aiSummary?: string } }[];
+  rawAiSummary?: string;
+  sector?: string;
+  changePercent?: number;
+  rrRatio?: number;
+  targetPrice?: number;
+  stopPrice?: number;
+}
+
+/**
  * processSignal
  * 다양한 데이터 형식을 DisplaySignal 포맷으로 변환하는 통합 프로세서
  */
-export const processSignal = (data: any): DisplaySignal => {
+export const processSignal = (raw: unknown): DisplaySignal => {
+  const data = raw as RawSignalData;
   // 1. WebSocket PulseData 형식 (ai_metadata 또는 ai_report 존재 시)
   if (data.ai_metadata || data.ai_report) {
     return {
-      ticker: data.ticker,
+      ticker: data.ticker || 'Unknown',
       dnaScore: data.ai_metadata?.dna_score || 50,
       bullPoints: data.ai_metadata?.bull_case ? [data.ai_metadata.bull_case] : ["데이터 분석 중..."],
       bearPoints: data.ai_metadata?.bear_case ? [data.ai_metadata.bear_case] : ["데이터 분석 중..."],
       reasoning: data.ai_metadata?.reasoning_ko || data.ai_report || "상세 분석 내용이 없습니다.",
-      tags: data.ai_metadata?.tags || [data.ticker, data.signal],
+      tags: data.ai_metadata?.tags || [data.ticker || 'Unknown', data.signal || ''],
       price: data.price,
       rsi: data.rsi,
       strength: data.strength,
@@ -85,7 +115,7 @@ export const processSignal = (data: any): DisplaySignal => {
     }
 
     return {
-      ticker: data.ticker,
+      ticker: data.ticker || 'Unknown',
       dnaScore,
       bullPoints,
       bearPoints,

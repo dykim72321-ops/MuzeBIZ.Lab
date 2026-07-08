@@ -42,6 +42,7 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
+  const connectRef = useRef<() => void>(() => {});
 
   const connect = useCallback(() => {
     if (!isMountedRef.current) return;
@@ -120,17 +121,24 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
         retryCountRef.current += 1;
         console.warn(`⚠️ Pulse WS disconnected — retry #${retryCountRef.current} in ${delay / 1000}s`);
 
-        retryTimerRef.current = setTimeout(connect, delay);
+        retryTimerRef.current = setTimeout(() => connectRef.current(), delay);
       };
 
       socketRef.current = ws;
-    } catch (e: any) {
-      setError(e.message || 'Failed to initialize WebSocket');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to initialize WebSocket');
     }
   }, [url]);
 
   useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
+
+  useEffect(() => {
     isMountedRef.current = true;
+    // connect()는 WebSocket을 열고 콜백을 등록할 뿐, 이 호출 프레임에서 동기적으로
+    // setState를 실행하지 않는다 (상태 변경은 모두 비동기 ws.onopen/onclose 콜백에서 발생).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     connect();
 
     return () => {

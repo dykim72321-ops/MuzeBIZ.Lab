@@ -63,8 +63,9 @@ serve(async (req) => {
           }
           needsPriceRefresh = false
         }
-      } catch (err: any) {
-        console.warn(`Finnhub fetch failed for ${ticker}:`, err.message)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.warn(`Finnhub fetch failed for ${ticker}:`, message)
       }
     }
 
@@ -101,8 +102,9 @@ serve(async (req) => {
         } else {
           console.warn(`Alpha Vantage Overview failed for ${ticker} (Rate limited?)`, ovRaw)
         }
-      } catch (err: any) {
-        console.error(`Alpha Vantage error for ${ticker}:`, err.message)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error(`Alpha Vantage error for ${ticker}:`, message)
       }
     }
 
@@ -132,8 +134,9 @@ serve(async (req) => {
       status: 200,
     })
 
-  } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return new Response(JSON.stringify({ error: message }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 500,
     })

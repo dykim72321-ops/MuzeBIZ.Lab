@@ -353,7 +353,7 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
         if (res.ok) {
           const json = await res.json();
           const batchResults = json?.quoteResponse?.result || [];
-          batchResults.forEach((item: any) => {
+          batchResults.forEach((item: { symbol?: string; regularMarketPreviousClose?: number; regularMarketVolume?: number }) => {
             if (!item.symbol) return;
             if (item.regularMarketPreviousClose) {
               prevCloseMap[item.symbol] = item.regularMarketPreviousClose;
@@ -389,9 +389,9 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
 
         const price = alpacaData.last_price;
         let changePercent = 0;
-        let prevClose = prevCloseCache.get(ticker)?.value ?? prevCloseMap[ticker] ?? 0;
+        const prevClose = prevCloseCache.get(ticker)?.value ?? prevCloseMap[ticker] ?? 0;
         // Yahoo 전체 시장 거래량(IEX 샘플보다 정확) → RVOL 계산 정확도 향상
-        let volume = yahooVolumeMap[ticker] ?? alpacaData.volume;
+        const volume = yahooVolumeMap[ticker] ?? alpacaData.volume;
 
         if (prevClose > 0) {
           changePercent = ((price - prevClose) / prevClose) * 100;
@@ -446,7 +446,7 @@ async function fetchAlpacaQuotesEnriched(tickers: string[]): Promise<Stock[]> {
 
         if (sigResult.data) {
           validStocks.forEach(stock => {
-            const match = sigResult.data!.find((sig: any) => sig.ticker === stock.ticker);
+            const match = sigResult.data!.find((sig: { ticker: string }) => sig.ticker === stock.ticker);
             if (match) {
               stock.rsi = match.rsi ?? undefined;
               stock.macdDiff = match.macd_diff ?? undefined;
@@ -485,7 +485,9 @@ export async function fetchStockQuote(ticker: string, historyRange?: string): Pr
         try {
           const hist = await fetchStockHistory(ticker, '1m', 30);
           alpacaStock.history = hist;
-        } catch {}
+        } catch {
+          // history is a nice-to-have; ignore failures and return the quote without it
+        }
       }
       cache.set(ticker, { data: alpacaStock, timestamp: Date.now() });
       return alpacaStock;
@@ -692,7 +694,7 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
 
     if (analysisCacheResult.data) {
       results.forEach(stock => {
-        const cacheEntries = analysisCacheResult.data!.filter((c: any) => c.ticker === stock.ticker);
+        const cacheEntries = analysisCacheResult.data!.filter((c: { ticker: string }) => c.ticker === stock.ticker);
         if (cacheEntries.length > 0) {
           stock.stock_analysis_cache = cacheEntries;
         }
@@ -712,7 +714,7 @@ export async function fetchMultipleStocksOptimized(tickers: string[], historyRan
 
     if (signalResult.data) {
       results.forEach(stock => {
-        const match = signalResult.data!.find((sig: any) => sig.ticker === stock.ticker);
+        const match = signalResult.data!.find((sig: { ticker: string }) => sig.ticker === stock.ticker);
         if (match) {
           stock.rsi = match.rsi ?? undefined;
           stock.macdDiff = match.macd_diff ?? undefined;
@@ -826,7 +828,7 @@ export async function fetchStockHistory(ticker: string, resolution: string = 'D'
           console.error(`🔴 [Finnhub] API Key Invalid or Exhausted (403). Switching to fallback mode.`);
           isFinnhubExhausted = true; // Trip the circuit breaker
         }
-      } catch (e) {
+      } catch {
         console.warn(`[Finnhub] Fetch failed for ${ticker}`);
       }
     }
@@ -846,7 +848,7 @@ export async function fetchStockHistory(ticker: string, resolution: string = 'D'
           history = timestamps.map((ts: number, index: number) => ({
             date: new Date(ts * 1000).toISOString(),
             price: closes[index]
-          })).filter((item: any) => item.price !== null && item.price !== undefined);
+          })).filter((item: { price: number | null | undefined }) => item.price !== null && item.price !== undefined);
           console.log(`✅ [Yahoo History Proxy] Loaded ${history.length} points for ${ticker}`);
         }
       }

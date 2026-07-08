@@ -42,9 +42,9 @@ export const CommandSettings: React.FC = () => {
           description: '안전 모드 전환. 스캐닝은 계속되지만 매매는 실행되지 않습니다.',
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       toast.error('ARM 전환 실패', {
-        description: err.message || '백엔드 연결을 확인하세요.',
+        description: err instanceof Error ? err.message : '백엔드 연결을 확인하세요.',
       });
     } finally {
       setIsTogglingArm(false);
@@ -91,9 +91,9 @@ export const CommandSettings: React.FC = () => {
       toast.success('📨 테스트 메시지 전송 완료', {
         description: 'Discord 채널에서 테스트 알림을 확인하세요.',
       });
-    } catch (error: any) {
+    } catch (error) {
       toast.error('Webhook 테스트 실패', {
-        description: error?.message || 'Webhook URL을 먼저 저장한 후 테스트하세요.',
+        description: error instanceof Error ? error.message : 'Webhook URL을 먼저 저장한 후 테스트하세요.',
       });
     } finally {
       setIsTesting(false);

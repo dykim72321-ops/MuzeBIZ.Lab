@@ -21,3 +21,4 @@ scikit-learn
 tzdata
 pandas_market_calendars
 playwright
+numba>=0.59.0

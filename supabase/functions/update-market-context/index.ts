@@ -12,7 +12,6 @@ serve(async (req) => {
   }
 
   try {
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     const NEWS_API_KEY = Deno.env.get('NEWS_API_KEY');
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -22,20 +21,17 @@ serve(async (req) => {
     }
 
     // 1. Fetch Top Headlines (Politics, Business)
-    let newsText = "";
     let sourceCount = 0;
-    
+
     // Fallback news if no API key provided (Dev mode)
     if (!NEWS_API_KEY) {
        console.warn("No NEWS_API_KEY provided. Using mock news data.");
-       newsText = "The Federal Reserve is signaling interest rate cuts later this year as inflation cools. Tech stocks are rallying on AI optimism. Geopolitical tensions in the Middle East remain high, affecting oil prices.";
        sourceCount = 3;
     } else {
        try {
           const newsResponse = await fetch(`https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey=${NEWS_API_KEY}`);
           const newsData = await newsResponse.json();
           if (newsData.articles) {
-             newsText = newsData.articles.slice(0, 10).map((a: any) => `- ${a.title}: ${a.description || ''}`).join('\n');
              sourceCount = newsData.articles.length;
           }
        } catch (err) {
@@ -64,7 +60,8 @@ serve(async (req) => {
       status: 200,
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({ error: message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
     });

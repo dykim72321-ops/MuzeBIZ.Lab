@@ -18,8 +18,19 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // Default tickers if none provided
 const DEFAULT_TICKERS = ['SNDL', 'MULN', 'IDEX', 'ZOM', 'FCEL', 'OCGN', 'BNGO', 'CTXR'];
 
+interface Quote {
+  price: number;
+  ask?: number;
+  bid?: number;
+  high?: number;
+  volume?: number;
+  changePercent?: number;
+  relativeVolume?: number;
+  sector?: string;
+}
+
 // Webhook 전송 함수 (Discord 또는 Slack 사용 예시)
-async function sendTradeAlert(ticker: string, analysis: any, quote: any) {
+async function sendTradeAlert(ticker: string, analysis: ReturnType<typeof generateLiveRuleBasedAnalysis>, quote: Quote) {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL; // .env.local에 추가 필요
   if (!webhookUrl) return;
 
@@ -53,7 +64,7 @@ async function sendTradeAlert(ticker: string, analysis: any, quote: any) {
 }
 
 // 🧠 실전용 로컬 룰베이스 퀀트 엔진 (Bid/Ask & 슬리피지 반영)
-function generateLiveRuleBasedAnalysis(quote: any) {
+function generateLiveRuleBasedAnalysis(quote: Quote) {
   const price = quote.price || 0;
   // API에서 Bid/Ask를 제공하지 않을 경우를 대비한 Fallback (실제 API 연동 시 필수 확인)
   const bid = quote.bid || price * 0.99; 
@@ -125,7 +136,7 @@ async function masterAnalysis(ticker: string) {
   try {
     // Stage 1: Sensing (Fetching rich market data)
     console.log(`   📡 Stage 1: Sensing... (Fetching market data for ${ticker})`);
-    const { data: quote, error: quoteError } = await (supabase.functions as any).invoke('smart-quote', {
+    const { data: quote, error: quoteError } = await supabase.functions.invoke('smart-quote', {
       body: { ticker }
     });
 
@@ -178,8 +189,8 @@ async function masterAnalysis(ticker: string) {
 
     return { ticker, status: 'PASSED', analysis };
 
-  } catch (err: any) {
-    console.error(`   ❌ Error analyzed ${ticker}:`, err.message);
+  } catch (err) {
+    console.error(`   ❌ Error analyzed ${ticker}:`, err instanceof Error ? err.message : err);
     return null;
   }
 }

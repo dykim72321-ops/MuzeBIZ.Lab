@@ -132,30 +132,54 @@ def calculate_dynamic_kelly(paper_history_records, current_atr, current_price):
     return max(0.02, min(0.15, dynamic_fraction))
 
 
-def update_reversible_trailing_stop(
-    pos: dict, highest_price: float, atr_value: float, current_smoothed_er: float = 0.5
+def _compute_locked_floor(
+    entry_price: float, highest_price: float, is_penny: bool
 ) -> float:
     """
-    스탑로스 하향 조정 리스크(자산 폭락 위험)를 0%로 통제하면서
-    단기 노이즈에 의한 휩쏘 청산 트랩을 분리한 생산용 스탑 엔진
-    """
-    # 1분봉의 순간적 횡보 소음에 반응하지 않도록
-    # MTFCache 수준(15분 윈도우)에서 완만하게 스무딩된 추세 효율성(ER) 반영
-    # 필터링된 ER이 높을수록 강세 레짐(스탑 타이트), 낮을수록 횡보 레짐(스탑 여유)
-    smoothed_er = current_smoothed_er
+    비가역(monotonic) 리스크 방어 하한선.
 
+    - 정적 초기 스탑(퍼센트 기반)은 항상 최저 방어선으로 유지된다.
+    - 페니 종목이 +10%(PENNY_BREAKEVEN_TRIGGER) 이상 도달한 이력이 있으면 본전(entry_price)
+      으로 영구 락인된다. highest_price는 호출부에서 이미 max()로 단조 갱신되므로,
+      이 락인 여부를 별도 상태(DB 컬럼/플래그) 없이 highest_price만으로 파생할 수 있다.
+    """
+    init_pct = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
+    static_floor = entry_price * init_pct
+    if is_penny and highest_price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
+        return max(static_floor, entry_price)
+    return static_floor
+
+
+def update_reversible_trailing_stop(
+    entry_price: float,
+    highest_price: float,
+    atr_value: float,
+    current_smoothed_er: float,
+    is_penny: bool,
+) -> float:
+    """
+    가역적(reversible) 스위칭 트레일링 스탑.
+
+    '적응형(soft)' 스탑과 '락인(hard floor)' 스탑을 분리한다:
+      - 적응형 구간(highest_price - k_t*ATR)은 smoothed_er 레짐에 따라 k_t가 변하며
+        실제로 오르내릴 수 있다 — 추세 레짐(er↑)에서는 k_t가 작아져 타이트하게 조이고,
+        횡보 레짐(er↓) 진입 시에는 k_t가 커져 스탑이 다시 느슨해진다. 이것이 없으면
+        "가역적"이라는 이름이 무의미해진다 (단순 max() 래칫은 절대 되돌아가지 못함).
+      - 락인 구간(_compute_locked_floor)만 비가역적으로 유지되어, 이미 확보한
+        리스크 방어선(초기 스탑·페니 본전 락인)이 regime 변화로 침식되지 않도록 보장한다.
+
+    최종 스탑 = max(locked_floor, adaptive_stop):
+    락인 아래로는 절대 내려가지 않지만, 락인보다 위에서는 자유롭게 오르내린다.
+    """
     k_max = 3.0
     k_min = 1.2
 
     # 레짐 강도에 비례한 ATR 승수 결정
-    k_t = k_min + (k_max - k_min) * (1.0 - smoothed_er)
+    k_t = k_min + (k_max - k_min) * (1.0 - current_smoothed_er)
+    adaptive_stop = highest_price - (k_t * atr_value)
 
-    # 고점 기준 스탑 버퍼 계산
-    new_stop_loss = highest_price - (k_t * atr_value)
-
-    # 스탑로스는 리스크 관리의 절대 원칙상 절대로 직전보다 낮아져서는 안 됨 (하향 금지).
-    current_ts = pos.get("ts_threshold") or (pos["entry_price"] - (3.0 * atr_value))
-    return max(current_ts, new_stop_loss)
+    locked_floor = _compute_locked_floor(entry_price, highest_price, is_penny)
+    return max(locked_floor, adaptive_stop)
 
 
 class PaperTradingManager:
@@ -457,6 +481,7 @@ class PaperTradingManager:
         dna_score: float = 85.0,
         recommended_weight: float = 0.0,
         atr: float = 0.0,
+        smoothed_er: float = 0.5,
     ):
         """동일 티커에 대한 진입/청산이 겹쳐 실행되지 않도록 락으로 직렬화."""
         async with self._get_lock(ticker):
@@ -600,9 +625,13 @@ class PaperTradingManager:
             # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
             # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
             if recommended_weight <= 0:
+                # paper_history에는 pnl_pct만 실제로 존재한다 (pnl/buy_price/qty 컬럼 없음
+                # — 이전엔 존재하지 않는 컬럼을 select하여 42703 에러로 매 폴백마다 크래시했음).
                 res = await asyncio.to_thread(
                     self.supabase.table("paper_history")
-                    .select("pnl_pct, pnl, buy_price, qty")
+                    .select("pnl_pct")
+                    .order("closed_at", desc=True)
+                    .limit(50)
                     .execute
                 )
                 paper_history_records = res.data or []
@@ -816,17 +845,14 @@ class PaperTradingManager:
                     print(f"⚠️ [Time-Decay] {ticker}: {e}")
 
             # A. TS 업데이트 (가역적 스위칭 스탑 적용)
+            # atr<=0(데이터 부족 초기 구간)에도 동일 경로를 타도록 합성 ATR로 폴백한다.
+            # 이전에는 atr<=0 분기에서만 페니 본전 락인(PENNY_BREAKEVEN_TRIGGER)을 체크했는데,
+            # 실전에서는 atr>0이 상시 공급되므로 그 분기가 사실상 죽은 코드였다 — 통합으로 해결.
             if not is_scaled_out:
-                if atr > 0:
-                    ts_threshold = update_reversible_trailing_stop(
-                        pos, highest_price, atr, smoothed_er
-                    )
-                else:
-                    trail_pct = PENNY_TS_TRAIL_PCT if is_penny else TS_TRAIL_PCT
-                    new_ts = highest_price * trail_pct
-                    if is_penny and price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
-                        new_ts = max(new_ts, entry_price)
-                    ts_threshold = max(ts_threshold, new_ts)
+                effective_atr = atr if atr > 0 else (entry_price * 0.02)
+                ts_threshold = update_reversible_trailing_stop(
+                    entry_price, highest_price, effective_atr, smoothed_er, is_penny
+                )
             else:
                 # Scale-Out 후 물량: 이익 보전을 위해 TS_TRAIL_PCT로 타이트하게 조이거나 본절 유지
                 if atr > 0:

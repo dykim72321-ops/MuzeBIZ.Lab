@@ -28,7 +28,7 @@ export interface CrmContact {
   department?: string;
   position?: string;
   influence_level: InfluenceLevel;
-  preferences: Record<string, any>;
+  preferences: Record<string, unknown>;
   contact_history?: string;
   email?: string;
   phone?: string;

@@ -47,7 +47,7 @@ export interface Stock {
   };
   news?: { title: string; url: string; time_published: string }[];
   newsHeadlines?: string[]; // 🆕 Google News headlines
-  stock_analysis_cache?: { analysis: any }[]; // 🆕 AI Analysis Cache for deep-dives
+  stock_analysis_cache?: { analysis: unknown }[]; // 🆕 AI Analysis Cache for deep-dives
   rawAiSummary?: string; // Fallback text from daily_discovery
   history?: HistoricalDataPoint[];
   rsi?: number;

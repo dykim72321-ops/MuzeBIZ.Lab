@@ -2,7 +2,7 @@
 // Unified Smart Quote API - Optimal combination of Finnhub, Yahoo, Alpha Vantage
 // deno-lint-ignore-file
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const FINNHUB_API_KEY = Deno.env.get("FINNHUB_API_KEY")
 const ALPHA_VANTAGE_API_KEY = Deno.env.get("ALPHA_VANTAGE_API_KEY")
@@ -15,8 +15,6 @@ const corsHeaders = {
 }
 
 // Cache TTLs
-const PRICE_CACHE_TTL = 5 * 60 * 1000;      // 5 minutes
-const ANALYST_CACHE_TTL = 30 * 60 * 1000;   // 30 minutes
 const FINANCIAL_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 // Yahoo session cache
@@ -156,7 +154,7 @@ async function fetchYahooHistory(ticker: string, session: { cookie: string; crum
       volume: volumes[i] || 0,
       high: highs[i] || closes[i],
       low: lows[i] || closes[i]
-    })).filter((p: any) => p.price !== null && p.price !== undefined);
+    })).filter((p: { price: number | null | undefined }) => p.price !== null && p.price !== undefined);
   } catch (e) {
     console.warn(`[Yahoo History] Failed for ${ticker}:`, e);
     return null;
@@ -240,7 +238,7 @@ async function fetchGoogleNews(ticker: string) {
 }
 
 // 3. Alpha Vantage: Deep financials (use sparingly - 25/day limit)
-async function fetchAlphaFinancials(ticker: string, supabase: any) {
+async function fetchAlphaFinancials(ticker: string, supabase: SupabaseClient) {
   // Check cache first (24h TTL)
   const { data: cached } = await supabase
     .from('stock_cache')
@@ -328,7 +326,7 @@ serve(async (req) => {
     let session = null;
     try {
       session = await getYahooSession();
-    } catch (e) {
+    } catch {
       console.warn('[SmartQuote] Failed to get Yahoo session, history/analyst data may be limited');
     }
 
@@ -399,7 +397,7 @@ serve(async (req) => {
       const HAS_LIQUIDITY = absoluteLiquidity >= 500000; // Minimum $500k volume traded
       
       // 2. Short-term EMA calculation
-      const closePrices = finalHistory.map((h: any) => h.price);
+      const closePrices = finalHistory.map((h: { price: number }) => h.price);
       const ema3 = calculateEMA(closePrices, 3);
       const ema5 = calculateEMA(closePrices, 5);
       
@@ -498,9 +496,10 @@ serve(async (req) => {
       status: 200,
     });
 
-  } catch (error: any) {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error('Smart Quote Error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
     });

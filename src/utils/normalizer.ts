@@ -38,7 +38,7 @@ export function normalizeStockData(ticker: string, rawData: ExternalQuote, sourc
         normalized.volume = Number(rawData.v || 0);
         break;
 
-      case 'AlphaVantage':
+      case 'AlphaVantage': {
         const quote = rawData["Global Quote"];
         if (quote) {
           normalized.price = parseFloat(quote["05. price"] || '0');
@@ -46,6 +46,7 @@ export function normalizeStockData(ticker: string, rawData: ExternalQuote, sourc
           normalized.volume = parseInt(quote["06. volume"] || '0', 10);
         }
         break;
+      }
       
       // Prep for future Yahoo integration
       case 'Yahoo':

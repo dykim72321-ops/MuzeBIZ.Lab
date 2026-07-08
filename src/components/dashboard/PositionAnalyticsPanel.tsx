@@ -3,19 +3,21 @@ import clsx from 'clsx';
 import { PieChart } from 'lucide-react';
 import {
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
+  PieChart as RechartsPieChart,
+  Pie,
   Tooltip,
   Cell,
 } from 'recharts';
+import type { PaperPosition } from '../../types/dashboard';
 
 interface PositionAnalyticsPanelProps {
-  positions: any[];
+  positions: PaperPosition[];
   totalEquity: number;
 }
+const COLORS = [
+  '#1e3a8a', '#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', 
+  '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#0284c7', '#38bdf8', '#7dd3fc'
+];
 
 export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnalyticsPanelProps) => {
   const weightData = useMemo(() => {
@@ -60,33 +62,42 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
         {/* Weight Bar Chart */}
         <div>
           <span className="text-[10px] font-black text-blue-950 uppercase tracking-widest block mb-2">포트폴리오 비중 (%)</span>
-          <div className="h-40 w-full">
+          <div className="h-44 w-full relative">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weightData} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#bfdbfe" />
-                <XAxis dataKey="ticker" stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} />
-                <YAxis stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
+              <RechartsPieChart>
+                <Pie
+                  data={weightData}
+                  dataKey="weight"
+                  nameKey="ticker"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={75}
+                  paddingAngle={2}
+                  stroke="none"
+                >
+                  {weightData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
                 <Tooltip
                   contentStyle={{ background: '#ffffff', border: '2px solid #bfdbfe', borderRadius: '4px', fontSize: '11px', color: '#000000', fontWeight: 'bold' }}
-                  formatter={(v: any) => [`${Number(v).toFixed(2)}%`, '비중']}
+                  formatter={(v: number | undefined, name: string) => [`${Number(v ?? 0).toFixed(2)}%`, name]}
                 />
-                <Bar dataKey="weight" radius={[2, 2, 0, 0]}>
-                  {weightData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.isPenny ? '#0ea5e9' : '#1d4ed8'} />
-                  ))}
-                </Bar>
-              </BarChart>
+              </RechartsPieChart>
             </ResponsiveContainer>
           </div>
-          <div className="flex items-center gap-4 mt-2">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-[#0ea5e9]" />
-              <span className="text-[10px] font-black text-blue-900">페니주식</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm bg-[#1d4ed8]" />
-              <span className="text-[10px] font-black text-blue-900">일반주식</span>
-            </div>
+
+          {/* Custom Scrollable Legend */}
+          <div className="grid grid-cols-3 gap-x-2 gap-y-2 mt-4 max-h-24 overflow-y-auto pr-1 custom-scrollbar">
+            {weightData.map((entry, index) => (
+              <div key={entry.ticker} className="flex items-center gap-1.5 overflow-hidden">
+                <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                <span className="text-[10px] font-bold text-blue-950 truncate" title={`${entry.ticker} (${entry.weight}%)`}>
+                  {entry.ticker} <span className="text-blue-700">{entry.weight}%</span>
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 

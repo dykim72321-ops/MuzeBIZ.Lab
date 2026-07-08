@@ -61,11 +61,11 @@ serve(async (req) => {
     }
 
     // Read body if applicable
-    let body: any = null
+    let body: unknown = null
     if (method !== 'GET' && method !== 'HEAD') {
       try {
         body = await req.json()
-      } catch (e) {
+      } catch {
         // Fallback or ignore if no body
       }
     }
@@ -90,9 +90,10 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
-  } catch (error: any) {
-    console.error(`[AdminProxy] Critical Error: ${error.message}`)
-    return new Response(JSON.stringify({ error: error.message }), {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`[AdminProxy] Critical Error: ${message}`)
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

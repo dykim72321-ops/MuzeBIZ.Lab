@@ -155,7 +155,7 @@ export const useMuzepartSearch = () => {
       const data = await response.json();
       
       if (Array.isArray(data)) {
-        return data.map((item: any) => {
+        return data.map((item: ComponentPart) => {
           const baseP = item.price;
           return {
             ...item,
@@ -283,8 +283,8 @@ export const useMuzepartSearch = () => {
     }
 
     if (filterPackage !== 'all') {
-      filtered = filtered.filter(p => 
-        (p as any).package && (p as any).package.toLowerCase().includes(filterPackage.toLowerCase())
+      filtered = filtered.filter(p =>
+        p.specs?.package && p.specs.package.toLowerCase().includes(filterPackage.toLowerCase())
       );
     }
 
@@ -339,7 +339,7 @@ export const useMuzepartSearch = () => {
     });
     // Keys appearing in >= 20% of results
     return Object.entries(keysCount)
-      .filter(([_, count]) => count >= results.length * 0.2)
+      .filter(([, count]) => count >= results.length * 0.2)
       .map(([key]) => key);
   }, [results]);
 
@@ -363,9 +363,9 @@ export const useMuzepartSearch = () => {
         if (data.recent_logs) {
           setLogs(prev => [...prev.slice(-10), ...data.recent_logs]);
         }
-      } catch (err: any) {
+      } catch (err) {
         setIsBackendConnected(false);
-        setConnectionError(err.message);
+        setConnectionError(err instanceof Error ? err.message : String(err));
       }
     };
     
@@ -416,7 +416,7 @@ export const useMuzepartSearch = () => {
       } else {
         throw new Error('Lock failed');
       }
-    } catch (err) {
+    } catch {
       setResults(prev => prev.map(p => p.id === part.id ? { ...p, is_processing: false } : p));
       alert("Security protocol violation during lock sequence.");
     }
@@ -469,7 +469,7 @@ export const useMuzepartSearch = () => {
     itemsPerPage,
     uniqueDistributors,
     uniqueManufacturers: [...new Set(results.map(r => r.manufacturer))],
-    uniquePackages: [...new Set(results.map(r => (r as any).package || 'N/A'))].filter(p => p !== 'N/A'),
+    uniquePackages: [...new Set(results.map(r => r.specs?.package || 'N/A'))].filter(p => p !== 'N/A'),
     specKeys,
     specValues,
     dynamicFilters,

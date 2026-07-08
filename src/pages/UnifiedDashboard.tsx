@@ -20,6 +20,7 @@ import { DashboardControls } from '../components/dashboard/HeaderCommandBar';
 import { MetricsGrid } from '../components/dashboard/MetricsGrid';
 import { RiskAnalyticsPanel } from '../components/dashboard/RiskAnalyticsPanel';
 import { PositionAnalyticsPanel } from '../components/dashboard/PositionAnalyticsPanel';
+import type { PaperPosition, PaperHistory } from '../types/dashboard';
 
 const PENNY_ENGINE_THRESHOLD = 1.0;
 
@@ -250,7 +251,7 @@ export default function UnifiedDashboard() {
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '11px', color: '#0f172a', fontWeight: '500', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                         labelFormatter={(label, payload) => payload?.[0]?.payload?.name ?? label}
-                        formatter={(val: any) => [`$${Number(val).toLocaleString()}`, 'Total Assets']}
+                        formatter={(val: number | undefined) => [`$${Number(val ?? 0).toLocaleString()}`, 'Total Assets']}
                       />
                       <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" />
                     </ComposedChart>
@@ -288,10 +289,10 @@ export default function UnifiedDashboard() {
                     {livePositions.length === 0 ? (
                       <tr><td colSpan={7} className="py-16 text-center text-slate-600 text-sm font-bold bg-white">보유 포지션 없음</td></tr>
                     ) : (
-                      livePositions.map((pos: any) => {
+                      livePositions.map((pos: PaperPosition) => {
                         const hasPnl = pos.unrealized_pl != null;
-                        const isProfit = hasPnl && pos.unrealized_pl >= 0;
-                        const pnlPct = hasPnl ? pos.unrealized_plpc : 0;
+                        const isProfit = hasPnl && (pos.unrealized_pl ?? 0) >= 0;
+                        const pnlPct = hasPnl ? (pos.unrealized_plpc ?? 0) : 0;
                         const isHighTension = Math.abs(pnlPct) >= 5; // 5% 이상 변동 시 텐션
                         const dec = pos.isPenny ? 4 : 2;
                         return (
@@ -310,7 +311,7 @@ export default function UnifiedDashboard() {
                               ${pos.trailing_stop ? Number(pos.trailing_stop).toFixed(dec) : '-'}
                             </td>
                             <td className={clsx("py-4 px-5 text-right font-mono text-xs font-extrabold", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
-                              <span className="block">{hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl).toFixed(2)}` : '-'}</span>
+                              <span className="block">{hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl ?? 0).toFixed(2)}` : '-'}</span>
                               <span className="block text-[10px] mt-1">{hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}</span>
                             </td>
                             <td className="py-4 px-5 text-center">
@@ -333,10 +334,10 @@ export default function UnifiedDashboard() {
                   {livePositions.length === 0 ? (
                     <div className="py-12 text-center text-slate-600 text-sm font-bold bg-white">보유 포지션 없음</div>
                   ) : (
-                    livePositions.map((pos: any) => {
+                    livePositions.map((pos: PaperPosition) => {
                       const hasPnl = pos.unrealized_pl != null;
-                      const isProfit = hasPnl && pos.unrealized_pl >= 0;
-                      const pnlPct = hasPnl ? pos.unrealized_plpc : 0;
+                      const isProfit = hasPnl && (pos.unrealized_pl ?? 0) >= 0;
+                      const pnlPct = hasPnl ? (pos.unrealized_plpc ?? 0) : 0;
                       const isHighTension = Math.abs(pnlPct) >= 5;
                       const dec = pos.isPenny ? 4 : 2;
                       return (
@@ -349,7 +350,7 @@ export default function UnifiedDashboard() {
                             </div>
                             <div className="text-right">
                               <span className={clsx("text-sm font-mono font-extrabold block", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
-                                {hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl).toFixed(2)}` : '-'}
+                                {hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl ?? 0).toFixed(2)}` : '-'}
                               </span>
                               <span className={clsx("text-[11px] font-mono font-bold block mt-1", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
                                 {hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}
@@ -397,28 +398,37 @@ export default function UnifiedDashboard() {
                   <div className="text-center py-10 text-slate-600 text-xs font-bold">기록 없음</div>
                 ) : (
                   <div className="space-y-3">
-                    {liveHistory.slice(0, 30).map((trade: any, idx: number) => {
+                    {liveHistory.slice(0, 30).map((trade: PaperHistory, idx: number) => {
                       const isWin = Number(trade.profit_amt) >= 0;
                       return (
                         <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
                           <div>
-                            <span className="text-sm font-black text-black">{trade.ticker}</span>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-[10px] font-bold text-slate-600 font-mono">
-                                {new Date(trade.created_at).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}
-                              </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-black text-black">{trade.ticker}</span>
                               {trade.exit_reason && (
-                                <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-600 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{trade.exit_reason}</span>
+                                <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                  {trade.exit_reason}
+                                </span>
                               )}
                             </div>
+                            <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono text-slate-500">
+                              <span title="Entry Price">E: ${trade.entry_price < 1 ? Number(trade.entry_price).toFixed(4) : Number(trade.entry_price).toFixed(2)}</span>
+                              <span>→</span>
+                              <span title="Exit Price">X: ${trade.exit_price < 1 ? Number(trade.exit_price).toFixed(4) : Number(trade.exit_price).toFixed(2)}</span>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <span className={clsx("font-mono text-sm font-extrabold block", isWin ? "text-emerald-600" : "text-rose-600")}>
+                          <div className="text-right flex flex-col items-end">
+                            <span className={clsx("font-mono text-sm font-extrabold", isWin ? "text-emerald-600" : "text-rose-600")}>
                               {isWin ? '+' : ''}${Number(trade.profit_amt).toFixed(2)}
                             </span>
-                            <span className={clsx("font-mono text-[10px] font-bold block mt-1", isWin ? "text-emerald-600" : "text-rose-600")}>
-                              {isWin ? '+' : ''}{Number(trade.pnl_pct).toFixed(2)}%
-                            </span>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[9px] font-medium text-slate-400 font-mono">
+                                {trade.created_at ? new Date(trade.created_at).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }) : '-'}
+                              </span>
+                              <span className={clsx("font-mono text-[10px] font-bold", isWin ? "text-emerald-600" : "text-rose-600")}>
+                                {isWin ? '+' : ''}{Number(trade.pnl_pct).toFixed(2)}%
+                              </span>
+                            </div>
                           </div>
                         </div>
                       );

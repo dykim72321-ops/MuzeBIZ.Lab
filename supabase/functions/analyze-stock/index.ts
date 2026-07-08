@@ -14,8 +14,8 @@ serve(async (req) => {
   try {
     const payload = await req.json();
     const {
-      ticker, price, change, volume,
-      newsHeadlines, sector, relativeVolume
+      ticker, price, change,
+      relativeVolume
     } = payload;
 
     if (!ticker) {
@@ -55,11 +55,11 @@ serve(async (req) => {
     const relVol = parseFloat(String(relativeVolume)) || 1.0;
 
     // 1. DNA Score 산출 (Base 40 + 모멘텀 가중치 + 거래량 스파이크 가중치)
-    let rawScore = 40 + (changePct * 1.5) + ((relVol - 1) * 15);
+    const rawScore = 40 + (changePct * 1.5) + ((relVol - 1) * 15);
     const dnaScore = Math.min(Math.max(Math.round(rawScore), 0), 100); // 0~100 사이로 제한
 
     // 2. 급등 확률 (Pop Probability): 거래량이 받쳐주는 양봉일 때 상승
-    let popProb = 20 + (changePct > 0 ? 15 : 0) + (relVol > 2.0 ? 30 : (relVol > 1.0 ? 10 : 0));
+    const popProb = 20 + (changePct > 0 ? 15 : 0) + (relVol > 2.0 ? 30 : (relVol > 1.0 ? 10 : 0));
     const popProbability = Math.min(Math.max(Math.round(popProb), 0), 100);
 
     // 3. 정량적 근거 생성 (Bull / Bear Case)
@@ -72,8 +72,8 @@ serve(async (req) => {
     else if (changePct < 0) bearCase.push(`단기 가격 추세 하락 (${changePct}%)`);
 
     // 4. 리스크 및 추천 등급 평가
-    let riskLevel = relVol > 3.0 && changePct > 10 ? "High" : (relVol < 0.5 ? "Low" : "Medium");
-    let recommendation = dnaScore >= 70 ? "Strong Buy" : (dnaScore >= 55 ? "Buy" : (dnaScore < 40 ? "Sell" : "Hold"));
+    const riskLevel = relVol > 3.0 && changePct > 10 ? "High" : (relVol < 0.5 ? "Low" : "Medium");
+    const recommendation = dnaScore >= 70 ? "Strong Buy" : (dnaScore >= 55 ? "Buy" : (dnaScore < 40 ? "Sell" : "Hold"));
 
     const analysis = {
       dnaScore,
@@ -98,8 +98,9 @@ serve(async (req) => {
             persona_used: 'QUANT_ENGINE_V1'
           })
         ]);
-      } catch (err: any) {
-        console.error("   ❌ Async Save Task Failed:", err.message);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("   ❌ Async Save Task Failed:", message);
       }
     })();
 
@@ -114,10 +115,11 @@ serve(async (req) => {
       status: 200,
     });
 
-  } catch (error: any) {
-    console.error(`[AnalyzeStock] Critical error: ${error.message}`);
-    return new Response(JSON.stringify({ 
-      error: error.message,
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[AnalyzeStock] Critical error: ${message}`);
+    return new Response(JSON.stringify({
+      error: message,
       status: "error",
       timestamp: new Date().toISOString()
     }), {

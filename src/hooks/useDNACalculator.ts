@@ -161,8 +161,7 @@ export function useDNACalculator({
       action: actionFlag,
       isLoading: false,
     };
-    // 💡 Performance Optimization: history 배열의 무분별한 리렌더링 방지를 위해 문자열화하여 비교
-  }, [buyPrice, currentPrice, currentHigh, atr5, buyDate, JSON.stringify(history)]);
+  }, [buyPrice, currentPrice, currentHigh, atr5, buyDate, history]);
 }
 
 

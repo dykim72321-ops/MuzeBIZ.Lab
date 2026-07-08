@@ -46,15 +46,14 @@ export const Tooltip: React.FC<TooltipProps> = ({
   };
 
   useEffect(() => {
-    if (isVisible) {
-      updateCoords();
-      window.addEventListener('scroll', updateCoords);
-      window.addEventListener('resize', updateCoords);
-    }
+    if (!isVisible) return;
+    window.addEventListener('scroll', updateCoords);
+    window.addEventListener('resize', updateCoords);
     return () => {
       window.removeEventListener('scroll', updateCoords);
       window.removeEventListener('resize', updateCoords);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisible]);
 
   const positionClasses = {
@@ -75,7 +74,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
     <div 
       ref={triggerRef}
       className="inline-flex items-center"
-      onMouseEnter={() => setIsVisible(true)}
+      onMouseEnter={() => { updateCoords(); setIsVisible(true); }}
       onMouseLeave={() => setIsVisible(false)}
     >
       {children}
