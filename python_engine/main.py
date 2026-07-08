@@ -358,6 +358,7 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         "signal": signal_type,
         "strength": strength,
         "timestamp": datetime.now().isoformat(),
+        "smoothed_er": round(float(latest.get("smoothed_er", 0.5)), 4),
     }
 
     macd_diff_cur = (
@@ -1084,6 +1085,11 @@ async def on_minute_bar_closed(bar):
                 dna_score=0.0,
                 recommended_weight=0.0,
                 atr=atr_val,
+                smoothed_er=(
+                    payload.get("smoothed_er", 0.5)
+                    if "payload" in locals() and isinstance(payload, dict)
+                    else 0.5
+                ),
             )
             if app_state.supabase:
                 try:
@@ -1223,6 +1229,7 @@ async def on_minute_bar_closed(bar):
                         "ai_report",
                         "timestamp",
                         "dna_score",
+                        "smoothed_er",
                     }
                     db_payload = {k: v for k, v in payload.items() if k in allowed_keys}
                     await asyncio.to_thread(
@@ -1308,6 +1315,7 @@ async def on_minute_bar_closed(bar):
                             payload.get("recommended_weight", 0.0)
                         ),
                         atr=float(payload.get("atr", 0.0)),
+                        smoothed_er=float(payload.get("smoothed_er", 0.5)),
                     )
                     if (
                         payload.get("signal") == "BUY"

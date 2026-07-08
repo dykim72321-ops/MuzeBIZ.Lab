@@ -11,7 +11,6 @@ _NY_TZ = ZoneInfo(
 INITIAL_CAPITAL = 100000.0
 
 # ── 포지션 사이징 / 리스크 상수 ──────────────────────────────────────────────
-KELLY_FRACTION = 0.15  # 가용 현금 대비 진입 비중 (3/4 Kelly ≈ 15%)
 MIN_BUY_BUDGET = 10.0  # 최소 주문 금액 (달러)
 MAX_BUY_BUDGET = 5000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_BUDGET × MAX_CONCURRENT = 총 배포 상한
 # Kelly 15% × $100k = $15k → MAX_BUY_BUDGET $5k 캡으로 실질 포지션당 $5k 고정
@@ -71,6 +70,92 @@ def _apply_slippage(
         return round(price * (1.0 + base_pct), 6)
     else:
         return round(price * (1.0 - base_pct), 6)
+
+
+def calculate_dynamic_kelly(paper_history_records, current_atr, current_price):
+    """
+    화폐 스케일 및 포지션 크기 왜곡이 100% 차단된 퍼센트 차원의 베이지안 평활화 모델
+    """
+    kappa = 5.0  # 사전 신뢰도 가중치 (샘플 5개 분량의 제동력)
+    mu_global_win_pct = 0.05  # 글로벌 기대 수익률 5%
+    mu_global_loss_pct = 0.03  # 글로벌 기대 손실률 3%
+
+    if not paper_history_records:
+        return 0.05  # 역사적 데이터 부족 시 락인할 보수적 하한선 비중 (5%)
+
+    win_pcts = []
+    loss_pcts = []
+
+    for r in paper_history_records:
+        # DB 레코드에 pnl_pct가 없을 경우를 대비해 금액 대비 수익률을 안전하게 역산
+        if "pnl_pct" in r and r["pnl_pct"] is not None:
+            pct = r["pnl_pct"]
+        else:
+            entry_val = r.get("entry_value", 0) or (
+                r.get("buy_price", 0) * r.get("qty", 0)
+            )
+            if entry_val <= 0:
+                continue
+            pct = r["pnl"] / entry_val
+
+        if pct > 0:
+            win_pcts.append(pct)
+        else:
+            loss_pcts.append(abs(pct))
+
+    total_trades = len(win_pcts) + len(loss_pcts)
+    if total_trades == 0:
+        return 0.05
+
+    p = len(win_pcts) / total_trades
+
+    # 차원 일치를 위해 퍼센트 스케일 공간에서 수축 추정 수행
+    avg_win_smoothed = (sum(win_pcts) + kappa * mu_global_win_pct) / (
+        len(win_pcts) + kappa
+    )
+    avg_loss_smoothed = (sum(loss_pcts) + kappa * mu_global_loss_pct) / (
+        len(loss_pcts) + kappa
+    )
+
+    b = avg_win_smoothed / avg_loss_smoothed if avg_loss_smoothed > 0 else 1.0
+
+    # 켈리 공식 도출 및 자산 보호 기댓값(EV) 가드
+    raw_kelly = (p * b - (1 - p)) / b if b > 0 else 0.0
+    if (p * avg_win_smoothed) - ((1 - p) * avg_loss_smoothed) <= 0:
+        return 0.02  # 기댓값 음수 혹은 제로 시 최소 비중으로 제한
+
+    # 변동성 패널티 오버레이 및 최종 방어적 Half-Kelly 적용
+    volatility_ratio = current_atr / current_price
+    penalty_factor = 1.0 / (1.0 + 10.0 * volatility_ratio)
+
+    dynamic_fraction = raw_kelly * 0.5 * penalty_factor
+    return max(0.02, min(0.15, dynamic_fraction))
+
+
+def update_reversible_trailing_stop(
+    pos: dict, highest_price: float, atr_value: float, current_smoothed_er: float = 0.5
+) -> float:
+    """
+    스탑로스 하향 조정 리스크(자산 폭락 위험)를 0%로 통제하면서
+    단기 노이즈에 의한 휩쏘 청산 트랩을 분리한 생산용 스탑 엔진
+    """
+    # 1분봉의 순간적 횡보 소음에 반응하지 않도록
+    # MTFCache 수준(15분 윈도우)에서 완만하게 스무딩된 추세 효율성(ER) 반영
+    # 필터링된 ER이 높을수록 강세 레짐(스탑 타이트), 낮을수록 횡보 레짐(스탑 여유)
+    smoothed_er = current_smoothed_er
+
+    k_max = 3.0
+    k_min = 1.2
+
+    # 레짐 강도에 비례한 ATR 승수 결정
+    k_t = k_min + (k_max - k_min) * (1.0 - smoothed_er)
+
+    # 고점 기준 스탑 버퍼 계산
+    new_stop_loss = highest_price - (k_t * atr_value)
+
+    # 스탑로스는 리스크 관리의 절대 원칙상 절대로 직전보다 낮아져서는 안 됨 (하향 금지).
+    current_ts = pos.get("ts_threshold") or (pos["entry_price"] - (3.0 * atr_value))
+    return max(current_ts, new_stop_loss)
 
 
 class PaperTradingManager:
@@ -386,6 +471,7 @@ class PaperTradingManager:
                 dna_score=dna_score,
                 recommended_weight=recommended_weight,
                 atr=atr,
+                smoothed_er=smoothed_er,
             )
 
     async def _process_signal_locked(
@@ -400,6 +486,7 @@ class PaperTradingManager:
         dna_score: float = 85.0,
         recommended_weight: float = 0.0,
         atr: float = 0.0,
+        smoothed_er: float = 0.5,
     ):
         """
         v4 State Machine:
@@ -511,13 +598,21 @@ class PaperTradingManager:
                 )
                 return
             # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
-            # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → KELLY_FRACTION 기본값으로 폴백.
+            # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
             if recommended_weight <= 0:
-                print(
-                    f"⚠️ [{ticker}] Kelly 계산 불가 (recommended_weight=0) "
-                    f"— 기본 비중 {KELLY_FRACTION*100:.0f}%로 폴백"
+                res = await asyncio.to_thread(
+                    self.supabase.table("paper_history")
+                    .select("pnl_pct, pnl, buy_price, qty")
+                    .execute
                 )
-                effective_fraction = KELLY_FRACTION
+                paper_history_records = res.data or []
+                safe_atr = atr if atr > 0 else (price * 0.02)
+                effective_fraction = calculate_dynamic_kelly(
+                    paper_history_records, safe_atr, price
+                )
+                print(
+                    f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
+                )
             else:
                 effective_fraction = min(recommended_weight / 100.0, 0.25)
             buy_budget = min(
@@ -720,36 +815,24 @@ class PaperTradingManager:
                 except Exception as e:
                     print(f"⚠️ [Time-Decay] {ticker}: {e}")
 
-            # A. TS 업데이트 (최고가 갱신 시 Chandelier Exit 또는 % 방식으로 상향)
-            # ATR이 공급된 경우: Highest - k×ATR (변동성 적응형, 스탑헌팅 내성)
-            # ATR 미공급(atr=0): 기존 고정 % 방식 폴백
+            # A. TS 업데이트 (가역적 스위칭 스탑 적용)
             if not is_scaled_out:
-                floor = entry_price * (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
                 if atr > 0:
-                    k = CHANDELIER_K_PENNY if is_penny else CHANDELIER_K_NORMAL
-                    new_ts = max(floor, highest_price - k * atr)
+                    ts_threshold = update_reversible_trailing_stop(
+                        pos, highest_price, atr, smoothed_er
+                    )
                 else:
                     trail_pct = PENNY_TS_TRAIL_PCT if is_penny else TS_TRAIL_PCT
                     new_ts = highest_price * trail_pct
-                # 페니: +10% 달성 시 TS 하한을 진입가(본전)로 락인
-                if is_penny and price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
-                    new_ts = max(new_ts, entry_price)
-                ts_threshold = max(ts_threshold, new_ts)
-            elif is_penny:
-                # Scale-Out 후 페니: -7% 타이트 TS (Chandelier 사용 시도, floor 보장)
-                if atr > 0:
-                    new_ts = max(
-                        entry_price, highest_price - CHANDELIER_K_PENNY * atr * 0.6
-                    )
-                else:
-                    new_ts = max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
-                ts_threshold = max(ts_threshold, new_ts)
+                    if is_penny and price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
+                        new_ts = max(new_ts, entry_price)
+                    ts_threshold = max(ts_threshold, new_ts)
             else:
-                # Scale-Out 후 일반 종목: 본절+1% 하한을 유지하며 Chandelier 추종
+                # Scale-Out 후 물량: 이익 보전을 위해 TS_TRAIL_PCT로 타이트하게 조이거나 본절 유지
                 if atr > 0:
                     new_ts = max(
                         entry_price * SCALE_OUT_TS_PCT,
-                        highest_price - CHANDELIER_K_NORMAL * atr,
+                        highest_price - (1.2 * atr),  # k=1.2 (Tight)
                     )
                 else:
                     new_ts = max(
