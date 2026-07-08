@@ -7,32 +7,94 @@
 @source "./**/*.{js,ts,jsx,tsx}";
 
 @theme {
+  /* Stitch MCP Generated Vars */
+  --color-secondary-fixed: #acedff;
+  --color-surface-bright: #faf8ff;
+  --color-outline: #737686;
+  --color-surface-variant: #dae2fd;
+  --color-error: #ba1a1a;
+  --color-primary-fixed: #dbe1ff;
+  --color-inverse-surface: #283044;
+  --color-background: #faf8ff;
+  --color-on-tertiary: #ffffff;
+  --color-primary: #004ac6;
+  --color-on-surface-variant: #434655;
+  --color-on-primary-fixed: #00174b;
+  --color-secondary-container: #57dffe;
+  --color-on-secondary: #ffffff;
+  --color-on-primary: #ffffff;
+  --color-primary-fixed-dim: #b4c5ff;
+  --color-tertiary-fixed-dim: #b7c8e1;
+  --color-on-surface: #131b2e;
+  --color-tertiary: #46566c;
+  --color-primary-container: #2563eb;
+  --color-secondary-fixed-dim: #4cd7f6;
+  --color-surface: #faf8ff;
+  --color-on-error: #ffffff;
+  --color-surface-container-highest: #dae2fd;
+  --color-on-secondary-fixed-variant: #004e5c;
+  --color-on-secondary-container: #006172;
+  --color-inverse-on-surface: #eef0ff;
+  --color-on-error-container: #93000a;
+  --color-surface-tint: #0053db;
+  --color-surface-container-low: #f2f3ff;
+  --color-on-tertiary-fixed-variant: #38485d;
+  --color-surface-container-lowest: #ffffff;
+  --color-inverse-primary: #b4c5ff;
+  --color-surface-dim: #d2d9f4;
+  --color-on-secondary-fixed: #001f26;
+  --color-secondary: #00687a;
+  --color-tertiary-fixed: #d3e4fe;
+  --color-on-tertiary-fixed: #0b1c30;
+  --color-on-primary-container: #eeefff;
+  --color-surface-container-high: #e2e7ff;
+  --color-surface-container: #eaedff;
+  --color-outline-variant: #c3c6d7;
+  --color-on-tertiary-container: #e9f0ff;
+  --color-on-background: #131b2e;
+  --color-on-primary-fixed-variant: #003ea8;
+  --color-tertiary-container: #5e6e85;
+  --color-error-container: #ffdad6;
+  --spacing-margin-mobile: 16px;
+  --spacing-unit-medium: 16px;
+  --spacing-container-max: 1280px;
+  --spacing-margin-desktop: 40px;
+  --spacing-unit-xsmall: 4px;
+  --spacing-unit-large: 32px;
+  --spacing-unit-small: 8px;
+  --spacing-gutter: 24px;
+  --font-body-md: Inter, sans-serif;
+  --font-headline-md: Inter, sans-serif;
+  --font-body-sm: Inter, sans-serif;
+  --font-data-tabular: Geist, monospace;
+  --font-label-mono: Geist, monospace;
+  --font-display-lg: Inter, sans-serif;
+  --font-display-lg-mobile: Inter, sans-serif;
+
   --font-sans: "Inter", "Noto Sans KR", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
-  /* Lumina Trade - Ultra High Contrast (NO GRAY) */
-  --color-lumina-base: #eff6ff; /* blue-50 */
+  /* Modern FinTech Clean Palette */
+  --color-lumina-base: #f8fafc; /* slate-50 */
   --color-lumina-surface: #ffffff; /* white */
-  --color-lumina-surface-container: #dbeafe; /* blue-100 */
-  --color-lumina-outline: #bfdbfe; /* blue-200 */
+  --color-lumina-surface-container: #f1f5f9; /* slate-100 */
+  --color-lumina-outline: #e2e8f0; /* slate-200 */
 
-  /* Lumina Trade - Brand Colors (Deeper) */
-  --color-lumina-primary: #1d4ed8;
-  --color-lumina-secondary: #0284c7;
+  --color-lumina-primary: #0f172a; /* slate-900 */
+  --color-lumina-secondary: #475569; /* slate-600 */
   
-  /* Lumina Trade - Semantic Colors (Vibrant) */
-  --color-lumina-emerald: #059669;
-  --color-lumina-rose: #e11d48;
+  --color-lumina-emerald: #10b981;
+  --color-lumina-rose: #f43f5e;
 }
 
 @layer base {
   body {
-    /* Pure Light Theme - NO GRAY */
-    @apply bg-[#fbfdff] text-blue-950 antialiased font-sans overflow-x-hidden w-full m-0 selection:bg-blue-300 selection:text-black;
+    /* Pure Modern FinTech Theme - clean and spacious */
+    @apply bg-slate-50 text-slate-700 antialiased font-sans overflow-x-hidden w-full m-0 selection:bg-indigo-100 selection:text-indigo-900;
   }
 
   h1, h2, h3, h4 {
-    @apply font-black tracking-tight text-black;
+    @apply font-bold tracking-tight text-slate-900;
   }
 
   .tabular-nums {
@@ -44,30 +106,30 @@
 @layer components {
   /* High Contrast Input */
   .sfdc-input {
-    @apply w-full bg-white border-2 border-blue-200 rounded-md px-3 py-2 text-sm text-black transition-all outline-none focus:border-blue-700 focus:ring-1 focus:ring-blue-700 placeholder:text-blue-400 shadow-sm font-bold;
+    @apply w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition-all outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-400 shadow-sm font-medium;
   }
 
   .sfdc-label {
-    @apply block text-sm font-black text-blue-950 mb-1.5;
+    @apply block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider;
   }
 
   /* Primary Button */
   .sfdc-button-primary {
-    @apply px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-md transition-all text-sm font-black active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-md;
+    @apply px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl transition-all text-sm font-medium active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-md flex items-center justify-center gap-2;
   }
 
   /* Secondary Button */
   .sfdc-button-secondary {
-    @apply px-4 py-2 bg-white hover:bg-blue-100 text-blue-800 border-2 border-blue-300 hover:border-blue-600 rounded-md transition-all text-sm font-black active:scale-95 shadow-sm;
+    @apply px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 rounded-xl transition-all text-sm font-medium active:scale-95 shadow-sm flex items-center justify-center gap-2;
   }
 
-  /* Bento Box Card - NO GRAY */
+  /* Bento Box Card - Modern Floating */
   .sfdc-card {
-    @apply bg-white border-2 border-blue-200 rounded-md shadow-[0_4px_12px_-2px_rgba(29,78,216,0.1)] overflow-hidden transition-all;
+    @apply bg-white border border-slate-100/80 rounded-2xl shadow-[0_4px_24px_-8px_rgba(0,0,0,0.06)] overflow-hidden transition-all duration-300;
   }
 
   .sfdc-card-header {
-    @apply p-4 border-b-2 border-blue-100 bg-blue-50/50 flex items-center justify-between text-black font-black;
+    @apply p-5 border-b border-slate-100 bg-white/50 backdrop-blur flex items-center justify-between text-slate-900 font-semibold;
   }
 
   /* Terminal Mono Font */
@@ -88,25 +150,25 @@
 
   /* Status Borders Light */
   .glow-border-emerald {
-    @apply border-2 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)];
+    @apply border border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.15)];
   }
   .glow-border-rose {
-    @apply border-2 border-rose-500 shadow-[0_0_15px_rgba(225,29,72,0.3)];
+    @apply border border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)];
   }
   .glow-border-cyan {
-    @apply border-2 border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.3)];
+    @apply border border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.15)];
   }
 
   /* Ghost Buttons Light */
   .btn-ghost-rose {
-    @apply border-2 border-rose-300 text-rose-800 bg-rose-50 hover:bg-rose-700 hover:text-white hover:border-rose-700 transition-all font-black;
+    @apply border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 transition-all font-medium rounded-lg;
   }
 }
 
 /* Scrollbar Custom (Light Theme) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(29, 78, 216, 0.3) transparent;
+  scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -116,11 +178,39 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(29, 78, 216, 0.2);
-  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
   border: 1px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(29, 78, 216, 0.5);
+  background: rgba(148, 163, 184, 0.5);
+}
+
+/* Auto-generated styles from Stitch */
+.glass-card {
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+.terminal-bg {
+    background: #0a0e17;
+}
+.order-book-scroll {
+    mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
+}
+@keyframes scroll-up {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-50%); }
+}
+.animate-scroll-up {
+    animation: scroll-up 10s linear infinite;
+}
+.line-chart-svg {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: dash 3s ease-out forwards;
+}
+@keyframes dash {
+    to { stroke-dashoffset: 0; }
 }

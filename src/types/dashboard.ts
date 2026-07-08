@@ -6,6 +6,7 @@ export interface DiscoveryStock {
   rsi?: number;
   macd?: number;
   macdDiff?: number;
+  macd_diff?: number;
   adx?: number;
   rvol?: number;
   change_percent?: number;

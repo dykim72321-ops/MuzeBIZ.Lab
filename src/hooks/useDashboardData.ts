@@ -278,7 +278,7 @@ export function useDashboardData() {
         kellyWeight: stock.kelly_weight || stock.kellyWeight || 0,
         quantData,
         rsi: stock.rsi,
-        macdDiff: stock.macdDiff,
+        macdDiff: stock.macdDiff ?? stock.macd_diff,
         adx: stock.adx,
         rvol: stock.rvol,
         history: stock.history || [],
@@ -303,10 +303,13 @@ export function useDashboardData() {
               changePercent: enrichedStock.changePercent,
               dayHigh: enrichedStock.currentHigh,
               volume: enrichedStock.volume,
-              rsi: enrichedStock.rsi,
-              macdDiff: enrichedStock.macdDiff,
-              adx: enrichedStock.adx,
-              rvol: enrichedStock.rvol,
+              // realtime_signals에 해당 티커가 없으면 enrichedStock 지표가 undefined로
+              // 돌아오는데, 이를 그대로 덮어쓰면 스캔 시점(daily_discovery)의 정상 값이
+              // 사라지므로 실측값이 있을 때만 교체한다.
+              rsi: enrichedStock.rsi ?? prev.rsi,
+              macdDiff: enrichedStock.macdDiff ?? prev.macdDiff,
+              adx: enrichedStock.adx ?? prev.adx,
+              rvol: enrichedStock.rvol ?? prev.rvol,
               history:
                 enrichedStock.history?.map((h: { price: number; date: string }) => ({
                   price: h.price,

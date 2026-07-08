@@ -6,7 +6,6 @@
 import React from 'react';
 import clsx from 'clsx';
 import {
-  Zap,
   ShieldCheck,
   Activity,
   Lock,
@@ -14,39 +13,6 @@ import {
 } from 'lucide-react';
 import type { PennyScanStatusResponse } from '../../types/api';
 
-export const DashboardTitle = React.memo(function DashboardTitle({
-  isMarketOpen,
-}: {
-  isMarketOpen: boolean;
-}) {
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="w-1.5 h-3.5 bg-blue-700 rounded-full shadow-sm" />
-        <span className="text-[10px] font-mono font-black text-blue-900 uppercase tracking-widest">
-          Integrated Intelligence Dashboard
-        </span>
-      </div>
-      <h1 className="text-[22px] font-black text-black flex items-center gap-2 tracking-tight">
-        <Zap className="w-6 h-6 text-blue-700 stroke-[3]" />
-        통합 지휘소
-      </h1>
-      <div className="flex items-center gap-2 mt-1">
-        <span
-          className={clsx(
-            'w-2 h-2 rounded-full',
-            isMarketOpen
-              ? 'bg-emerald-600 animate-pulse shadow-sm'
-              : 'bg-blue-300',
-          )}
-        />
-        <span className="text-[10px] font-mono font-bold text-blue-950 uppercase tracking-widest">
-          US Market {isMarketOpen ? 'Open' : 'Closed'}
-        </span>
-      </div>
-    </div>
-  );
-});
 
 export const DashboardControls = React.memo(function DashboardControls({
   isArmed,

@@ -35,7 +35,6 @@ class BacktestRunRequest(BaseModel):
     gamma: float = 0.8
     delta: float = 1.5
     lambda_val: float = 2.0
-    slippage_rate: float = 0.01
     deviation_threshold: float = -0.07
     target_atr: float = 5.0
 
@@ -47,7 +46,9 @@ async def run_backtest_endpoint(
     """DNA 전략 백테스트 실행 (DNAValidator 사용, 15분 캐시)"""
     tickers = request.tickers if request.tickers else DEFAULT_BACKTEST_UNIVERSE
     cache_key = (
-        f"bt_{request.gamma}_{request.delta}_{request.deviation_threshold}"
+        f"bt_{','.join(sorted(tickers))}"
+        f"_{request.gamma}_{request.delta}_{request.lambda_val}"
+        f"_{request.deviation_threshold}_{request.target_atr}"
         f"_{request.start_date}_{request.end_date}"
     )
     if cache_key in backtest_cache:
@@ -62,7 +63,6 @@ async def run_backtest_endpoint(
             gamma=request.gamma,
             delta=request.delta,
             lambda_val=request.lambda_val,
-            slippage_rate=request.slippage_rate,
             deviation_threshold=request.deviation_threshold,
             target_atr=request.target_atr,
         )

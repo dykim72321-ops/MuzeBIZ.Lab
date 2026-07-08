@@ -230,13 +230,13 @@ from routers import (
     analyze,
     backtest,
     broker,
+    checklist,
     edge,
     parts,
     penny,
     portfolio,
     pulse,
     settings,
-    simulate,
     strategy,
 )
 
@@ -250,7 +250,7 @@ app.include_router(backtest.router)
 app.include_router(edge.router)
 app.include_router(strategy.router)
 app.include_router(penny.router)
-app.include_router(simulate.router)
+app.include_router(checklist.router)
 
 
 # ── 루트 엔드포인트 ──────────────────────────────────────────────────────────

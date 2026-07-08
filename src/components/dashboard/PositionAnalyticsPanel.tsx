@@ -43,7 +43,7 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
     return (
       <div className="sfdc-card p-6 flex flex-col items-center justify-center min-h-[200px] gap-3">
         <PieChart className="w-8 h-8 text-blue-300" />
-        <p className="text-sm font-bold text-blue-900">보유 포지션 없음</p>
+        <p className="text-sm font-black text-blue-900">보유 포지션 없음</p>
         <p className="text-xs text-blue-800 text-center">포지션이 생기면 비중 분석이 표시됩니다.</p>
       </div>
     );

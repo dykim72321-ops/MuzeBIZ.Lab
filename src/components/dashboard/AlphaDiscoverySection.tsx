@@ -1,7 +1,6 @@
-import { Sparkles, Activity, Target, Zap, FlaskConical } from 'lucide-react';
+import { Sparkles, Activity, Target, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import { useNavigate } from 'react-router-dom';
 import { executeManualOrder } from '../../services/pythonApiService';
 import { toast } from 'sonner';
 
@@ -26,39 +25,11 @@ const handlePaperBuy = async (e: React.MouseEvent, ticker: string, price: number
   }
 };
 
-function deriveMacdStatus(macdDiff?: number | null, macdDiffPrev?: number | null): string {
-  const d = macdDiff ?? 0;
-  const p = macdDiffPrev ?? 0;
-  if (d > 0 && p <= 0) return 'golden';
-  if (d < 0 && p >= 0) return 'dead';
-  if (d > p) return 'rising';
-  return 'falling';
-}
-
 export const AlphaDiscoverySection: React.FC<AlphaDiscoverySectionProps> = ({
   filteredDiscovery,
   handleDeepDive,
   lastFetchedTime
 }) => {
-  const navigate = useNavigate();
-
-  const handleSimulator = (e: React.MouseEvent, stock: any) => {
-    e.stopPropagation();
-    const params = new URLSearchParams({
-      ticker: stock.ticker,
-      entry: String(stock.price ?? 10),
-      penny: String((stock.price ?? 10) <= 1.0),
-      ...(stock.rsi != null      && { rsi:  String(stock.rsi) }),
-      ...(stock.rvol != null     && { rvol: String(stock.rvol) }),
-      ...(stock.adx != null      && { adx:  String(stock.adx) }),
-      ...(stock.atr_pct != null  && { atr:  String(stock.atr_pct) }),
-      ...(stock.di_positive != null && { diPos: String(stock.di_positive) }),
-      ...(stock.is_extended != null && { extended: String(stock.is_extended) }),
-      macd: deriveMacdStatus(stock.macd_diff, stock.macd_diff_prev),
-    });
-    navigate(`/dna-simulator?${params.toString()}`);
-  };
-
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between pb-2">
@@ -138,13 +109,6 @@ export const AlphaDiscoverySection: React.FC<AlphaDiscoverySectionProps> = ({
                   >
                     <Zap className="w-3 h-3" />
                     Buy
-                  </button>
-                  <button
-                    onClick={(e) => handleSimulator(e, stock)}
-                    title="DNA 시뮬레이터에서 사전 점검"
-                    className="flex items-center justify-center gap-1 px-2.5 py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-[9px] font-black text-indigo-700 uppercase tracking-widest transition-all active:scale-95"
-                  >
-                    <FlaskConical className="w-3 h-3" />
                   </button>
                 </div>
               </div>

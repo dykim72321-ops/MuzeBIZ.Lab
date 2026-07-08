@@ -14,7 +14,7 @@ import { queryClient } from './lib/queryClient';
 //   /portfolio  → 알파 펀드 (포트폴리오 운용)
 //   /watchlist  → 관심 종목
 //   /backtesting→ 백테스팅 히스토리
-//   /settings   → 환경 설정
+//   /settings   → /stock/dashboard 리다이렉트 (설정은 NexGuard Control 패널로 통합)
 const AlphaFundView = lazy(() => import('./pages/AlphaFundView').then(m => ({ default: m.AlphaFundView })));
 
 const MuzepartSearchPage = lazy(() => import('./pages/MuzepartSearchPage').then(m => ({ default: m.MuzepartSearchPage })));
@@ -22,10 +22,9 @@ const UnifiedDashboard = lazy(() => import('./pages/UnifiedDashboard'));
 
 
 const PersonaPerformance = lazy(() => import('./components/dashboard/PersonaPerformance').then(m => ({ default: m.PersonaPerformance })));
-const SettingsView = lazy(() => import('./components/dashboard/SettingsView').then(m => ({ default: m.SettingsView })));
 
 const LandingPage = lazy(() => import('./pages/LandingPage'));
-const DnaSimulatorPage = lazy(() => import('./pages/DnaSimulatorPage').then(m => ({ default: m.DnaSimulatorPage })));
+const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 
 // 로딩 폴백 컴포넌트
 const PageLoadingFallback = () => (
@@ -70,15 +69,14 @@ function App() {
 
 
 
-                {/* DNA 시뮬레이터 */}
-                <Route path="dna-simulator" element={<DnaSimulatorPage />} />
+                {/* 성과 리포트 (주간/월간) */}
+                <Route path="reports" element={<ReportsPage />} />
 
                 {/* 기타 도구 */}
                 <Route path="personas" element={<PersonaPerformance />} />
 
-                {/* 기타 백그라운드 라우트 (비공개/테스트용) */}
-                {/* 환경 설정 */}
-                <Route path="settings" element={<SettingsView />} />
+                {/* 환경 설정: 실제 설정 패널은 통합 지휘소의 NexGuard Control 패널로 통합됨 */}
+                <Route path="settings" element={<Navigate to="/stock/dashboard" replace />} />
 
                 {/* 404 → 랜딩 */}
                 <Route path="*" element={<Navigate to="/" replace />} />

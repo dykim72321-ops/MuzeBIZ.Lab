@@ -49,7 +49,7 @@ const CompactGauge = React.memo(function CompactGauge({
           {title}
         </span>
         {subtitle && (
-          <span className="text-[8px] font-bold text-blue-700 block font-mono">{subtitle}</span>
+          <span className="text-[8px] font-black text-blue-700 block font-mono">{subtitle}</span>
         )}
       </div>
     </div>
@@ -144,7 +144,7 @@ export const MetricsGrid = React.memo(function MetricsGrid({
           <span className={clsx("text-xl font-black tabular-nums block truncate", totalPnl >= 0 ? "text-emerald-800" : "text-rose-800")} title={`${totalPnl >= 0 ? '+' : ''}$${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}>
             {totalPnl >= 0 ? '+' : ''}${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
-          <span className={clsx("text-[9px] font-bold block mt-0.5 whitespace-nowrap", totalPnl >= 0 ? "text-emerald-700" : "text-rose-700")}>
+          <span className={clsx("text-[9px] font-black block mt-0.5 whitespace-nowrap", totalPnl >= 0 ? "text-emerald-700" : "text-rose-700")}>
             {displayedPositions.length}개 보유
           </span>
         </div>

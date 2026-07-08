@@ -2,18 +2,17 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   Search,
-  Dna,
   LayoutDashboard,
   Bell,
   Menu,
   X,
-  FlaskConical
+  BarChart3
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const NAVIGATION = [
   { name: '통합 지휘소', icon: LayoutDashboard, path: '/stock/dashboard' },
-  { name: 'DNA 시뮬레이터', icon: FlaskConical, path: '/dna-simulator' },
+  { name: '성과 리포트', icon: BarChart3, path: '/reports' },
   { name: '제품 검색', icon: Search, path: '/parts-search' }
 ];
 
@@ -26,8 +25,8 @@ export const TopNav = () => {
         {/* Left: Logo & Nav */}
         <div className="flex items-center gap-8">
           <NavLink to="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg border border-blue-300 flex items-center justify-center shadow-sm group-hover:border-blue-600 transition-all">
-              <Dna className="w-6 h-6 text-blue-700 group-hover:scale-110 transition-transform" />
+            <div className="w-10 h-10 bg-white rounded-lg border border-blue-200 flex items-center justify-center shadow-sm group-hover:border-blue-400 transition-all overflow-hidden p-1">
+              <img src="/logo.png" alt="MuzeBIZ Logo" className="w-full h-full object-contain group-hover:scale-110 transition-transform" />
             </div>
             <span className="text-xl font-black text-black tracking-tighter uppercase font-mono">
               MuzeBIZ<span className="text-blue-700 transition-colors">.Lab</span>

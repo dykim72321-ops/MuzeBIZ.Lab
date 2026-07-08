@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    X, TrendingUp, TrendingDown, Zap,
-    Fingerprint, ShieldCheck, Activity, Dna, ArrowUpRight,
+    X,
+    Fingerprint, Activity,
     List
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -15,7 +15,6 @@ import {
     Tooltip,
     ReferenceLine
 } from 'recharts';
-import { generateVerdictFromIndicators } from '../../utils/generateVerdictFromIndicators';
 
 // ── Candlestick Chart (SVG-based) ──────────────────────────────────────
 const CandlestickChart = ({
@@ -50,7 +49,7 @@ const CandlestickChart = ({
     const xLabelIndices = [0, Math.floor(data.length / 3), Math.floor((2 * data.length) / 3), data.length - 1];
 
     return (
-        <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-blue-800/80 overflow-hidden">
+        <div className="relative w-full h-52 bg-blue-50/50 rounded-2xl border border-blue-200 overflow-hidden">
             <svg width="100%" height="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="xMidYMid meet">
                 {/* Grid lines */}
                 {yTickValues.map((v, i) => (
@@ -58,11 +57,11 @@ const CandlestickChart = ({
                         <line
                             x1={MARGIN.left} y1={toY(v)}
                             x2={WIDTH - MARGIN.right} y2={toY(v)}
-                            stroke="#1e293b" strokeWidth={0.5}
+                            stroke="#e2e8f0" strokeWidth={0.5}
                         />
                         <text
                             x={WIDTH - MARGIN.right + 4} y={toY(v) + 3}
-                            fontSize={8} fill="#475569" fontFamily="monospace"
+                            fontSize={8} fill="#64748b" fontFamily="monospace"
                         >
                             ${v.toFixed(v < 1 ? 3 : 2)}
                         </text>
@@ -92,7 +91,7 @@ const CandlestickChart = ({
                     const d = data[i];
                     const label = d.date ? d.date.substring(5).replace('-', '/') : '';
                     return (
-                        <text key={i} x={x} y={HEIGHT - 4} fontSize={8} fill="#475569" fontFamily="monospace" textAnchor="middle">
+                        <text key={i} x={x} y={HEIGHT - 4} fontSize={8} fill="#64748b" fontFamily="monospace" textAnchor="middle">
                             {label}
                         </text>
                     );
@@ -148,14 +147,14 @@ const PriceTrajectoryChart = ({
 
     if (chartData.length < 2) {
         return (
-            <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-blue-800/80 flex items-center justify-center">
-                <span className="text-xs font-semibold text-blue-400 font-sans">장 개장 후 가격 데이터가 수집됩니다</span>
+            <div className="relative w-full h-52 bg-blue-50/50 rounded-2xl border border-blue-200 flex items-center justify-center">
+                <span className="text-xs font-semibold text-blue-500 font-sans">장 개장 후 가격 데이터가 수집됩니다</span>
             </div>
         );
     }
 
     return (
-        <div className="relative w-full h-52 bg-[#020617]/60 rounded-2xl border border-blue-800/80 overflow-hidden">
+        <div className="relative w-full h-52 bg-blue-50/50 rounded-2xl border border-blue-200 overflow-hidden">
             <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 12, right: 12, bottom: 4, left: 4 }}>
                     <defs>
@@ -167,8 +166,8 @@ const PriceTrajectoryChart = ({
                     <XAxis
                         dataKey="date"
                         tickFormatter={formatDate}
-                        tick={{ fill: '#475569', fontSize: 10, fontFamily: 'monospace' }}
-                        axisLine={{ stroke: '#1e293b' }}
+                        tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'monospace' }}
+                        axisLine={{ stroke: '#e2e8f0' }}
                         tickLine={false}
                         interval="preserveStartEnd"
                         minTickGap={50}
@@ -179,13 +178,15 @@ const PriceTrajectoryChart = ({
                     />
                     <Tooltip
                         contentStyle={{
-                            background: '#0f172a',
-                            border: '1px solid #334155',
+                            background: '#ffffff',
+                            border: '1px solid #e2e8f0',
                             borderRadius: '12px',
                             padding: '8px 12px',
                             fontSize: '11px',
                             fontFamily: 'monospace',
+                            boxShadow: '0 4px 24px -8px rgba(0,0,0,0.12)',
                         }}
+                        labelStyle={{ color: '#334155' }}
                         labelFormatter={(label) => {
                             try { return new Date(label).toLocaleDateString('ko-KR'); } catch { return ''; }
                         }}
@@ -201,7 +202,7 @@ const PriceTrajectoryChart = ({
                             label={{
                                 value: `매수 $${buyPrice.toFixed(2)}`,
                                 position: 'left',
-                                fill: '#818cf8',
+                                fill: '#4f46e5',
                                 fontSize: 9,
                                 fontFamily: 'monospace',
                             }}
@@ -217,7 +218,7 @@ const PriceTrajectoryChart = ({
                             label={{
                                 value: `목표 $${targetPrice.toFixed(2)}`,
                                 position: 'right',
-                                fill: '#34d399',
+                                fill: '#059669',
                                 fontSize: 9,
                                 fontFamily: 'monospace',
                             }}
@@ -233,7 +234,7 @@ const PriceTrajectoryChart = ({
                             label={{
                                 value: `손절 $${stopPrice.toFixed(2)}`,
                                 position: 'right',
-                                fill: '#fb7185',
+                                fill: '#e11d48',
                                 fontSize: 9,
                                 fontFamily: 'monospace',
                             }}
@@ -247,7 +248,7 @@ const PriceTrajectoryChart = ({
                         fill="url(#priceGrad)"
                         strokeWidth={2}
                         dot={false}
-                        activeDot={{ r: 4, stroke: isUp ? '#10b981' : '#f43f5e', strokeWidth: 2, fill: '#0f172a' }}
+                        activeDot={{ r: 4, stroke: isUp ? '#10b981' : '#f43f5e', strokeWidth: 2, fill: '#ffffff' }}
                     />
                 </AreaChart>
             </ResponsiveContainer>
@@ -263,6 +264,7 @@ const QuantIndicatorBar = ({
     colorClass,
     displayValue,
     unit,
+    description,
 }: {
     label: string;
     value: number;
@@ -270,17 +272,18 @@ const QuantIndicatorBar = ({
     colorClass: string;
     displayValue: string;
     unit?: string;
+    description: string;
 }) => {
     const pct = Math.min(100, Math.max(0, (value / maxValue) * 100));
     return (
         <div className="space-y-2">
             <div className="flex justify-between items-center text-[11px] font-bold uppercase tracking-widest">
-                <span className="text-blue-400">{label}</span>
+                <span className="text-blue-500">{label}</span>
                 <span className={clsx("font-mono font-black", colorClass.replace('bg-', 'text-'))}>
-                    {displayValue}{unit && <span className="text-blue-500 ml-0.5">{unit}</span>}
+                    {displayValue}{unit && <span className="text-blue-400 ml-0.5">{unit}</span>}
                 </span>
             </div>
-            <div className="w-full h-1.5 bg-blue-800 rounded-full overflow-hidden border border-white/5">
+            <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
                 <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${pct}%` }}
@@ -288,6 +291,7 @@ const QuantIndicatorBar = ({
                     className={clsx("h-full rounded-full transition-all", colorClass)}
                 />
             </div>
+            <p className="text-[10px] text-blue-400 font-medium leading-snug font-sans">{description}</p>
         </div>
     );
 };
@@ -343,7 +347,6 @@ interface StockTerminalModalProps {
         ohlcData?: { date: string; open: number; high: number; low: number; close: number }[];
     };
     onAddToWatchlist?: () => Promise<void>;
-    onExecuteTrade?: (tradeParams: any) => void;
 }
 
 export const StockTerminalModal = ({
@@ -351,53 +354,7 @@ export const StockTerminalModal = ({
     onClose,
     data,
     onAddToWatchlist,
-    onExecuteTrade
 }: StockTerminalModalProps) => {
-    const [fetchedAnalysis, setFetchedAnalysis] = useState<Partial<typeof data> | null>(null);
-    const isMounted = useRef(false);
-
-    useEffect(() => {
-        isMounted.current = true;
-        return () => { isMounted.current = false; };
-    }, []);
-
-    const displayData = fetchedAnalysis ? { ...data, ...fetchedAnalysis } : data;
-
-    useEffect(() => {
-        setFetchedAnalysis(null);
-        if (!isOpen) return;
-
-        const fetchMissingData = async () => {
-            const hasDetailedPoints = data.bullPoints && data.bullPoints.length > 0 && data.bullPoints[0] !== "모멘텀 지표 분석 중";
-            if (hasDetailedPoints) return;
-
-            try {
-                const { supabase } = await import('../../lib/supabase');
-                const { data: cacheData } = await supabase
-                    .from('stock_analysis_cache')
-                    .select('analysis')
-                    .eq('ticker', data.ticker)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
-                if (isMounted.current && cacheData?.analysis) {
-                    const analysis = cacheData.analysis;
-                    setFetchedAnalysis({
-                        bullPoints: analysis.bullCase || ["강세 요인 데이터 부족"],
-                        bearPoints: analysis.bearCase || ["약세 요인 데이터 부족"],
-                        formulaVerdict: analysis.matchReasoning || data.formulaVerdict,
-                        riskLevel: analysis.riskLevel || data.riskLevel,
-                    });
-                }
-            } catch (err) {
-                console.error("Analysis fetch error:", err);
-            }
-        };
-
-        fetchMissingData();
-    }, [data.ticker, isOpen]);
-
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') onClose();
@@ -412,48 +369,25 @@ export const StockTerminalModal = ({
         };
     }, [isOpen, onClose]);
 
-    // ── 실측 지표 기반 자동 분석 생성 ─────────────────────────────────────
-    const autoVerdict = generateVerdictFromIndicators({
-        rsi: displayData.rsi,
-        macdDiff: displayData.macdDiff,
-        adx: displayData.adx,
-        rvol: displayData.rvol,
-        dnaScore: displayData.dnaScore,
-        price: displayData.price,
-        changePercent: displayData.changePercent,
-        targetPrice: displayData.targetPrice,
-        stopPrice: displayData.stopPrice,
-        kellyWeight: displayData.kellyWeight,
-    });
-
-    // Cache/fetch 결과가 있으면 우선 사용, 없으면 auto-generated
-    const finalBullPoints = (displayData.bullPoints && displayData.bullPoints.length > 0 && displayData.bullPoints[0] !== "모멘텀 지표 분석 중")
-        ? displayData.bullPoints
-        : autoVerdict.bullPoints;
-    const finalBearPoints = (displayData.bearPoints && displayData.bearPoints.length > 0 && displayData.bearPoints[0] !== "리스크 요인 스캔 중")
-        ? displayData.bearPoints
-        : autoVerdict.bearPoints;
-    const finalVerdict = (displayData.formulaVerdict && displayData.formulaVerdict !== "시스템 분석 결과를 불러오는 중입니다...")
-        ? displayData.formulaVerdict
-        : autoVerdict.verdict;
-
     // ── RSI 정규화 (0~100 그대로) ──────────────────────────────────────────
+    const displayData = data;
     const rsiVal = displayData.rsi ?? 0;
-    const rsiColor = rsiVal < 30 ? 'bg-emerald-400' : rsiVal > 70 ? 'bg-rose-400' : 'bg-cyan-400';
+    const rsiColor = rsiVal < 30 ? 'bg-emerald-500' : rsiVal > 70 ? 'bg-rose-500' : 'bg-cyan-600';
 
-    // MACD → 정규화 (-2~2 범위를 0~100으로)
+    // MACD → 정규화 (-2~2 범위를 0~100으로), 실측값 없으면 빈 막대
+    const hasMacd = displayData.macdDiff !== undefined;
     const macdRaw = displayData.macdDiff ?? 0;
-    const macdNorm = Math.min(100, Math.max(0, (macdRaw + 2) / 4 * 100));
-    const macdColor = macdRaw > 0 ? 'bg-emerald-400' : 'bg-rose-400';
+    const macdNorm = hasMacd ? Math.min(100, Math.max(0, (macdRaw + 2) / 4 * 100)) : 0;
+    const macdColor = hasMacd ? (macdRaw > 0 ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-blue-300';
 
     // ADX (0~100 그대로)
     const adxVal = displayData.adx ?? 0;
-    const adxColor = adxVal > 25 ? 'bg-emerald-400' : adxVal > 20 ? 'bg-amber-400' : 'bg-blue-500';
+    const adxColor = adxVal > 25 ? 'bg-emerald-500' : adxVal > 20 ? 'bg-amber-500' : 'bg-blue-300';
 
-    // RVOL → 정규화 (0~10 범위를 0~100으로)
-    const rvolVal = displayData.rvol ?? 1.0;
+    // RVOL → 정규화 (0~10 범위를 0~100으로), 실측값 없으면 빈 막대
+    const rvolVal = displayData.rvol ?? 0;
     const rvolNorm = Math.min(100, (rvolVal / 10) * 100);
-    const rvolColor = rvolVal > 3 ? 'bg-emerald-400' : rvolVal > 2 ? 'bg-cyan-400' : 'bg-blue-500';
+    const rvolColor = rvolVal > 3 ? 'bg-emerald-500' : rvolVal > 2 ? 'bg-cyan-600' : 'bg-blue-300';
 
     const chartHistory = displayData.history || [];
 
@@ -461,36 +395,34 @@ export const StockTerminalModal = ({
         <AnimatePresence>
             {isOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-[#020617]/95 backdrop-blur-3xl" />
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
 
                     <motion.div
                         initial={{ opacity: 0, scale: 0.95, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
                         transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-                        className="relative w-full max-w-4xl bg-[#0A0F1C]/95 backdrop-blur-3xl border border-blue-800 rounded-[2.5rem] overflow-hidden shadow-[0_0_100px_rgba(34,211,238,0.1)] flex flex-col"
+                        className="relative w-full max-w-4xl bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col"
                     >
                         {/* ─── 1. Header ─────────────────────────────────────────── */}
-                        <div className="p-8 border-b border-blue-800/80 flex justify-between items-start bg-gradient-to-b from-blue-900/50 to-transparent relative z-10">
+                        <div className="p-8 border-b border-slate-100 flex justify-between items-start bg-gradient-to-b from-blue-50/60 to-transparent relative z-10">
                             <div className="flex items-center gap-6">
-                                <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-center shadow-[inset_0_0_20px_rgba(99,102,241,0.2)]">
-                                    <Dna className="w-8 h-8 text-indigo-400" />
-                                </div>
+                                <img src="/logo.png" alt="MuzeBiz.Lab" className="w-20 h-20 object-contain" />
                                 <div>
                                     <div className="flex items-center gap-2 mb-1.5 font-mono">
-                                        <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-black tracking-[0.2em] uppercase">Quant Analysis</span>
+                                        <span className="px-2 py-0.5 rounded text-[10px] bg-blue-50 text-blue-600 border border-blue-200 font-black tracking-[0.2em] uppercase">Quant Analysis</span>
                                         {displayData.rsi !== undefined && displayData.rsi > 0 && (
-                                            <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-extrabold tracking-wider uppercase font-sans">실시간 지표 연동</span>
+                                            <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold tracking-wider uppercase font-sans">실시간 지표 연동</span>
                                         )}
                                     </div>
-                                    <h1 className="text-4xl font-black text-white tracking-tighter flex items-center gap-4">
-                                        <span className="text-blue-500 opacity-40">/</span>
+                                    <h1 className="text-4xl font-black text-black tracking-tighter flex items-center gap-4">
+                                        <span className="text-blue-300">/</span>
                                         {displayData.ticker}
                                     </h1>
                                 </div>
                             </div>
-                            <button onClick={onClose} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/5 transition-all duration-300 group">
-                                <X className="w-5 h-5 text-blue-400 group-hover:text-white" />
+                            <button onClick={onClose} className="p-3 bg-slate-50 hover:bg-slate-100 rounded-xl border border-slate-200 transition-all duration-300 group">
+                                <X className="w-5 h-5 text-slate-500 group-hover:text-slate-900" />
                             </button>
                         </div>
 
@@ -499,8 +431,8 @@ export const StockTerminalModal = ({
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
                                 {/* LEFT: 가격 추이 차트 + 시장 데이터 */}
                                 <div className="space-y-3">
-                                    <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-3 font-sans">
-                                        <Activity className="w-4 h-4 text-indigo-400" /> 가격 추이 & 목표선
+                                    <h3 className="text-xs font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2 mb-3 font-sans">
+                                        <Activity className="w-4 h-4 text-indigo-600" /> 가격 추이 & 목표선
                                     </h3>
                                     <PriceTrajectoryChart
                                         history={chartHistory}
@@ -511,29 +443,29 @@ export const StockTerminalModal = ({
                                         ohlcData={displayData.ohlcData}
                                     />
                                     <div className="grid grid-cols-3 gap-3 mt-4">
-                                        <div className="bg-blue-950/50 p-3.5 rounded-xl border border-blue-800/60 font-mono">
-                                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block mb-1 font-sans">현재가</span>
-                                            <span className="text-lg font-black text-white">{formatPrice(displayData.price || 0)}</span>
+                                        <div className="bg-blue-50 p-3.5 rounded-xl border border-blue-200 font-mono">
+                                            <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1 font-sans">현재가</span>
+                                            <span className="text-lg font-black text-slate-900">{formatPrice(displayData.price || 0)}</span>
                                             {displayData.changePercent !== undefined && (
                                                 <span className={clsx(
                                                     "text-[10px] font-bold block mt-0.5",
-                                                    displayData.changePercent >= 0 ? "text-emerald-400" : "text-rose-400"
+                                                    displayData.changePercent >= 0 ? "text-emerald-600" : "text-rose-600"
                                                 )}>
                                                     {displayData.changePercent >= 0 ? '+' : ''}{displayData.changePercent.toFixed(2)}%
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="bg-blue-950/50 p-3.5 rounded-xl border border-blue-800/60 font-mono">
-                                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block mb-1 font-sans">고가 (Day)</span>
-                                            <span className="text-lg font-black text-white">
+                                        <div className="bg-blue-50 p-3.5 rounded-xl border border-blue-200 font-mono">
+                                            <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1 font-sans">고가 (Day)</span>
+                                            <span className="text-lg font-black text-slate-900">
                                                 {displayData.dayHigh && displayData.dayHigh > 0
                                                     ? formatPrice(displayData.dayHigh)
                                                     : '—'}
                                             </span>
                                         </div>
-                                        <div className="bg-blue-950/50 p-3.5 rounded-xl border border-blue-800/60 font-mono">
+                                        <div className="bg-blue-50 p-3.5 rounded-xl border border-blue-200 font-mono">
                                             <span className="text-[9px] font-bold text-blue-500 uppercase tracking-widest block mb-1">거래량</span>
-                                            <span className="text-lg font-black text-white">
+                                            <span className="text-lg font-black text-slate-900">
                                                 {displayData.volume && displayData.volume > 0
                                                     ? formatVolume(displayData.volume)
                                                     : '—'}
@@ -543,17 +475,17 @@ export const StockTerminalModal = ({
                                 </div>
 
                                 {/* RIGHT: 퀀트 분석 매트릭스 */}
-                                <div className="bg-[#020617]/40 rounded-2xl border border-blue-800/80 p-7 flex flex-col justify-center relative overflow-hidden group">
-                                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                        <Fingerprint className="w-24 h-24" />
+                                <div className="bg-blue-50/50 rounded-2xl border border-blue-200 p-7 flex flex-col justify-center relative overflow-hidden group">
+                                    <div className="absolute top-0 right-0 p-4 opacity-[0.06] group-hover:opacity-10 transition-opacity">
+                                        <Fingerprint className="w-24 h-24 text-blue-900" />
                                     </div>
                                     <div className="relative z-10">
                                         <div className="flex justify-between items-end mb-6">
                                             <div>
-                                                <h3 className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-1 font-sans">퀀트 분석 매트릭스</h3>
-                                                <p className="text-[11px] text-blue-400 font-bold tracking-tight font-sans font-sans">RSI · MACD · ADX · RVOL 실측 기반</p>
+                                                <h3 className="text-xs font-black text-blue-600 uppercase tracking-widest mb-1 font-sans">퀀트 분석 매트릭스</h3>
+                                                <p className="text-[11px] text-blue-500 font-bold tracking-tight font-sans">RSI · MACD · ADX · RVOL 실측 기반</p>
                                             </div>
-                                            <span className="text-5xl font-black text-white font-mono tracking-tighter drop-shadow-[0_0_15px_rgba(34,211,238,0.4)]">
+                                            <span className="text-5xl font-black text-slate-900 font-mono tracking-tighter">
                                                 {displayData.dnaScore}
                                             </span>
                                         </div>
@@ -564,13 +496,15 @@ export const StockTerminalModal = ({
                                                 maxValue={100}
                                                 colorClass={rsiColor}
                                                 displayValue={rsiVal > 0 ? rsiVal.toFixed(1) : '—'}
+                                                description="상대강도지수. 30 이하는 과매도(반등 기대), 70 이상은 과매수(조정 위험) 구간입니다."
                                             />
                                             <QuantIndicatorBar
                                                 label="MACD Histogram"
                                                 value={macdNorm}
                                                 maxValue={100}
                                                 colorClass={macdColor}
-                                                displayValue={macdRaw !== 0 ? (macdRaw > 0 ? '+' : '') + macdRaw.toFixed(3) : '—'}
+                                                displayValue={hasMacd ? (macdRaw > 0 ? '+' : '') + macdRaw.toFixed(3) : '—'}
+                                                description="단기·장기 이동평균 추세 차이. 0보다 크면(초록) 상승 모멘텀, 작으면(빨강) 하락 모멘텀을 의미합니다."
                                             />
                                             <QuantIndicatorBar
                                                 label="ADX (추세 강도)"
@@ -578,6 +512,7 @@ export const StockTerminalModal = ({
                                                 maxValue={100}
                                                 colorClass={adxColor}
                                                 displayValue={adxVal > 0 ? adxVal.toFixed(1) : '—'}
+                                                description="추세의 강도를 나타내는 지표. 25 이상이면 뚜렷한 추세, 20 이하면 방향성 없는 횡보 구간입니다."
                                             />
                                             <QuantIndicatorBar
                                                 label="RVOL (상대거래량)"
@@ -586,44 +521,9 @@ export const StockTerminalModal = ({
                                                 colorClass={rvolColor}
                                                 displayValue={rvolVal > 0 ? rvolVal.toFixed(1) : '—'}
                                                 unit="x"
+                                                description="평소 대비 현재 거래량 배수. 1.5배 이상이면 시장의 관심이 집중되고 있다는 신호입니다."
                                             />
                                         </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* ─── 투자 판단 근거 ───────────────────────────────────── */}
-                            <div className="bg-[#0d1527]/40 rounded-2xl border border-white/5 p-7 space-y-5">
-                                <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2 mb-3 font-sans">
-                                    <Zap className="w-4 h-4 text-indigo-400 fill-indigo-400/10" /> 투자 판단 근거
-                                </h3>
-                                <p className="text-sm text-blue-300 font-medium leading-relaxed mb-5">
-                                    {finalVerdict}
-                                </p>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5 border-t border-blue-800/50">
-                                    <div className="space-y-3">
-                                        <span className="text-[11px] font-black text-emerald-400 uppercase tracking-wider block mb-2 font-sans">
-                                            강세 요인 (Bull Case)
-                                        </span>
-                                        <ul className="space-y-2.5">
-                                            {finalBullPoints.slice(0, 4).map((pt, i) => (
-                                                <li key={i} className="flex gap-2.5 text-xs text-blue-300 font-medium items-start leading-relaxed">
-                                                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" /> {pt}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                    <div className="space-y-3">
-                                        <span className="text-[11px] font-black text-rose-400 uppercase tracking-wider block mb-2 font-sans">
-                                            리스크 요인 (Bear Case)
-                                        </span>
-                                        <ul className="space-y-2.5">
-                                            {finalBearPoints.slice(0, 4).map((pt, i) => (
-                                                <li key={i} className="flex gap-2.5 text-xs text-blue-400 font-medium items-start leading-relaxed">
-                                                    <TrendingDown className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" /> {pt}
-                                                </li>
-                                            ))}
-                                        </ul>
                                     </div>
                                 </div>
                             </div>
@@ -631,9 +531,9 @@ export const StockTerminalModal = ({
 
 
 
-                        <div className="p-8 pt-4 border-t border-blue-800/80 bg-[#020617] flex justify-between items-center relative z-10 font-mono">
+                        <div className="p-8 pt-4 border-t border-slate-100 bg-white flex justify-between items-center relative z-10 font-mono">
                             <div className="flex items-center gap-4">
-                                <button onClick={onClose} className="text-[10px] font-black text-blue-400 hover:text-white uppercase tracking-[0.2em] transition-all bg-white/5 px-6 py-3 rounded-xl border border-white/5">
+                                <button onClick={onClose} className="text-[10px] font-black text-blue-600 hover:text-blue-900 uppercase tracking-[0.2em] transition-all bg-blue-50 hover:bg-blue-100 px-6 py-3 rounded-xl border border-blue-200">
                                     Close
                                 </button>
 
@@ -646,7 +546,7 @@ export const StockTerminalModal = ({
                                                 console.error("Watchlist add error:", error);
                                             }
                                         }}
-                                        className="text-[10px] font-black text-cyan-400 hover:text-cyan-300 uppercase tracking-[0.2em] transition-all bg-cyan-500/10 px-6 py-3 rounded-xl border border-cyan-500/20 flex items-center gap-2"
+                                        className="text-[10px] font-black text-cyan-700 hover:text-cyan-800 uppercase tracking-[0.2em] transition-all bg-cyan-50 hover:bg-cyan-100 px-6 py-3 rounded-xl border border-cyan-200 flex items-center gap-2"
                                     >
                                         <List className="w-3.5 h-3.5" />
                                         Watchlist
@@ -654,29 +554,9 @@ export const StockTerminalModal = ({
                                 )}
                             </div>
 
-                            <div className="flex items-center gap-4">
-                                <div className="hidden md:flex flex-col items-end mr-2 text-right">
-                                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest font-sans">Kelly 적정 비중</span>
-                                    <span className="text-xs font-black text-indigo-400">{displayData.kellyWeight?.toFixed(1) ?? '—'}%</span>
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        if (onExecuteTrade) {
-                                            onExecuteTrade({
-                                                ticker: displayData.ticker,
-                                                price: displayData.price || 0,
-                                                targetPrice: displayData.targetPrice,
-                                                stopPrice: displayData.stopPrice,
-                                                lotSize: displayData.kellyWeight
-                                            });
-                                        }
-                                    }}
-                                    className="group relative px-10 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-[0.2em] transition-all shadow-lg active:scale-95 flex items-center gap-3"
-                                >
-                                    <ShieldCheck className="w-4 h-4 text-white" />
-                                    <span>Execute Trade</span>
-                                    <ArrowUpRight className="w-4 h-4 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                                </button>
+                            <div className="hidden md:flex flex-col items-end mr-2 text-right">
+                                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest font-sans">Kelly 적정 비중</span>
+                                <span className="text-xs font-black text-indigo-600">{displayData.kellyWeight?.toFixed(1) ?? '—'}%</span>
                             </div>
                         </div>
                     </motion.div>

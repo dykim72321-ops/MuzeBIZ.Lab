@@ -82,6 +82,23 @@ export interface StrategyStats {
   recent_trades_count: number;
 }
 
+export interface StrategyReportBucket {
+  period_label: string;
+  win_rate: number;
+  profit_factor: number;
+  mdd: number;
+  avg_pnl: number;
+  total_trades: number;
+  gross_profit: number;
+  gross_loss: number;
+}
+
+export interface StrategyReportsResponse {
+  period: 'week' | 'month';
+  buckets: StrategyReportBucket[];
+  message: string;
+}
+
 export interface BacktestRunParams {
   tickers?: string[];
   start_date?: string;
@@ -89,7 +106,6 @@ export interface BacktestRunParams {
   gamma?: number;
   delta?: number;
   lambda_val?: number;
-  slippage_rate?: number;
   deviation_threshold?: number;
   target_atr?: number;
 }
@@ -380,6 +396,46 @@ export async function fetchStrategyStats(): Promise<StrategyStats | null> {
     console.error('[PythonAPI] Strategy stats error:', error);
     return null;
   }
+}
+
+/**
+ * 주간/월간 전략 성과 리포트 조회
+ */
+export async function fetchStrategyReports(period: 'week' | 'month' = 'month'): Promise<StrategyReportsResponse | null> {
+  try {
+    return await apiClient.get<StrategyReportsResponse>(`/api/strategy/reports?period=${period}`);
+  } catch (error) {
+    console.error('[PythonAPI] Strategy reports error:', error);
+    return null;
+  }
+}
+
+export interface ChecklistItem {
+  item_key: string;
+  category: string;
+  label: string;
+  is_checked: boolean;
+  checked_at: string | null;
+  sort_order: number;
+}
+
+/**
+ * 실계좌 전환 체크리스트 조회
+ */
+export async function fetchChecklist(): Promise<ChecklistItem[]> {
+  try {
+    return await apiClient.broker.get<ChecklistItem[]>('/api/checklist');
+  } catch (error) {
+    console.error('[PythonAPI] Checklist fetch error:', error);
+    return [];
+  }
+}
+
+/**
+ * 실계좌 전환 체크리스트 항목 토글
+ */
+export async function toggleChecklistItem(itemKey: string): Promise<ChecklistItem> {
+  return apiClient.broker.post<ChecklistItem>(`/api/checklist/${itemKey}/toggle`, {});
 }
 
 export async function fetchPennyScanStatus(): Promise<PennyScanStatusResponse | null> {

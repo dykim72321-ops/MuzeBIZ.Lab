@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Bell, Database, Save, RefreshCw, Shield, ShieldOff, ShieldCheck, Send } from 'lucide-react';
+import { Settings, Bell, Save, RefreshCw, Shield, ShieldOff, ShieldCheck, Send } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
 import { toggleSystemArm, updateWebhookUrl, testWebhook } from '../../services/pythonApiService';
 
 export const CommandSettings: React.FC = () => {
-  const [dnaThreshold, setDnaThreshold] = useState<number>(85);
   const [webhookUrl, setWebhookUrl] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
-  const [isClearing, setIsClearing] = useState(false);
 
   const [isArmed, setIsArmed] = useState<boolean>(false);
   const [isTogglingArm, setIsTogglingArm] = useState(false);
@@ -22,7 +20,6 @@ export const CommandSettings: React.FC = () => {
         .single();
 
       if (data) {
-        if (data.alert_threshold) setDnaThreshold(data.alert_threshold);
         if (data.webhook_url) setWebhookUrl(data.webhook_url);
         if (data.is_armed !== undefined) setIsArmed(!!data.is_armed);
       }
@@ -60,7 +57,6 @@ export const CommandSettings: React.FC = () => {
       const { error } = await supabase
         .from('system_settings')
         .update({
-          alert_threshold: dnaThreshold,
           webhook_url: webhookUrl || null,
           updated_at: new Date().toISOString(),
         })
@@ -75,8 +71,8 @@ export const CommandSettings: React.FC = () => {
         // 백엔드 미응답 시 DB 저장은 성공으로 처리
       }
 
-      toast.success('Matrix Config Saved', {
-        description: 'System thresholds globally updated.',
+      toast.success('Webhook Config Saved', {
+        description: 'Discord webhook URL updated.',
       });
     } catch (error) {
       console.error('Settings save error:', error);
@@ -102,43 +98,6 @@ export const CommandSettings: React.FC = () => {
     } finally {
       setIsTesting(false);
     }
-  };
-
-  const handleClearCache = async () => {
-    toast('💣 Cache Flush Confirmation', {
-      description: '정말 백테스트 캐시를 모두 초기화하시겠습니까? 다음 호출 시 연산 부하가 발생할 수 있습니다.',
-      action: {
-        label: '캐시 초기화',
-        onClick: async () => {
-          setIsClearing(true);
-          const toastId = toast.loading('Purging backtest memory tables...');
-          try {
-            const { error } = await supabase
-              .from('backtest_cache')
-              .delete()
-              .neq('ticker', 'dummy');
-
-            if (error) throw error;
-            toast.success('Cache Flushed', {
-              description: 'All backtest data has been cleared.',
-              id: toastId,
-            });
-          } catch (error) {
-            console.error('Cache clear error:', error);
-            toast.error('Flush Error', {
-              description: 'Could not purge memory tables.',
-              id: toastId,
-            });
-          } finally {
-            setIsClearing(false);
-          }
-        },
-      },
-      cancel: {
-        label: '취소',
-        onClick: () => {},
-      },
-    });
   };
 
   return (
@@ -216,63 +175,22 @@ export const CommandSettings: React.FC = () => {
             <Bell className="w-4 h-4 text-indigo-400" /> Alert & Webhook Setup
           </h4>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pl-6 border-l-2 border-blue-100">
-            <div className="space-y-2">
-              <label className="text-[11px] font-black text-blue-500 uppercase tracking-wider font-mono">DNA Score Threshold (Target)</label>
-              <div className="flex items-center gap-4">
-                <input
-                  type="range"
-                  min="50" max="100"
-                  value={dnaThreshold}
-                  onChange={(e) => setDnaThreshold(Number(e.target.value))}
-                  className="flex-1 accent-indigo-555"
-                />
-                <span className={`text-lg font-black w-12 text-right font-mono ${dnaThreshold >= 85 ? 'text-rose-500' : 'text-indigo-600'}`}>
-                  {dnaThreshold}
-                </span>
-              </div>
-              <p className="text-[10px] text-blue-500">이 점수 이상을 획득한 종목만 Webhook으로 알림을 전송합니다.</p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[11px] font-black text-blue-500 uppercase tracking-wider font-mono">Discord Webhook URL</label>
-              <input
-                type="password"
-                value={webhookUrl}
-                onChange={(e) => setWebhookUrl(e.target.value)}
-                placeholder="https://discord.com/api/webhooks/..."
-                className="w-full text-sm px-3 py-2 bg-white border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all text-blue-800 font-mono shadow-sm"
-              />
-              <button
-                onClick={handleTestWebhook}
-                disabled={isTesting || !webhookUrl}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-lg text-[11px] font-bold hover:bg-blue-50 hover:border-indigo-300 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono shadow-sm"
-              >
-                {isTesting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                {isTesting ? 'Sending...' : 'Test Webhook'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. 시스템 유지보수 (Cache Control) */}
-        <div className="space-y-4">
-          <h4 className="text-xs font-bold text-blue-400 uppercase flex items-center gap-2 font-mono">
-            <Database className="w-4 h-4 text-indigo-400" /> System Maintenance
-          </h4>
-
-          <div className="pl-6 border-l-2 border-blue-100 flex items-center justify-between bg-blue-50 border border-blue-200 p-4 rounded-lg">
-            <div>
-              <p className="text-sm font-bold text-blue-800 font-mono">Backtest Matrix Cache</p>
-              <p className="text-[10px] text-blue-500 mt-1">알고리즘 v4 업데이트 후 즉각적인 재연산이 필요할 때 캐시를 초기화합니다.</p>
-            </div>
+          <div className="pl-6 border-l-2 border-blue-100 space-y-2 max-w-md">
+            <label className="text-[11px] font-black text-blue-500 uppercase tracking-wider font-mono">Discord Webhook URL</label>
+            <input
+              type="password"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              placeholder="https://discord.com/api/webhooks/..."
+              className="w-full text-sm px-3 py-2 bg-white border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all text-blue-800 font-mono shadow-sm"
+            />
             <button
-              onClick={handleClearCache}
-              disabled={isClearing}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-rose-200 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-50 transition-colors disabled:opacity-50 font-mono shadow-sm"
+              onClick={handleTestWebhook}
+              disabled={isTesting || !webhookUrl}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-lg text-[11px] font-bold hover:bg-blue-50 hover:border-indigo-300 hover:text-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono shadow-sm"
             >
-              <RefreshCw className={`w-3 h-3 ${isClearing ? 'animate-spin' : ''}`} />
-              {isClearing ? 'FLUSHING...' : 'FLUSH CACHE'}
+              {isTesting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+              {isTesting ? 'Sending...' : 'Test Webhook'}
             </button>
           </div>
         </div>
@@ -285,7 +203,7 @@ export const CommandSettings: React.FC = () => {
             className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-lg text-xs font-black uppercase tracking-wider hover:bg-indigo-500 transition-colors disabled:opacity-50 shadow-lg shadow-indigo-950/40 active:scale-95 font-mono"
           >
             <Save className="w-4 h-4" />
-            {isSaving ? 'Saving Matrix...' : 'Save Configuration'}
+            {isSaving ? 'Saving...' : 'Save Configuration'}
           </button>
         </div>
       </div>

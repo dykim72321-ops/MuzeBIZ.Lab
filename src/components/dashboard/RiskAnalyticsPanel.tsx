@@ -62,7 +62,7 @@ export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
     return (
       <div className="sfdc-card p-6 flex flex-col items-center justify-center min-h-[200px] gap-3">
         <AlertTriangle className="w-8 h-8 text-amber-500" />
-        <p className="text-sm font-bold text-blue-900">청산 이력 필요</p>
+        <p className="text-sm font-black text-blue-900">청산 이력 필요</p>
         <p className="text-xs text-blue-800 text-center">리스크 지표는 청산 이력이 있을 때 표시됩니다.</p>
       </div>
     );
@@ -119,7 +119,7 @@ export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
           <div key={card.label} className="bg-blue-50 border-2 border-blue-100 rounded-md p-3">
             <span className="text-[9px] font-black text-blue-950 uppercase tracking-widest block mb-1">{card.label}</span>
             <span className={clsx('text-base font-black font-mono block', card.color)}>{card.value}</span>
-            {card.sub && <span className="text-[10px] font-bold text-blue-800 block mt-0.5">{card.sub}</span>}
+            {card.sub && <span className="text-[10px] font-black text-blue-800 block mt-0.5">{card.sub}</span>}
           </div>
         ))}
       </div>

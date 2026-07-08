@@ -19,7 +19,6 @@ export const BacktestPanel = () => {
     gamma: 0.8,
     delta: 1.5,
     lambda_val: 2.0,
-    slippage_rate: 0.01,
     deviation_threshold: -0.07,
     target_atr: 5.0,
   });
@@ -198,7 +197,7 @@ export const BacktestPanel = () => {
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <BarChart3 className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">자산 곡선 ($10,000 기준)</span>
+                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">자산 곡선 ($100,000 기준 · 실계좌 동일)</span>
               </div>
               <div className="h-40 w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -223,13 +222,13 @@ export const BacktestPanel = () => {
               </div>
               <div className="flex items-center justify-between text-[10px] font-mono text-blue-500">
                 <span>
-                  최종: <span className={clsx('font-black', (result.equity_curve[result.equity_curve.length - 1]?.value ?? 10000) >= 10000 ? 'text-emerald-600' : 'text-rose-600')}>
-                    ${(result.equity_curve[result.equity_curve.length - 1]?.value ?? 10000).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  최종: <span className={clsx('font-black', (result.equity_curve[result.equity_curve.length - 1]?.value ?? 100000) >= 100000 ? 'text-emerald-600' : 'text-rose-600')}>
+                    ${(result.equity_curve[result.equity_curve.length - 1]?.value ?? 100000).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </span>
                 </span>
                 {(() => {
-                  const final = result.equity_curve[result.equity_curve.length - 1]?.value ?? 10000;
-                  const ret = ((final - 10000) / 10000) * 100;
+                  const final = result.equity_curve[result.equity_curve.length - 1]?.value ?? 100000;
+                  const ret = ((final - 100000) / 100000) * 100;
                   return (
                     <span className={clsx('font-black flex items-center gap-1', ret >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
                       {ret >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}

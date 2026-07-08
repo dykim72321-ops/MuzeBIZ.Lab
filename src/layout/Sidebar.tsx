@@ -2,13 +2,11 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
     LayoutDashboard,
-    FlaskConical,
-
-    Settings,
     Dna,
     LifeBuoy,
     Folder,
     Server,
+    BarChart3,
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { LucideIcon } from 'lucide-react';
@@ -35,13 +33,7 @@ const NAVIGATION: { section: string; items: NavItem[] }[] = [
         section: 'ANALYSIS & FUND',
         items: [
             { name: '알파 펀드 (Alpha Fund)', icon: Folder, path: '/portfolio' },
-            { name: 'DNA 시뮬레이터', icon: FlaskConical, path: '/dna-simulator' },
-        ]
-    },
-    {
-        section: 'SYSTEM',
-        items: [
-            { name: '환경 설정 (Settings)', icon: Settings, path: '/settings' },
+            { name: '성과 리포트', icon: BarChart3, path: '/reports' },
         ]
     }
 ];

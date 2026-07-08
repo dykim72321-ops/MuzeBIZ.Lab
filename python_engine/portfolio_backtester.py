@@ -5,6 +5,12 @@ import ta
 import warnings
 from datetime import datetime
 
+from paper_engine import (
+    INITIAL_CAPITAL,
+    PENNY_MAX_PRICE,
+    _apply_slippage,
+)
+
 # 경고 무시
 warnings.filterwarnings("ignore")
 
@@ -18,17 +24,17 @@ class DNAValidator:
         gamma: float = 0.8,  # 수익 모멘텀
         delta: float = 1.5,  # 손실 공포
         lambda_val: float = 2.0,  # 시간 감가
-        slippage_rate: float = 0.01,  # [Optimized] 0.2% -> 1.0% (Penny Stock Reality)
         deviation_threshold: float = -0.07,  # [Optimized] 이격도 진입 장벽
         target_atr: float = 5.0,  # [Optimized] 목표 ATR 멀티플라이어
     ):
+        # 슬리피지는 paper_engine._apply_slippage()로 라이브 엔진과 동일하게 산출한다
+        # (페니 여부 · 거래량 저유동성 2배 가중 반영) — 별도 flat slippage_rate 파라미터는 사용하지 않음
         self.tickers = tickers
         self.start_date = start_date
         self.end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         self.gamma = gamma
         self.delta = delta
         self.lambda_val = lambda_val
-        self.slippage_rate = slippage_rate
         self.deviation_threshold = deviation_threshold
         self.target_atr = target_atr
         self.benchmark_data = None
@@ -157,6 +163,7 @@ class DNAValidator:
         entry_date = None
         target_price = 0
         stop_price = 0
+        is_penny = False
 
         for i in range(20, len(df)):  # RVOL을 위해 20봉 이후부터
             current_close = df["Close"].iloc[i]
@@ -164,6 +171,7 @@ class DNAValidator:
             current_low = df["Low"].iloc[i]
             current_date = df.index[i]
             current_atr = df["ATR5"].iloc[i]
+            current_volume = int(df["Volume"].iloc[i])
 
             if not is_holding:
                 # [전략 변경] Mean Reversion (낙폭과대 역추세) 진입 로직:
@@ -174,7 +182,14 @@ class DNAValidator:
 
                 if cond1 and cond2:
                     is_holding = True
-                    entry_price = current_close * (1 + self.slippage_rate)
+                    # 라이브 엔진(paper_engine._apply_slippage)과 동일한 페니/저유동성 슬리피지 모델 적용
+                    is_penny = current_close <= PENNY_MAX_PRICE
+                    entry_price = _apply_slippage(
+                        current_close,
+                        is_buy=True,
+                        is_penny=is_penny,
+                        volume=current_volume,
+                    )
                     entry_date = current_date
                     entry_idx = i
 
@@ -249,7 +264,12 @@ class DNAValidator:
 
                 # [전략 변경] 극한의 Time Stop 로직 (3일 초과 시 무조건 청산)
                 if days_held > 3:
-                    exit_price = current_close * (1 - self.slippage_rate)
+                    exit_price = _apply_slippage(
+                        current_close,
+                        is_buy=False,
+                        is_penny=is_penny,
+                        volume=current_volume,
+                    )
                     pnl = (exit_price - entry_price) / entry_price
                     trades.append(
                         {
@@ -267,7 +287,12 @@ class DNAValidator:
 
                 # 1. 장중 목표가 달성
                 if current_high >= target_price:
-                    exit_price = target_price * (1 - self.slippage_rate)
+                    exit_price = _apply_slippage(
+                        target_price,
+                        is_buy=False,
+                        is_penny=is_penny,
+                        volume=current_volume,
+                    )
                     trades.append(
                         {
                             "ticker": ticker,
@@ -282,7 +307,12 @@ class DNAValidator:
 
                 # 2. 장중 손절가 이탈
                 elif current_low <= stop_price:
-                    exit_price = stop_price * (1 - self.slippage_rate)
+                    exit_price = _apply_slippage(
+                        stop_price,
+                        is_buy=False,
+                        is_penny=is_penny,
+                        volume=current_volume,
+                    )
                     trades.append(
                         {
                             "ticker": ticker,
@@ -297,7 +327,12 @@ class DNAValidator:
 
                 # 3. Kelly Weight가 0 이하로 떨어져 강제 청산 (종가 기준)
                 elif kelly_weight <= 0:
-                    exit_price = current_close * (1 - self.slippage_rate)
+                    exit_price = _apply_slippage(
+                        current_close,
+                        is_buy=False,
+                        is_penny=is_penny,
+                        volume=current_volume,
+                    )
                     pnl = (exit_price - entry_price) / entry_price
                     trades.append(
                         {
@@ -372,13 +407,13 @@ class DNAValidator:
             "avg_days": round(avg_days, 1),
         }
 
-        # equity curve for frontend chart
+        # equity curve for frontend chart — 라이브 계좌(INITIAL_CAPITAL)와 동일 기준으로 산출
         equity_curve = []
-        capital = 10000.0
+        capital = INITIAL_CAPITAL
         for idx_num, (_, row) in enumerate(df_trades.iterrows()):
             capital *= 1 + row["pnl"]
             equity_curve.append({"trade": idx_num + 1, "value": round(capital, 2)})
-        stats["equity_curve"] = [{"trade": 0, "value": 10000.0}] + equity_curve
+        stats["equity_curve"] = [{"trade": 0, "value": INITIAL_CAPITAL}] + equity_curve
 
         print("\n" + "=" * 60)
         print("  🧬 DNA Scoring Engine | Statistical Backtest Report")

@@ -4,30 +4,20 @@ import { useNavigate } from 'react-router-dom';
 import { useMockAuth } from '../hooks/useMockAuth';
 import {
   X,
-  TrendingDown,
-  Scale,
-  Activity,
-  Calculator,
-  ShieldAlert,
-  TerminalSquare,
-  Cpu,
-  Crosshair,
-  LayoutGrid,
-  FlaskConical,
   Search,
-  Bell,
-  ActivitySquare
+  LayoutDashboard,
+  BarChart3,
+  Menu
 } from 'lucide-react';
-import clsx from 'clsx';
-import { 
-  ResponsiveContainer, 
-  ComposedChart, 
-  Area, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip 
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Line,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
 } from 'recharts';
 
 // Custom styles for marquee animation
@@ -37,37 +27,96 @@ const styleSheet = `
     100% { transform: translateX(-50%); }
   }
   .animate-marquee {
-    animation: marquee 30s linear infinite;
+    animation: marquee 90s linear infinite;
   }
 `;
 
 // Mock Data for Recharts
-const mockChartData = [
-  { time: '09:30', price: 150.2, sma: 149.5, exit: 148.0 },
-  { time: '10:00', price: 152.4, sma: 150.1, exit: 148.5 },
-  { time: '10:30', price: 151.8, sma: 150.8, exit: 149.2 },
-  { time: '11:00', price: 154.2, sma: 151.4, exit: 149.8 },
-  { time: '11:30', price: 155.1, sma: 152.2, exit: 150.5 },
-  { time: '12:00', price: 153.8, sma: 152.9, exit: 151.0 },
-  { time: '12:30', price: 156.4, sma: 153.5, exit: 151.5 },
-  { time: '13:00', price: 158.2, sma: 154.2, exit: 152.2 },
-  { time: '13:30', price: 157.9, sma: 155.0, exit: 153.0 },
-  { time: '14:00', price: 159.5, sma: 155.8, exit: 153.8 },
-  { time: '14:30', price: 161.2, sma: 156.5, exit: 154.5 },
-  { time: '15:00', price: 162.8, sma: 157.4, exit: 155.4 },
+const mockChartData = Array.from({ length: 80 }, (_, i) => {
+  const basePrice = 64250 + Math.sin(i * 0.1) * 200 + i * 2;
+  return {
+    time: `10:${(i + 10).toString().padStart(2, '0')}`,
+    price: Number(basePrice.toFixed(2)),
+    sma20: Number((basePrice - 45).toFixed(2)),
+    sma50: Number((basePrice - 110).toFixed(2)),
+    upperBand: Number((basePrice + 180).toFixed(2)),
+    lowerBand: Number((basePrice - 180).toFixed(2)),
+    volume: Math.floor(Math.random() * 800) + 200
+  };
+});
+
+
+
+const tickerData = [
+  { symbol: 'AAPL', price: '189.43', change: 1.24 },
+  { symbol: 'MSFT', price: '420.55', change: 0.89 },
+  { symbol: 'NVDA', price: '942.31', change: 2.45 },
+  { symbol: 'GOOGL', price: '178.12', change: -0.34 },
+  { symbol: 'AMZN', price: '185.00', change: 1.12 },
+  { symbol: 'META', price: '502.11', change: -1.20 },
+  { symbol: 'TSLA', price: '175.22', change: -2.31 },
+  { symbol: 'BRK.B', price: '405.10', change: 0.15 },
+  { symbol: 'AVGO', price: '1330.2', change: 3.12 },
+  { symbol: 'LLY', price: '780.40', change: 0.45 },
+  { symbol: 'JPM', price: '198.20', change: 0.22 },
+  { symbol: 'V', price: '275.10', change: -0.12 },
+  { symbol: 'BTC/USD', price: '64,281.4', change: 0.14 },
+  { symbol: 'ETH/USD', price: '3,492.1', change: -0.85 },
 ];
 
 export default function LandingPage() {
   const { isLoading, isAuthenticated, signIn } = useMockAuth();
   const navigate = useNavigate();
-  
-  // State for login modal
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [email, setEmail] = useState('admin@muzestop.lab');
-  const [password, setPassword] = useState('hunterpassword');
-  // Optional: keep track of where to route after login
-  const [targetRoute, setTargetRoute] = useState('/dna-simulator');
+  const [targetRoute, setTargetRoute] = useState('/stock/dashboard');
   
+  const [liveChartData, setLiveChartData] = useState(mockChartData);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLiveChartData(prev => {
+        const newData = [...prev.slice(1)];
+        const last = prev[prev.length - 1];
+        
+        // Institutional grade tick simulation
+        const timeVal = Date.now() / 10000;
+        const trend = Math.sin(timeVal) * 2;
+        const noise = (Math.random() - 0.5) * 8;
+        const newPrice = Number((last.price + trend + noise).toFixed(2));
+        
+        const newSma20 = Number((last.sma20 * 0.95 + newPrice * 0.05).toFixed(2));
+        const newSma50 = Number((last.sma50 * 0.98 + newPrice * 0.02).toFixed(2));
+        
+        const volatility = Math.abs(newPrice - newSma20) + 60;
+        const newUpper = Number((newSma20 + volatility * 2).toFixed(2));
+        const newLower = Number((newSma20 - volatility * 2).toFixed(2));
+        
+        const newVolume = Math.floor(Math.random() * 800) + 200;
+
+        const [hours, mins] = last.time.split(':').map(Number);
+        let newMins = mins + 1;
+        let newHours = hours;
+        if (newMins >= 60) {
+          newMins -= 60;
+          newHours += 1;
+        }
+        const newTime = `${newHours.toString().padStart(2, "0")}:${newMins.toString().padStart(2, "0")}`;
+
+        newData.push({ 
+          time: newTime, 
+          price: newPrice, 
+          sma20: newSma20, 
+          sma50: newSma50, 
+          upperBand: newUpper, 
+          lowerBand: newLower, 
+          volume: newVolume 
+        });
+        return newData;
+      });
+    }, 800);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await signIn('');
@@ -87,429 +136,374 @@ export default function LandingPage() {
     setShowLoginModal(true);
   };
 
-  const mockTickers = [
-    { sym: 'AAPL', price: '173.50', change: '+1.2%', up: true },
-    { sym: 'NVDA', price: '884.23', change: '+3.4%', up: true },
-    { sym: 'TSLA', price: '184.11', change: '-2.1%', up: false },
-    { sym: 'MSFT', price: '420.55', change: '+0.5%', up: true },
-    { sym: 'AMD', price: '164.21', change: '-1.2%', up: false },
-    { sym: 'META', price: '502.11', change: '+1.8%', up: true },
-    { sym: 'AMZN', price: '178.22', change: '-0.3%', up: false },
-    { sym: 'GOOGL', price: '144.12', change: '+0.9%', up: true },
-  ];
-
   return (
-    <div className="min-h-screen bg-blue-50 text-blue-950 overflow-x-hidden font-sans relative selection:bg-blue-300 selection:text-black">
-      <style>{styleSheet}</style>
-      
-      {/* Background atmospheric glows - Light Mode */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-blue-600/10 blur-[120px] pointer-events-none rounded-full" />
-      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-cyan-600/5 blur-[150px] pointer-events-none rounded-full" />
-
-      {/* Top Header */}
-      <header className="fixed top-0 w-full z-50 bg-white/95 backdrop-blur-xl border-b-2 border-blue-200 shadow-sm">
-        <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      {/* Top Header - Matched exactly to TopNav design */}
+      <header className="absolute top-0 w-full z-50 bg-white/95 backdrop-blur-xl border-b border-blue-200 shadow-sm font-sans">
+        <div className="flex justify-between items-center px-6 h-16 w-full">
           
-          {/* Logo */}
-          <div className="flex items-center gap-3 select-none cursor-pointer group">
-            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center border-2 border-blue-300">
-              <ActivitySquare className="w-4 h-4 text-blue-700" />
+          {/* Left: Logo & Nav */}
+          <div className="flex items-center gap-8">
+            <div className="flex items-center gap-3 group">
+              <div className="w-10 h-10 bg-white rounded-lg border border-blue-200 flex items-center justify-center shadow-sm overflow-hidden p-1 group-hover:border-blue-400 transition-all">
+                <img src="/logo.png" alt="MuzeBIZ Logo" className="w-full h-full object-contain pointer-events-none select-none group-hover:scale-110 transition-transform" />
+              </div>
+              <span className="text-xl font-black text-black tracking-tighter uppercase font-mono pointer-events-none select-none">
+                MuzeBIZ<span className="text-blue-700">.Lab</span>
+              </span>
             </div>
-            <span className="text-[15px] font-black text-black tracking-wide uppercase font-mono flex items-center gap-0.5">
-              MUZEBIZ<span className="text-blue-700">.LAB</span>
-            </span>
+
+            <div className="hidden lg:flex items-center gap-6">
+              <button onClick={() => handleNavClick('/stock/dashboard')} className="py-5 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] transition-all border-b-2 text-blue-900 border-transparent hover:text-black hover:border-blue-300">
+                <LayoutDashboard className="w-4 h-4" />
+                <span>통합지휘소</span>
+              </button>
+              <button onClick={() => handleNavClick('/reports')} className="py-5 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] transition-all border-b-2 text-blue-900 border-transparent hover:text-black hover:border-blue-300">
+                <BarChart3 className="w-4 h-4" />
+                <span>성과 리포트</span>
+              </button>
+              <button onClick={() => handleNavClick('/parts-search')} className="py-5 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] transition-all border-b-2 text-blue-900 border-transparent hover:text-black hover:border-blue-300">
+                <Search className="w-4 h-4" />
+                <span>제품 검색</span>
+              </button>
+            </div>
           </div>
 
-          {/* Center Navigation Links */}
-          <nav className="hidden md:flex items-center gap-2">
-            <button 
-              onClick={() => handleNavClick('/stock/dashboard')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-50 rounded-md text-blue-800 border-2 border-blue-200 hover:bg-blue-100 hover:border-blue-400 transition-colors cursor-pointer shadow-sm"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span className="text-[12px] font-black">통합 지휘소</span>
+          {/* Right: Actions */}
+          <div className="flex items-center gap-4">
+            <button onClick={() => handleNavClick('/stock/dashboard')} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all text-sm font-medium shadow-md">
+                로그인
             </button>
-
-            <button 
-              onClick={() => handleNavClick('/dna-simulator')}
-              className="flex items-center gap-2 px-4 py-2 text-blue-900 border-2 border-transparent hover:text-black hover:bg-blue-50 hover:border-blue-200 rounded-md transition-colors cursor-pointer"
-            >
-              <FlaskConical className="w-3.5 h-3.5" />
-              <span className="text-[12px] font-black">DNA 시뮬레이터</span>
-            </button>
-            <button 
-              onClick={() => handleNavClick('/stock/search')}
-              className="flex items-center gap-2 px-4 py-2 text-blue-900 border-2 border-transparent hover:text-black hover:bg-blue-50 hover:border-blue-200 rounded-md transition-colors cursor-pointer"
-            >
-              <Search className="w-3.5 h-3.5" />
-              <span className="text-[12px] font-black">제품 검색</span>
-            </button>
-          </nav>
-
-          {/* Right Area (Status & Noti & Login) */}
-          <div className="flex items-center gap-4 sm:gap-5">
             <button
-              onClick={() => handleNavClick('/dna-simulator')}
-              className="hidden sm:flex px-4 py-1.5 bg-blue-700 text-white hover:bg-blue-800 text-[11px] font-black uppercase tracking-widest font-mono rounded-md transition-colors cursor-pointer shadow-md"
+              className="lg:hidden p-2 text-blue-900 hover:text-black transition-all cursor-pointer"
+              onClick={() => handleNavClick('/stock/dashboard')}
             >
-              LOGIN
+              <Menu className="w-6 h-6" />
             </button>
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-2 border-blue-200 rounded-full shadow-sm">
-              <div className="w-2 h-2 bg-emerald-600 rounded-full shadow-[0_0_8px_rgba(5,150,105,0.6)] animate-pulse" />
-              <span className="text-[10px] font-black text-blue-900 uppercase tracking-widest font-mono">SYSTEM ONLINE</span>
-            </div>
-            <div className="relative cursor-pointer group">
-              <Bell className="w-5 h-5 text-blue-800 group-hover:text-blue-950 transition-colors" />
-              <div className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-600 rounded-full border-2 border-white" />
-            </div>
           </div>
         </div>
-
-        {/* Real-time Ticker Tape (Attached below nav) */}
-        <div className="h-8 border-t-2 border-blue-200 bg-blue-50 overflow-hidden flex items-center text-[11px] font-mono whitespace-nowrap shadow-inner">
-          <div className="flex animate-marquee min-w-max">
-            {[...mockTickers, ...mockTickers, ...mockTickers].map((t, i) => (
-              <div key={i} className="flex items-center gap-2 px-6 border-r-2 border-blue-200">
-                <span className="text-blue-900 font-bold">{t.sym}</span>
-                <span className="text-black font-black">{t.price}</span>
-                <span className={clsx("font-black", t.up ? "text-emerald-700" : "text-rose-700")}>{t.change}</span>
+      </header>
+      <main className="pt-16">
+        {/* Ticker Tape */}
+        <div className="w-full bg-slate-900 border-b border-slate-800 flex items-center h-10 overflow-hidden relative">
+          <style>{styleSheet}</style>
+          <div className="flex whitespace-nowrap animate-marquee">
+            {[...tickerData, ...tickerData, ...tickerData, ...tickerData].map((item, idx) => (
+              <div key={idx} className="flex items-center gap-3 px-6 border-r border-slate-800 shrink-0 hover:bg-slate-800/50 transition-colors cursor-default">
+                <span className="font-label-mono text-xs font-bold text-slate-300">{item.symbol}</span>
+                <span className="font-data-tabular text-xs text-white">{item.price}</span>
+                <span className={`font-data-tabular text-[10px] ${item.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {item.change >= 0 ? '+' : ''}{item.change}%
+                </span>
               </div>
             ))}
           </div>
         </div>
-      </header>
+{/* Hero & Terminal Simulator */}
+<section className="relative py-unit-large md:py-24 overflow-hidden">
+<div className="max-w-container-max mx-auto px-margin-desktop text-center mb-unit-large">
+<span className="bg-primary-fixed text-on-primary-fixed-variant px-unit-medium py-unit-xsmall rounded-full font-label-mono text-xs mb-unit-medium inline-block">v4.2 ENTERPRISE READY</span>
+<h1 className="font-display-lg text-display-lg-mobile md:text-display-lg text-on-surface mb-unit-medium max-w-4xl mx-auto leading-tight">
+                    지능형 알고리즘으로 설계된 <br className="hidden md:block"/>
+<span className="text-primary">비즈니스 인텔리전스</span>의 정점
+                </h1>
+<p className="font-body-md text-on-surface-variant max-w-2xl mx-auto mb-unit-large">
+                    최고 수준의 데이터 분석과 예측 알고리즘을 통해 차세대 비즈니스 인텔리전스 환경을 구축하십시오. 
+                </p>
+</div>
+{/* Simulator Area */}
+<div className="max-w-container-max mx-auto px-margin-desktop">
+<div className="terminal-bg rounded-xl shadow-2xl overflow-hidden border border-outline/30 p-unit-small md:p-unit-medium relative">
+{/* Terminal Header */}
+<div className="flex items-center justify-between border-b border-outline/20 pb-unit-small mb-unit-small">
+<div className="flex items-center gap-unit-small">
+<div className="flex gap-1.5">
+<div className="w-2.5 h-2.5 rounded-full bg-error"></div>
+<div className="w-2.5 h-2.5 rounded-full bg-secondary-container"></div>
+<div className="w-2.5 h-2.5 rounded-full bg-primary-fixed"></div>
+</div>
+<span className="font-label-mono text-[10px] text-outline ml-unit-small">MUZEBIZ_ANALYTICS_CORE</span>
+</div>
+<div className="flex gap-unit-medium">
+<span className="text-secondary-fixed font-label-mono text-[10px] flex items-center gap-1">
+<span className="w-1.5 h-1.5 rounded-full bg-secondary-fixed animate-pulse"></span>
+                                LIVE FEED
+                            </span>
+<span className="text-outline font-label-mono text-[10px]">UTC+09:00</span>
+</div>
+</div>
+<div className="grid grid-cols-12 gap-gutter">
+{/* Main Chart Area */}
+<div className="col-span-12 lg:col-span-8 space-y-gutter">
+<div className="bg-surface/5 rounded p-unit-medium border border-outline/10 h-80 relative overflow-hidden">
+<div className="absolute top-unit-small left-unit-small flex gap-unit-medium z-10">
+<div>
+<div className="font-label-mono text-[10px] text-outline uppercase">BTC/USD</div>
+<div className="font-data-tabular text-headline-md text-on-primary-container">64,281.40</div>
+</div>
+<div>
+<div className="font-label-mono text-[10px] text-outline uppercase">VOLATILITY</div>
+<div className="font-data-tabular text-headline-md text-secondary-fixed">0.142%</div>
+</div>
+</div>
 
-      <main className="relative z-10 pt-40 pb-24">
-        {/* Hero Section - Structural Layout */}
-        <section className="max-w-[1440px] mx-auto px-6 pt-6 pb-24">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-8 items-center">
-            
-            {/* Left: Text & CTA */}
-            <div className="space-y-8">
-              <motion.div 
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border-2 border-blue-300 text-blue-800 text-[10px] font-black font-mono uppercase tracking-widest shadow-sm"
-              >
-                <Cpu className="w-3.5 h-3.5" />
-                Live: Quantitative Engine v2.0
-              </motion.div>
-              
-              <motion.h1 
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.1 }}
-                className="text-4xl md:text-5xl lg:text-6xl font-black text-black leading-[1.15] tracking-tight"
-              >
-                직관을 넘어서는 데이터,<br/>
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-cyan-600">터미널 하나로 끝내세요</span>
-              </motion.h1>
-              
-              <motion.p 
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.2 }}
-                className="text-blue-950 text-base md:text-lg leading-relaxed max-w-lg font-bold"
-              >
-                기관 레벨의 실시간 스캐닝과 퀀트 알고리즘이 결합된 하이엔드 트레이딩 콕핏. 
-                차트 위에 그려지는 수학적 진입 타점, 켈리 기준 포지션 사이징을 단 1초 만에 시뮬레이션 합니다.
-              </motion.p>
-              
-              <motion.div 
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.3 }}
-                className="flex flex-col sm:flex-row items-center gap-4 pt-4"
-              >
-                <button 
-                  onClick={() => handleNavClick('/stock/dashboard')} 
-                  className="w-full sm:w-auto bg-blue-700 hover:bg-blue-800 border-2 border-blue-800 text-white px-8 py-4 rounded-md font-black text-sm shadow-[0_8px_15px_-3px_rgba(29,78,216,0.3)] transition-all hover:shadow-[0_12px_20px_-3px_rgba(29,78,216,0.5)] cursor-pointer flex items-center justify-center gap-3 font-mono uppercase tracking-widest active:scale-95"
-                >
-                  <Activity className="w-4 h-4 text-cyan-300" />
-                  지휘소 접속하기
-                </button>
-                <div className="text-[10px] font-mono font-black text-blue-900 uppercase tracking-widest border-2 border-blue-200 bg-white px-3 py-1 rounded-md shadow-sm">
-                  Secure Access • Terminal UI
-                </div>
-              </motion.div>
-            </div>
-
-            {/* Right: Realistic Terminal UI with Recharts (Light Mode) */}
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.4, duration: 0.5 }}
-              className="relative w-full max-w-2xl mx-auto lg:mr-0"
-            >
-              {/* Terminal Frame */}
-              <div className="bg-white rounded-lg border-2 border-blue-300 shadow-[0_10px_30px_-5px_rgba(29,78,216,0.15)] overflow-hidden flex flex-col h-[460px]">
-                
-                {/* Terminal Header */}
-                <div className="h-10 bg-blue-100 border-b-2 border-blue-300 flex items-center px-4 justify-between">
-                  <div className="flex gap-2">
-                    <div className="w-3 h-3 rounded-full bg-rose-500 border-2 border-rose-600" />
-                    <div className="w-3 h-3 rounded-full bg-amber-500 border-2 border-amber-600" />
-                    <div className="w-3 h-3 rounded-full bg-emerald-500 border-2 border-emerald-600" />
-                  </div>
-                  <div className="text-[11px] font-black text-blue-900 font-mono tracking-widest flex items-center gap-2">
-                    <ActivitySquare className="w-3 h-3" /> MZT_SIMULATOR_ENV.exe
-                  </div>
-                  <div className="w-12"></div> {/* Spacer for centering */}
-                </div>
-
-                {/* Terminal Content Area */}
-                <div className="flex-1 p-5 flex flex-col gap-4 overflow-hidden bg-blue-50/50">
-                  {/* Top Stats Row */}
-                  <div className="grid grid-cols-4 gap-3">
-                    <div className="bg-white border-2 border-blue-200 rounded-md p-3 shadow-sm">
-                      <div className="text-[10px] font-black text-blue-900 font-mono mb-1">ASSET</div>
-                      <div className="text-xl font-black text-black font-mono leading-none">NVDA</div>
-                      <div className="text-[10px] font-black text-emerald-700 font-mono mt-1.5">+3.42%</div>
-                    </div>
-                    <div className="bg-white border-2 border-blue-200 rounded-md p-3 shadow-sm">
-                      <div className="text-[10px] font-black text-blue-900 font-mono mb-1">DNA SCORE</div>
-                      <div className="text-xl font-black text-cyan-700 tabular-nums leading-none">98.4</div>
-                      <div className="text-[10px] font-black text-emerald-700 font-mono mt-1.5">+12 STR</div>
-                    </div>
-                    <div className="bg-white border-2 border-blue-200 rounded-md p-3 shadow-sm">
-                      <div className="text-[10px] font-black text-blue-900 font-mono mb-1">MOMENTUM</div>
-                      <div className="text-xl font-black text-emerald-700 tabular-nums leading-none">STRONG</div>
-                      <div className="text-[10px] font-black text-blue-800 font-mono mt-1.5">EMA ALIGNED</div>
-                    </div>
-                    <div className="bg-blue-100 border-2 border-blue-300 rounded-md p-3 shadow-inner">
-                      <div className="text-[10px] font-black text-blue-800 font-mono mb-1">KELLY ALLOC</div>
-                      <div className="text-xl font-black text-blue-950 tabular-nums leading-none">24.5%</div>
-                      <div className="text-[10px] font-black text-blue-900 font-mono mt-1.5">OPTIMAL</div>
-                    </div>
-                  </div>
-
-                  {/* Chart & Status Split */}
-                  <div className="flex-1 grid grid-cols-3 gap-4 h-full min-h-0">
+            <div className="absolute inset-0 w-full h-full opacity-80 pt-10">
+                <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={liveChartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                    <defs>
+                        <linearGradient id="colorPriceModern" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563EB" stopOpacity={0.4}/>
+                        <stop offset="95%" stopColor="#2563EB" stopOpacity={0}/>
+                        </linearGradient>
+                        <linearGradient id="colorBand" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.15}/>
+                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                        </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} opacity={0.05} />
+                    <XAxis dataKey="time" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} dy={5} />
+                    <YAxis yAxisId="left" domain={['dataMin - 100', 'dataMax + 100']} stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val.toLocaleString()}`} />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 2000]} hide />
                     
-                    {/* Realistic Recharts Graph Area */}
-                    <div className="col-span-2 bg-white border-2 border-blue-200 rounded-md relative overflow-hidden flex flex-col p-3 shadow-sm">
-                      <div className="flex justify-between items-center mb-2 px-1">
-                        <div className="text-[11px] font-black text-blue-900 flex items-center gap-1.5 font-mono">
-                          <TrendingDown className="w-3.5 h-3.5 text-emerald-600" />
-                          PRICE ACTION & EXIT LINE
-                        </div>
-                        <div className="text-[10px] text-cyan-800 font-black font-mono border-2 border-cyan-300 bg-cyan-50 px-1.5 py-0.5 rounded shadow-sm">LIVE</div>
-                      </div>
-                      <div className="flex-1 w-full min-h-[150px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ComposedChart data={mockChartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-                            <defs>
-                              <linearGradient id="colorPriceLight" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#1d4ed8" stopOpacity={0.2}/>
-                                <stop offset="95%" stopColor="#1d4ed8" stopOpacity={0}/>
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#bfdbfe" vertical={false} />
-                            <XAxis dataKey="time" stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} dy={5} />
-                            <YAxis domain={['dataMin - 2', 'dataMax + 2']} stroke="#1e3a8a" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
-                            <Tooltip 
-                              contentStyle={{ backgroundColor: '#ffffff', border: '2px solid #bfdbfe', borderRadius: '4px', fontSize: '11px', color: '#000000', fontWeight: 'bold' }}
-                            />
-                            <Area type="monotone" dataKey="price" stroke="#1d4ed8" strokeWidth={2} fillOpacity={1} fill="url(#colorPriceLight)" />
-                            <Line type="monotone" dataKey="sma" stroke="#059669" strokeWidth={2} dot={false} strokeDasharray="4 4" />
-                            <Line type="stepAfter" dataKey="exit" stroke="#e11d48" strokeWidth={2} dot={false} />
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="flex gap-4 px-2 mt-2">
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-blue-900 font-mono"><div className="w-2 h-0.5 bg-blue-700"></div> PRICE</div>
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-blue-900 font-mono"><div className="w-2 h-0.5 bg-emerald-600 border-t-2 border-dashed"></div> SMA 20</div>
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-blue-900 font-mono"><div className="w-2 h-0.5 bg-rose-600"></div> CHANDELIER</div>
-                      </div>
-                    </div>
-
-                    {/* Execution & Live Status Panel */}
-                    <div className="col-span-1 bg-white border-2 border-blue-200 rounded-md p-4 flex flex-col justify-between shadow-sm">
-                      <div>
-                        <div className="text-[10px] font-black text-blue-900 font-mono mb-4 flex items-center gap-1 border-b-2 border-blue-100 pb-2">
-                          <Crosshair className="w-3 h-3" /> RISK METRICS
-                        </div>
-                        <div className="space-y-3">
-                          <div className="flex justify-between items-center border-b-2 border-blue-50 pb-1">
-                            <span className="text-[10px] font-black text-blue-900 font-mono">Win Rate</span>
-                            <span className="text-xs font-black text-black font-mono tabular-nums">65.0%</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b-2 border-blue-50 pb-1">
-                            <span className="text-[10px] font-black text-blue-900 font-mono">P/L Ratio</span>
-                            <span className="text-xs font-black text-emerald-700 font-mono tabular-nums">1 : 2.5</span>
-                          </div>
-                          <div className="flex justify-between items-center border-b-2 border-blue-50 pb-1">
-                            <span className="text-[10px] font-black text-blue-900 font-mono">Stop Loss</span>
-                            <span className="text-xs font-black text-rose-700 font-mono tabular-nums">$155.40</span>
-                          </div>
-                        </div>
-                        
-                        {/* Live Log Mock */}
-                        <div className="mt-4 p-2 bg-blue-100 rounded-md border-2 border-blue-200 h-16 overflow-hidden relative shadow-inner">
-                          <div className="text-[9px] font-black font-mono text-blue-950 space-y-1">
-                            <p className="text-emerald-700">&gt; Volatility check... OK</p>
-                            <p>&gt; Calculating Kelly f...</p>
-                            <p>&gt; Risk adjusted to 24.5%</p>
-                            <p className="animate-pulse text-blue-800">&gt; Awaiting execution...</p>
-                          </div>
-                        </div>
-                      </div>
-                      <button className="w-full bg-emerald-600 hover:bg-emerald-700 border-2 border-emerald-700 text-white py-2 rounded-md text-[11px] font-black font-mono uppercase tracking-widest transition-colors shadow-md mt-3 active:scale-95">
-                        Execute Long
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        </section>
-
-        {/* Feature Grid - Bento Box Layout */}
-        <section className="py-24 bg-white border-t-2 border-blue-200">
-          <div className="max-w-[1440px] mx-auto px-6">
-            <div className="mb-12">
-              <h2 className="text-2xl md:text-3xl font-black text-black tracking-tight mb-2 uppercase font-mono">
-                System Capabilities <span className="text-blue-700 text-xl">_</span>
-              </h2>
-              <p className="text-sm font-black text-blue-900 font-mono uppercase tracking-widest">
-                High-Density Quantitative Modules
-              </p>
+                    {/* Bollinger Bands */}
+                    <Line yAxisId="left" type="linear" dataKey="upperBand" stroke="#475569" strokeWidth={1} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
+                    <Line yAxisId="left" type="linear" dataKey="lowerBand" stroke="#475569" strokeWidth={1} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
+                    
+                    {/* Volume */}
+                    <Bar yAxisId="right" dataKey="volume" fill="#334155" opacity={0.5} isAnimationActive={false} />
+                    
+                    {/* Price and SMAs */}
+                    <Area yAxisId="left" type="linear" dataKey="price" stroke="#3b82f6" strokeWidth={1.5} fillOpacity={1} fill="url(#colorPriceModern)" isAnimationActive={false} />
+                    <Line yAxisId="left" type="linear" dataKey="sma20" stroke="#f59e0b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                    <Line yAxisId="left" type="linear" dataKey="sma50" stroke="#10b981" strokeWidth={1.5} dot={false} strokeDasharray="4 4" isAnimationActive={false} />
+                    </ComposedChart>
+                </ResponsiveContainer>
             </div>
 
-            {/* CSS Grid for Thick borders (Bento Box) */}
-            <div className="bg-blue-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0.5 rounded-lg overflow-hidden border-2 border-blue-200 shadow-sm">
-              {[
-                {
-                  icon: Activity,
-                  title: 'DNA SCORE MATRIX',
-                  desc: 'RSI, RVOL, MACD, ADX 기반의 멀티 팩터 평가 모델. 종목의 펀더멘탈과 기술적 모멘텀을 100점 만점 수치로 스코어링하여 즉각적인 매력도를 산출합니다.',
-                  val: 'ALGO.01'
-                },
-                {
-                  icon: ShieldAlert,
-                  title: 'MOMENTUM INTERCEPTOR',
-                  desc: '현재가와 15분봉 20 EMA 이격을 실시간 스캔합니다. 거래량 없는 페이크 상승장(Whipsaw) 진입을 차단하는 2단계 보안 알고리즘입니다.',
-                  val: 'ALGO.02'
-                },
-                {
-                  icon: Scale,
-                  title: 'KELLY SIZING ENGINE',
-                  desc: '예상 승률, 손익비(R:R), 주가 변동성(ATR) 변수를 종합 연산하여, 계좌 파산을 방지하는 수학적 최적 매수 비중(Kelly F)을 자동 계산합니다.',
-                  val: 'ALGO.03'
-                },
-                {
-                  icon: TrendingDown,
-                  title: 'CHANDELIER EXIT PREDICT',
-                  desc: '고정된 손절선 대신 종목 고유의 평균 참변동성(ATR) 마진을 적용한 동적 샹들리에 엑시트 트레일링 스탑 라인을 차트 상에 시각화합니다.',
-                  val: 'ALGO.04'
-                },
-                {
-                  icon: Calculator,
-                  title: 'PENNY STOCK HARDCUT',
-                  desc: '$1 이하 동전주와 대형주의 틱 밸류 차이를 인식하고, 페니 주식에 대해서는 손실을 막기 위한 극한의 하드컷(Hard-cut) 기준을 강제 적용합니다.',
-                  val: 'ALGO.05'
-                },
-                {
-                  icon: TerminalSquare,
-                  title: 'BACKEND SYNCHRONIZATION',
-                  desc: '당사 퀀트 파이프라인의 핵심인 파이썬 기반 Pulse Engine 서버와 수식 오차율 0%로 완벽하게 동일한 결과값을 웹 브라우저에서 보장합니다.',
-                  val: 'SYS.OK'
-                }
-              ].map((f, i) => (
-                <div key={i} className="bg-white p-8 hover:bg-blue-50 transition-colors relative group">
-                  <div className="flex justify-between items-start mb-6">
-                    <f.icon className="w-6 h-6 text-blue-700 group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-black text-blue-900 bg-blue-100 px-2 py-1 rounded border-2 border-blue-200 font-mono">{f.val}</span>
-                  </div>
-                  <h3 className="text-sm font-black text-black mb-3 tracking-widest uppercase font-mono">{f.title}</h3>
-                  <p className="text-xs font-bold text-blue-950 leading-relaxed">
-                    {f.desc}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      </main>
+<div className="absolute top-1/4 left-1/3 w-2 h-2 bg-secondary-container rounded-full ring-4 ring-secondary-container/20 animate-ping"></div>
+<div className="absolute bottom-1/3 right-1/4 w-2 h-2 bg-error rounded-full ring-4 ring-error/20"></div>
+</div>
+{/* Metric Cards Grid */}
+<div className="grid grid-cols-3 gap-unit-small">
+<div className="bg-surface/5 border border-outline/10 rounded p-unit-small">
+<div className="font-label-mono text-[10px] text-outline mb-1">ALPHA GENERATION</div>
+<div className="font-data-tabular text-body-md text-secondary-container">+14.2%</div>
+</div>
+<div className="bg-surface/5 border border-outline/10 rounded p-unit-small">
+<div className="font-label-mono text-[10px] text-outline mb-1">EXECUTION LATENCY</div>
+<div className="font-data-tabular text-body-md text-on-primary-container">0.8ms</div>
+</div>
+<div className="bg-surface/5 border border-outline/10 rounded p-unit-small">
+<div className="font-label-mono text-[10px] text-outline mb-1">LIQUIDITY ACCESS</div>
+<div className="font-data-tabular text-body-md text-on-primary-container">82 SOURCES</div>
+</div>
+</div>
+</div>
+{/* Live Order Book */}
+<div className="col-span-12 lg:col-span-4 bg-surface/5 border border-outline/10 rounded p-unit-small overflow-hidden h-full flex flex-col">
+<div className="flex justify-between font-label-mono text-[10px] text-outline mb-unit-small px-2">
+<span>PRICE</span>
+<span>SIZE</span>
+<span>TIME</span>
+</div>
+<div className="relative flex-1 order-book-scroll overflow-hidden">
+<div className="animate-scroll-up space-y-1 font-data-tabular text-[12px]">
+<div className="flex justify-between text-error/80 px-2"><span>64282.5</span><span>1.420</span><span>14:02:11</span></div>
+<div className="flex justify-between text-error/80 px-2"><span>64282.4</span><span>0.051</span><span>14:02:10</span></div>
+<div className="flex justify-between text-error/80 px-2"><span>64282.2</span><span>2.114</span><span>14:02:09</span></div>
+<div className="flex justify-between text-secondary-fixed/80 px-2"><span>64281.4</span><span>0.100</span><span>14:02:08</span></div>
+<div className="flex justify-between text-secondary-fixed/80 px-2"><span>64281.3</span><span>1.229</span><span>14:02:07</span></div>
+<div className="flex justify-between text-secondary-fixed/80 px-2"><span>64281.2</span><span>0.881</span><span>14:02:06</span></div>
+{/* Duplicated for seamless loop */}
+<div className="flex justify-between text-error/80 px-2"><span>64282.5</span><span>1.420</span><span>14:02:11</span></div>
+<div className="flex justify-between text-error/80 px-2"><span>64282.4</span><span>0.051</span><span>14:02:10</span></div>
+<div className="flex justify-between text-error/80 px-2"><span>64282.2</span><span>2.114</span><span>14:02:09</span></div>
+<div className="flex justify-between text-secondary-fixed/80 px-2"><span>64281.4</span><span>0.100</span><span>14:02:08</span></div>
+</div>
+</div>
+<div className="mt-auto pt-unit-small border-t border-outline/10">
+<button className="w-full py-1.5 bg-primary text-white font-label-mono text-[11px] rounded-sm hover:bg-primary-container transition-colors">
+                                    INITIATE SMART ROUTE
+                                </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+{/* Trust Section */}
+<section className="py-unit-large border-y border-outline-variant/10 bg-surface-container-low">
+<div className="max-w-container-max mx-auto px-margin-desktop text-center">
+<p className="font-label-mono text-body-sm text-on-surface-variant/70 mb-unit-large">TRUSTED BY 500+ GLOBAL INSTITUTIONS</p>
+<div className="flex flex-wrap justify-center items-center gap-12 opacity-40 grayscale">
+<div className="flex items-center gap-2">
+<span className="material-symbols-outlined text-2xl" data-icon="account_balance">account_balance</span>
+<span className="font-bold text-xl tracking-tight">GLOBALBANK</span>
+</div>
+<div className="flex items-center gap-2">
+<span className="material-symbols-outlined text-2xl" data-icon="security">security</span>
+<span className="font-bold text-xl tracking-tight">SECURECAPITAL</span>
+</div>
+<div className="flex items-center gap-2">
+<span className="material-symbols-outlined text-2xl" data-icon="hub">hub</span>
+<span className="font-bold text-xl tracking-tight">NETWORKS_X</span>
+</div>
+<div className="flex items-center gap-2">
+<span className="material-symbols-outlined text-2xl" data-icon="diamond">diamond</span>
+<span className="font-bold text-xl tracking-tight">PREMIER_ASSET</span>
+</div>
+</div>
+</div>
+</section>
+{/* Feature Grid (Bento Style) */}
+<section className="py-24 bg-surface">
+<div className="max-w-container-max mx-auto px-margin-desktop">
+<div className="grid grid-cols-12 gap-gutter">
+{/* Feature 1: Large */}
+<div className="col-span-12 md:col-span-8 glass-card p-unit-large rounded-xl border border-outline-variant/30 relative overflow-hidden group">
+<div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl -mr-20 -mt-20 group-hover:bg-primary/10 transition-all duration-500"></div>
+<span className="material-symbols-outlined text-primary text-4xl mb-unit-medium" data-icon="bolt">bolt</span>
+<h3 className="font-headline-md text-headline-md mb-unit-small">정밀 실행 엔진 (Precision Execution)</h3>
+<p className="font-body-md text-on-surface-variant max-w-xl">
+                            시장의 미세한 변동성을 포착하여 최적의 가격에서 거래를 실행합니다. 다중 경로 스마트 오더 라우팅(SOR)을 통해 슬리피지를 최소화하고 유동성을 극대화합니다.
+                        </p>
+<div className="mt-unit-large grid grid-cols-2 gap-unit-medium">
+<div className="flex items-center gap-2 font-label-mono text-body-sm text-primary">
+<span className="material-symbols-outlined text-sm" data-icon="check_circle">check_circle</span>
+                                Smart Order Routing
+                            </div>
+<div className="flex items-center gap-2 font-label-mono text-body-sm text-primary">
+<span className="material-symbols-outlined text-sm" data-icon="check_circle">check_circle</span>
+                                Dark Pool Access
+                            </div>
+</div>
+</div>
+{/* Feature 2: Side */}
+<div className="col-span-12 md:col-span-4 bg-primary-container text-on-primary p-unit-large rounded-xl border border-primary/20 flex flex-col justify-between">
+<div>
+<span className="material-symbols-outlined text-4xl mb-unit-medium" data-icon="verified_user">verified_user</span>
+<h3 className="font-headline-md text-headline-md mb-unit-small">고도화된 리스크 관리</h3>
+<p className="font-body-sm opacity-90">
+                                실시간 노출 관리 및 자동화된 서킷 브레이커 시스템을 통해 기관 자산을 안전하게 보호합니다.
+                            </p>
+</div>
+<div className="mt-unit-large">
+<div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+<div className="h-full bg-secondary-container w-3/4"></div>
+</div>
+<div className="flex justify-between mt-1 text-[10px] font-label-mono">
+<span>SAFE ZONE</span>
+<span>75% CAPACITY</span>
+</div>
+</div>
+</div>
+{/* Feature 3: Bottom Left */}
+<div className="col-span-12 md:col-span-4 glass-card p-unit-large rounded-xl border border-outline-variant/30">
+<span className="material-symbols-outlined text-secondary text-4xl mb-unit-medium" data-icon="speed">speed</span>
+<h3 className="font-headline-md text-headline-md mb-unit-small">0.8ms 초저지연</h3>
+<p className="font-body-sm text-on-surface-variant">
+                            하드웨어 가속 기술(FPGA)을 기반으로 한 인프라를 통해 경쟁자보다 한 발 앞선 실행 속도를 제공합니다.
+                        </p>
+</div>
+{/* Feature 4: Bottom Right */}
+<div className="col-span-12 md:col-span-8 glass-card p-unit-large rounded-xl border border-outline-variant/30 flex items-center gap-unit-large">
+<div className="hidden lg:block w-48 h-32 bg-surface-container-high rounded-lg overflow-hidden relative">
+</div>
+<div>
+<h3 className="font-headline-md text-headline-md mb-unit-small">포괄적인 분석 대시보드</h3>
+<p className="font-body-md text-on-surface-variant">
+                                맞춤형 리포팅 도구를 통해 전략 성과를 분석하고 인사이트를 도출하십시오. 모든 데이터는 실시간 API를 통해 외부 시스템과 통합 가능합니다.
+                            </p>
+</div>
+</div>
+</div>
+</div>
+</section>
 
-      {/* Footer Area */}
-      <footer className="border-t-2 border-blue-200 py-8 bg-blue-50 relative z-10 font-mono text-[10px] font-black text-blue-900 uppercase flex flex-col md:flex-row items-center justify-between px-6 max-w-[1440px] mx-auto">
-        <div className="flex items-center gap-2 mb-4 md:mb-0">
-          <ActivitySquare className="w-4 h-4 text-blue-700" />
-          <span>MuzeBIZ.LAB Terminal Build v2.1</span>
-        </div>
-        <div className="text-right leading-tight">
-          <span className="text-rose-700">RISK DISCLOSURE:</span> SIMULATION DATA IS BASED ON HISTORICAL STATS.<br/> PAST PERFORMANCE IS NOT INDICATIVE OF FUTURE RESULTS.
-        </div>
-      </footer>
-
-      {/* Login Modal Overlay */}
+</main>
+      <footer className="bg-surface-container-lowest border-t border-outline-variant/30 w-full mt-unit-large">
+<div className="max-w-container-max mx-auto px-margin-desktop py-unit-large grid grid-cols-2 md:grid-cols-4 gap-gutter items-start">
+<div className="col-span-2 md:col-span-1">
+<div className="flex items-center gap-unit-small mb-unit-medium">
+<img src="/logo.png" alt="MuzeBIZ.Lab" className="h-8 w-auto object-contain pointer-events-none select-none" />
+</div>
+<p className="font-body-sm text-on-surface-variant max-w-xs">
+                    Advanced infrastructure for high-performance business intelligence.
+                </p>
+</div>
+<div className="space-y-unit-small">
+<h4 className="font-label-mono text-xs text-on-surface-variant/60 uppercase">Platform</h4>
+<nav className="flex flex-col gap-2">
+<a className="font-body-sm text-on-surface-variant hover:text-primary transition-all" href="#">Markets</a>
+<a className="font-body-sm text-on-surface-variant hover:text-primary transition-all" href="#">Liquidity</a>
+<a className="font-body-sm text-on-surface-variant hover:text-primary transition-all" href="#">Execution</a>
+</nav>
+</div>
+<div className="space-y-unit-small">
+<h4 className="font-label-mono text-xs text-on-surface-variant/60 uppercase">Resources</h4>
+<nav className="flex flex-col gap-2">
+<a className="font-body-sm text-on-surface-variant hover:text-primary transition-all" href="#">API Docs</a>
+<a className="font-body-sm text-on-surface-variant hover:text-primary transition-all" href="#">Security</a>
+<a className="font-body-sm text-on-surface-variant hover:text-primary transition-all" href="#">Compliance</a>
+</nav>
+</div>
+<div className="space-y-unit-small">
+<h4 className="font-label-mono text-xs text-on-surface-variant/60 uppercase">Institutional</h4>
+<button className="text-primary font-bold font-body-sm hover:underline transition-all block">Contact Sales</button>
+<button className="text-primary font-bold font-body-sm hover:underline transition-all block">Request Trial</button>
+</div>
+</div>
+<div className="max-w-container-max mx-auto px-margin-desktop py-unit-medium border-t border-outline-variant/10 flex flex-col md:flex-row justify-between items-center gap-unit-small">
+<p className="font-body-sm text-body-sm text-on-surface-variant opacity-80 uppercase tracking-widest">
+                © 2026 MuzeBIZ.Lab. BUSINESS INTELLIGENCE PRECISION.
+            </p>
+<div className="flex gap-unit-medium opacity-60">
+<span className="material-symbols-outlined text-lg cursor-pointer hover:text-primary" data-icon="share">share</span>
+<span className="material-symbols-outlined text-lg cursor-pointer hover:text-primary" data-icon="language">language</span>
+<span className="material-symbols-outlined text-lg cursor-pointer hover:text-primary" data-icon="info">info</span>
+</div>
+</div>
+</footer>
       <AnimatePresence>
         {showLoginModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowLoginModal(false)}
-              className="absolute inset-0 bg-blue-950/80 backdrop-blur-sm cursor-pointer"
-            />
-
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.98, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.98, y: 10 }}
-              className="bg-white border-2 border-blue-300 shadow-[0_20px_50px_-10px_rgba(29,78,216,0.3)] rounded-lg w-full max-w-sm p-6 relative z-10 overflow-hidden"
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-blue-950/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
             >
-              <div className="absolute top-0 left-0 w-full h-2 bg-blue-700" />
-              
-              <div className="flex justify-between items-start mb-6 pt-2">
-                <div>
-                  <h2 className="text-xl font-black text-black tracking-widest font-mono">AUTH</h2>
-                  <p className="text-[10px] font-black text-blue-800 uppercase tracking-widest font-mono mt-0.5">Terminal Protocol</p>
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-8">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white rounded-lg border border-blue-200 flex items-center justify-center p-1">
+                      <img src="/logo.png" alt="Logo" className="w-full h-full object-contain pointer-events-none select-none" />
+                    </div>
+                    <span className="text-xl font-black text-black font-mono tracking-tighter">MuzeBIZ<span className="text-blue-700">.Lab</span></span>
+                  </div>
+                  <button onClick={() => setShowLoginModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                    <X className="w-6 h-6" />
+                  </button>
                 </div>
-                <button 
-                  onClick={() => setShowLoginModal(false)}
-                  className="text-blue-800 hover:text-black p-1.5 rounded-md bg-blue-50 border-2 border-blue-200 transition-colors cursor-pointer hover:border-blue-400"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">시스템 접속</h3>
+                <p className="text-slate-500 mb-8 font-medium">시스템에 안전하게 접속하세요.</p>
+                <form onSubmit={handleLoginSubmit}>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-blue-500/30 flex items-center justify-center gap-2"
+                  >
+                    {isLoading ? <span className="animate-spin text-xl">◌</span> : '시스템 접속하기'}
+                  </button>
+                </form>
               </div>
-
-              <form className="space-y-4" onSubmit={handleLoginSubmit}>
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-blue-950 font-mono">User ID</label>
-                  <input 
-                    type="email" 
-                    className="w-full bg-white border-2 border-blue-200 rounded-md px-3 py-2.5 text-black font-black outline-none focus:border-blue-700 focus:shadow-[0_0_0_3px_rgba(29,78,216,0.2)] transition-all font-mono text-xs"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    readOnly
-                  />
-                </div>
-                
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-blue-950 font-mono">Auth Token</label>
-                  <input 
-                    type="password" 
-                    className="w-full bg-white border-2 border-blue-200 rounded-md px-3 py-2.5 text-black font-black outline-none focus:border-blue-700 focus:shadow-[0_0_0_3px_rgba(29,78,216,0.2)] transition-all font-mono text-xs"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    readOnly
-                  />
-                </div>
-
-                <button 
-                  type="submit" 
-                  disabled={isLoading}
-                  className="w-full py-3 bg-blue-700 hover:bg-blue-800 border-2 border-blue-800 text-white rounded-md shadow-md transition-all mt-6 text-[12px] font-black uppercase tracking-widest font-mono cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
-                >
-                  {isLoading ? 'Verifying...' : `Connect to ${targetRoute === '/dna-simulator' ? 'Simulator' : targetRoute === '/stock/dashboard' ? 'Dashboard' : targetRoute.split('/').pop()}`}
-                </button>
-              </form>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

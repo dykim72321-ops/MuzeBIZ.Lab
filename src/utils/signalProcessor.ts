@@ -40,8 +40,9 @@ export const processSignal = (data: any): DisplaySignal => {
     };
   }
 
-  // 2. DB Stock 형식 (ScannerPage 등에서 사용)
-  if (data.dnaScore !== undefined) {
+  // 2. DB Stock 형식 (ScannerPage 등에서 사용, dnaScore/dna_score 둘 다 허용)
+  const dnaScore = data.dnaScore ?? data.dna_score;
+  if (dnaScore !== undefined) {
     const cache = data.stock_analysis_cache?.[0]?.analysis;
     const rawSummary = data.rawAiSummary || "";
 
@@ -85,7 +86,7 @@ export const processSignal = (data: any): DisplaySignal => {
 
     return {
       ticker: data.ticker,
-      dnaScore: data.dnaScore,
+      dnaScore,
       bullPoints,
       bearPoints,
       reasoning,
