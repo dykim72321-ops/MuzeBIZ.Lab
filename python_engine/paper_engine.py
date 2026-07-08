@@ -381,8 +381,13 @@ class PaperTradingManager:
         exit_reason: str,
     ) -> dict | None:
         """
-        포지션 전량 청산 공통 경로 — 슬리피지 적용 → 실주문 제출(LIVE 모드는 체결 확인까지) →
-        현금 갱신 → paper_history 기록 → paper_positions 삭제 → watchlist EXITED 동기화.
+        포지션 전량 청산 공통 경로 — 청산 클레임(원자적 상태 전환) → 슬리피지 적용 →
+        실주문 제출(LIVE 모드는 체결 확인까지) → 현금 갱신 → paper_history 기록 →
+        paper_positions 삭제 → watchlist EXITED 동기화.
+
+        Railway 배포 중 신·구 컨테이너가 겹치는 등 asyncio.Lock이 보호하지 못하는
+        프로세스 간 중복 실행이 발생해도, 이 클레임 단계의 원자적 UPDATE(Postgres 행
+        잠금)가 두 번째 호출을 조기에 차단해 중복 실주문/이중 기록을 방지한다.
 
         실주문 실패/체결 미확인 시 None 반환 — 포지션은 그대로 유지되며 DB는 기록되지 않는다.
         """
@@ -390,12 +395,33 @@ class PaperTradingManager:
         entry_price = float(pos["entry_price"])
         units = float(pos["units"])
         is_penny = entry_price <= PENNY_MAX_PRICE
+        original_status = pos.get("status") or "HOLD"
+
+        # 청산 클레임: status != 'CLOSING'인 행만 'CLOSING'으로 전환.
+        # 동시에 두 프로세스가 같은 티커를 청산 시도해도 Postgres 행 잠금으로
+        # 단 하나만 이 UPDATE에 매치되므로, 나머지는 즉시 빈 결과를 받고 중단한다.
+        claim = await asyncio.to_thread(
+            self.supabase.table("paper_positions")
+            .update({"status": "CLOSING"})
+            .eq("ticker", ticker)
+            .neq("status", "CLOSING")
+            .execute
+        )
+        if not claim.data:
+            return None
 
         fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
         executed_units = await self._on_order_sell(
             ticker, units, fill_price, exit_reason
         )
         if executed_units is None:
+            # 실주문 실패 — 클레임 해제(원래 상태로 복구)해 재시도 가능하게 유지
+            await asyncio.to_thread(
+                self.supabase.table("paper_positions")
+                .update({"status": original_status})
+                .eq("ticker", ticker)
+                .execute
+            )
             return None
         units = executed_units
 
