@@ -16,9 +16,15 @@
 export interface BrokerAccountResponse {
   buying_power: number;
   equity: number;
+  cash_available?: number;
+  total_assets?: number;
+  invested_capital?: number;
   today_pnl: number;
   today_pnl_pct: number;
+  total_pnl?: number;
+  total_pnl_pct?: number;
   current_drawdown: number;
+  high_water_mark?: number;
   currency: string;
   status: string;
   error?: string;
@@ -44,12 +50,18 @@ export interface BrokerArmResponse {
 export interface BrokerPositionRaw {
   ticker: string;
   quantity: number | string;
+  units?: number | string;
   entry_price: number | string;
   current_price: number | string;
   market_value?: number | string;
   unrealized_pl?: number | string;
   unrealized_plpc?: number | string;
   side?: string;
+  is_penny?: boolean;
+  ts_threshold?: number | string | null;
+  highest_price?: number | string | null;
+  status?: string;
+  created_at?: string | null;
 }
 
 /** GET /api/broker/closed-trades — single item */
@@ -61,6 +73,7 @@ export interface ClosedTradeRaw {
   exit_price: number | string;
   profit_amt: number | string;
   pnl_pct: number | string;
+  is_penny?: boolean;
   exit_reason?: string;
   created_at?: string;
 }

@@ -18,12 +18,12 @@ import type {
   TerminalData,
 } from '../types/dashboard';
 
-import type { PaperPositionRaw, PaperHistoryRaw, PaperAccountResponse, PennyScanStatusResponse } from '../types/api';
+import type { BrokerPositionRaw, ClosedTradeRaw, BrokerAccountResponse, PennyScanStatusResponse } from '../types/api';
 import {
   fetchBrokerStatus,
-  fetchPaperAccount,
-  fetchPaperPositions,
-  fetchPaperHistory,
+  fetchBrokerAccount,
+  fetchBrokerPositions,
+  fetchClosedTrades,
   fetchPennyScanStatus,
 } from '../services/pythonApiService';
 
@@ -54,7 +54,7 @@ interface TradingState {
   discoveryStocks: DiscoveryStock[];
   livePositions: PaperPosition[];
   liveHistory: PaperHistory[];
-  paperAccount: PaperAccountResponse | null;
+  paperAccount: BrokerAccountResponse | null;
   pennyScanStatus: PennyScanStatusResponse | null;
   edgeAlert: EdgeAlert;
   terminalData: TerminalData | null;
@@ -77,11 +77,11 @@ interface TradingState {
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
-function mapPaperPositions(raw: PaperPositionRaw[]): PaperPosition[] {
+function mapPaperPositions(raw: BrokerPositionRaw[]): PaperPosition[] {
   return raw.map((pp) => {
     const entry = Number(pp.entry_price);
     const current = pp.current_price != null ? Number(pp.current_price) : entry;
-    const units = Number(pp.units);
+    const units = Number(pp.units ?? pp.quantity);
     const isPenny = pp.is_penny ?? entry <= PENNY_THRESHOLD;
     const highestPrice = pp.highest_price != null ? Number(pp.highest_price) : Math.max(entry, current);
     const tsThreshold = pp.ts_threshold != null ? Number(pp.ts_threshold) : highestPrice * (isPenny ? 0.90 : 0.95);
@@ -96,7 +96,7 @@ function mapPaperPositions(raw: PaperPositionRaw[]): PaperPosition[] {
       highest_price: highestPrice,
       status: pp.status ?? 'HOLDING',
       is_penny: isPenny,
-      created_at: pp.created_at,
+      created_at: pp.created_at ?? undefined,
       // 백엔드(Decimal 정밀도)에서 계산된 값을 그대로 사용 — 프론트엔드에서 재계산하지 않는다.
       unrealized_pl: Number(pp.unrealized_pl ?? 0),
       unrealized_plpc: Number(pp.unrealized_plpc ?? 0),
@@ -105,21 +105,21 @@ function mapPaperPositions(raw: PaperPositionRaw[]): PaperPosition[] {
   });
 }
 
-function mapPaperHistory(raw: PaperHistoryRaw[]): PaperHistory[] {
+function mapPaperHistory(raw: ClosedTradeRaw[]): PaperHistory[] {
   return raw.map((th) => ({
     id: th.id,
     ticker: th.ticker,
     units: Number(th.units ?? 0),
     entry_price: Number(th.entry_price ?? 0),
     exit_price: Number(th.exit_price ?? 0),
-    pnl: Number(th.profit_amt ?? th.pnl ?? 0),
+    pnl: Number(th.profit_amt ?? 0),
     pnl_pct: Number(th.pnl_pct ?? 0),
     profit_amt: Number(th.profit_amt ?? 0),
-    exit_reason: th.exit_reason ?? 'trailing_stop',
+    exit_reason: th.exit_reason ?? 'Alpaca Order',
     is_penny: th.is_penny,
     isPenny: th.is_penny,
-    created_at: th.created_at ?? th.closed_at,
-    closed_at: th.closed_at,
+    created_at: th.created_at,
+    closed_at: th.created_at,
   }));
 }
 
@@ -182,7 +182,7 @@ export const useTradingStore = create<TradingState>((set) => ({
         paperPositions,
         paperHistory,
       ] = await Promise.all([
-        fetchPaperAccount(),
+        fetchBrokerAccount(),
         supabaseClient
           .from('daily_discovery')
           .select('*')
@@ -192,8 +192,8 @@ export const useTradingStore = create<TradingState>((set) => ({
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
-        fetchPaperPositions(),
-        fetchPaperHistory(),
+        fetchBrokerPositions(),
+        fetchClosedTrades(),
       ]);
 
       const mappedPositions = mapPaperPositions(paperPositions);

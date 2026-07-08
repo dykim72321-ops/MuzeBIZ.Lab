@@ -52,7 +52,9 @@ class PaperSellRequest(BaseModel):
 
 @router.get("/account")
 async def get_broker_account(api_key: str = Security(get_api_key)):
-    """Alpaca 계좌 현황 조회 (Buying Power, PnL 등)"""
+    """Alpaca 계좌 현황 조회 (Buying Power, PnL 등) — 대시보드 진실 소스."""
+    from paper_engine import INITIAL_CAPITAL
+
     trading_client = app_state.trading_client
     if not trading_client:
         return {"error": "Trading client not initialized"}
@@ -62,19 +64,54 @@ async def get_broker_account(api_key: str = Security(get_api_key)):
 
         equity = float(acc.equity)
         last_equity = float(acc.last_equity)
+        cash_available = float(acc.cash)
+        invested_capital = float(acc.long_market_value or 0)
         today_pnl = equity - last_equity
         today_pnl_pct = (today_pnl / last_equity * 100) if last_equity > 0 else 0
 
-        drawdown = 0.0
-        if equity < last_equity:
-            drawdown = round(((last_equity - equity) / last_equity) * 100, 2)
+        # 원금 기준선(base_value)·역대 고점(high_water_mark)은 Alpaca 자체 포트폴리오
+        # 히스토리에서 조회 — 신규 계좌 등으로 조회가 실패하면 INITIAL_CAPITAL로 폴백.
+        base_value = INITIAL_CAPITAL
+        high_water_mark = max(equity, INITIAL_CAPITAL)
+        try:
+            from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+            hist_req = GetPortfolioHistoryRequest(period="all", timeframe="1D")
+            history = await asyncio.to_thread(
+                trading_client.get_portfolio_history, hist_req
+            )
+            equity_series = [e for e in (history.equity or []) if e is not None]
+            if history.base_value:
+                base_value = float(history.base_value)
+            elif equity_series:
+                base_value = float(equity_series[0])
+            if equity_series:
+                high_water_mark = max(float(max(equity_series)), equity)
+        except Exception as hist_err:
+            print(
+                f"⚠️ Portfolio history fetch failed, using fallback baseline: {hist_err}"
+            )
+
+        total_pnl = equity - base_value
+        total_pnl_pct = (total_pnl / base_value * 100) if base_value > 0 else 0
+        current_drawdown = (
+            round(((equity - high_water_mark) / high_water_mark) * 100, 2)
+            if high_water_mark > 0
+            else 0.0
+        )
 
         return {
             "buying_power": float(acc.buying_power),
             "equity": equity,
+            "cash_available": round(cash_available, 2),
+            "total_assets": round(equity, 2),
+            "invested_capital": round(invested_capital, 2),
             "today_pnl": round(today_pnl, 2),
             "today_pnl_pct": round(today_pnl_pct, 2),
-            "current_drawdown": drawdown,
+            "total_pnl": round(total_pnl, 2),
+            "total_pnl_pct": round(total_pnl_pct, 2),
+            "current_drawdown": current_drawdown,
+            "high_water_mark": round(high_water_mark, 2),
             "currency": acc.currency,
             "status": acc.status,
         }
@@ -406,26 +443,53 @@ async def close_specific_position(
 
 @router.get("/positions")
 async def get_broker_positions(api_key: str = Security(get_api_key)):
-    """Alpaca 보유 포지션 조회"""
+    """Alpaca 보유 포지션 조회 (수량·체결가·평가손익의 진실 소스).
+
+    내부 paper_positions 테이블은 TS(Trailing Stop) 임계값 등 Alpaca가 갖고 있지
+    않은 엔진 상태를 보강하는 용도로만 병합한다 — 보유 여부·수량·손익은 항상 Alpaca 값.
+    """
     trading_client = app_state.trading_client
     if not trading_client:
         return []
     try:
         positions = await asyncio.to_thread(trading_client.get_all_positions)
-        return [
-            {
-                "id": p.asset_id,
-                "ticker": p.symbol,
-                "entry_price": float(p.avg_entry_price),
-                "current_price": float(p.current_price),
-                "quantity": float(p.qty),
-                "market_value": float(p.market_value),
-                "unrealized_pl": float(p.unrealized_pl),
-                "unrealized_plpc": float(p.unrealized_plpc) * 100,
-                "change_percent": float(p.change_today) * 100,
-            }
-            for p in positions
-        ]
+
+        internal_by_ticker: dict[str, dict] = {}
+        supabase = app_state.supabase
+        if supabase:
+            try:
+                res = await asyncio.to_thread(
+                    supabase.table("paper_positions").select("*").execute
+                )
+                internal_by_ticker = {row["ticker"]: row for row in (res.data or [])}
+            except Exception as db_err:
+                print(f"⚠️ paper_positions merge lookup failed: {db_err}")
+
+        result = []
+        for p in positions:
+            entry_price = float(p.avg_entry_price)
+            qty = float(p.qty)
+            internal = internal_by_ticker.get(p.symbol, {})
+            result.append(
+                {
+                    "id": p.asset_id,
+                    "ticker": p.symbol,
+                    "entry_price": entry_price,
+                    "current_price": float(p.current_price),
+                    "quantity": qty,
+                    "units": qty,
+                    "market_value": float(p.market_value),
+                    "unrealized_pl": float(p.unrealized_pl),
+                    "unrealized_plpc": float(p.unrealized_plpc) * 100,
+                    "change_percent": float(p.change_today) * 100,
+                    "is_penny": entry_price <= 1.0,
+                    "ts_threshold": internal.get("ts_threshold"),
+                    "highest_price": internal.get("highest_price"),
+                    "status": internal.get("status") or "HOLDING",
+                    "created_at": internal.get("created_at"),
+                }
+            )
+        return result
     except Exception as e:
         print(f"❌ Broker Positions Error: {e}")
         return {"error": str(e)}
@@ -864,6 +928,7 @@ async def get_closed_trades(limit: int = 30, api_key: str = Security(get_api_key
                             "exit_price": round(price, 4),
                             "pnl_pct": round(pnl_pct, 2),
                             "profit_amt": round(profit_amt, 2),
+                            "is_penny": avg_entry <= 1.0,
                             "exit_reason": "Alpaca Order",
                             "created_at": filled_at.isoformat(),
                         }
