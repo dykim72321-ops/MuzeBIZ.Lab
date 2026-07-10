@@ -1,27 +1,34 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, Check } from 'lucide-react';
+import { ShieldCheck, Check, X as XIcon } from 'lucide-react';
 import clsx from 'clsx';
-import { fetchChecklist, toggleChecklistItem, type ChecklistItem } from '../../services/pythonApiService';
+import { fetchChecklist, toggleChecklistItem, fetchStrategyStats, type ChecklistItem, type StrategyStats } from '../../services/pythonApiService';
 
 export const LiveTransitionChecklist = () => {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [stats, setStats] = useState<StrategyStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function loadChecklist() {
+    async function loadData() {
       try {
-        const data = await fetchChecklist();
-        setChecklist(data);
+        const [checklistData, statsData] = await Promise.all([
+          fetchChecklist(),
+          fetchStrategyStats()
+        ]);
+        setChecklist(checklistData);
+        setStats(statsData);
       } catch (err) {
-        console.error('Failed to load checklist', err);
+        console.error('Failed to load checklist or stats', err);
       } finally {
         setLoading(false);
       }
     }
-    loadChecklist();
+    loadData();
   }, []);
 
-  const handleToggle = async (itemKey: string) => {
+  const handleToggle = async (itemKey: string, isAutomated: boolean) => {
+    if (isAutomated) return; // Cannot manually toggle automated items
+
     try {
       const updatedItem = await toggleChecklistItem(itemKey);
       setChecklist(prev => prev.map(item => item.item_key === itemKey ? updatedItem : item));
@@ -30,9 +37,38 @@ export const LiveTransitionChecklist = () => {
     }
   };
 
-  const completedCount = checklist.filter(c => c.is_checked).length;
-  const progressPercent = checklist.length > 0 ? (completedCount / checklist.length) * 100 : 0;
-  const isAllCleared = checklist.length > 0 && completedCount === checklist.length;
+  // Evaluate automated conditions
+  const evaluatedChecklist = checklist.map(item => {
+    let isAutomated = false;
+    let autoChecked = false;
+    
+    if (stats) {
+      if (item.item_key === 'min_3month_period') {
+        isAutomated = true;
+        const targetDate = new Date('2026-10-08T00:00:00Z').getTime();
+        autoChecked = Date.now() >= targetDate;
+      } else if (item.item_key === 'win_rate_threshold') {
+        isAutomated = true;
+        autoChecked = stats.win_rate >= 55 && stats.profit_factor >= 1.3;
+      } else if (item.item_key === 'mdd_acceptable') {
+        isAutomated = true;
+        autoChecked = stats.mdd >= -15; // MDD is negative, e.g., -5% is acceptable
+      } else if (item.item_key === 'min_trade_count') {
+        isAutomated = true;
+        autoChecked = stats.total_trades >= 30;
+      }
+    }
+
+    return {
+      ...item,
+      isAutomated,
+      finalChecked: isAutomated ? autoChecked : item.is_checked,
+    };
+  });
+
+  const completedCount = evaluatedChecklist.filter(c => c.finalChecked).length;
+  const progressPercent = evaluatedChecklist.length > 0 ? (completedCount / evaluatedChecklist.length) * 100 : 0;
+  const isAllCleared = evaluatedChecklist.length > 0 && completedCount === evaluatedChecklist.length;
 
   return (
     <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden flex flex-col">
@@ -67,41 +103,61 @@ export const LiveTransitionChecklist = () => {
           <div className="text-center py-6 text-slate-600 text-xs font-bold">로딩 중...</div>
         ) : (
           <div className="space-y-2.5">
-            {checklist.map(item => (
-              <button
-                key={item.item_key}
-                onClick={() => handleToggle(item.item_key)}
-                className={clsx(
-                  "w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all group",
-                  item.is_checked
-                    ? "bg-emerald-50/50 border-emerald-100"
-                    : "bg-white border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-md"
-                )}
-              >
-                <div className={clsx(
-                  "mt-0.5 w-4 h-4 rounded-md flex items-center justify-center shrink-0 border transition-colors",
-                  item.is_checked
-                    ? "bg-emerald-500 border-emerald-500 text-white"
-                    : "bg-slate-50 border-slate-300 text-transparent group-hover:border-indigo-400"
-                )}>
-                  <Check className="w-3 h-3" strokeWidth={3} />
-                </div>
-                <div className="flex-1">
+            {evaluatedChecklist.map(item => {
+              const isFailedAuto = item.isAutomated && !item.finalChecked;
+              const isPassed = item.finalChecked;
+
+              return (
+                <button
+                  key={item.item_key}
+                  onClick={() => handleToggle(item.item_key, item.isAutomated)}
+                  className={clsx(
+                    "w-full flex items-start gap-3 p-3 rounded-xl border text-left transition-all",
+                    item.isAutomated ? "cursor-default" : "cursor-pointer group",
+                    isPassed
+                      ? "bg-emerald-50/50 border-emerald-100"
+                      : isFailedAuto
+                        ? "bg-rose-50/50 border-rose-100"
+                        : "bg-white border-slate-200 hover:border-indigo-300 shadow-sm hover:shadow-md"
+                  )}
+                >
                   <div className={clsx(
-                    "text-xs font-black leading-tight mb-1",
-                    item.is_checked ? "text-emerald-800" : "text-black group-hover:text-indigo-700"
+                    "mt-0.5 w-4 h-4 rounded-md flex items-center justify-center shrink-0 border transition-colors",
+                    isPassed
+                      ? "bg-emerald-500 border-emerald-500 text-white"
+                      : isFailedAuto
+                        ? "bg-rose-500 border-rose-500 text-white"
+                        : "bg-slate-50 border-slate-300 text-transparent group-hover:border-indigo-400"
                   )}>
-                    {item.label}
+                    {isPassed ? <Check className="w-3 h-3" strokeWidth={3} /> : isFailedAuto ? <XIcon className="w-3 h-3" strokeWidth={3} /> : <Check className="w-3 h-3" strokeWidth={3} />}
                   </div>
-                  <div className={clsx(
-                    "text-[10px] font-bold leading-relaxed uppercase tracking-widest",
-                    item.is_checked ? "text-emerald-600/80" : "text-slate-500"
-                  )}>
-                    {item.category}
+                  <div className="flex-1">
+                    <div className={clsx(
+                      "text-xs font-black leading-tight mb-1",
+                      isPassed ? "text-emerald-800" : isFailedAuto ? "text-rose-800" : "text-black group-hover:text-indigo-700"
+                    )}>
+                      {item.label}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className={clsx(
+                        "text-[10px] font-bold leading-relaxed uppercase tracking-widest",
+                        isPassed ? "text-emerald-600/80" : isFailedAuto ? "text-rose-600/80" : "text-slate-500"
+                      )}>
+                        {item.category}
+                      </div>
+                      {item.isAutomated && (
+                        <span className={clsx(
+                          "px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border",
+                          isPassed ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-rose-100 text-rose-700 border-rose-200"
+                        )}>
+                          Auto
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

@@ -51,10 +51,12 @@ export default function ReportsPage() {
 
   // Aggregate Data for Chart
   const chartData = reportData
-    ? [...reportData].reverse().map(item => ({
-        period: item.period_label,
-        winRate: item.win_rate,
-      }))
+    ? [...reportData]
+        .sort((a, b) => a.period_label.localeCompare(b.period_label))
+        .map(item => ({
+          period: item.period_label,
+          winRate: item.win_rate,
+        }))
     : [];
 
   return (
