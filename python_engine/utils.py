@@ -239,6 +239,84 @@ class PartNormalizer:
             return "Verical"
         if "tme" in n:
             return "TME"
-        if "element14" in n or "farnell" in n:
+        if "element14" in n or "farnell" in n or "newark" in n:
             return "Farnell / e14"
-        return name.split()[0].title() if name else "Other"
+        if "lcsc" in n:
+            return "LCSC"
+        if "win source" in n or "win-source" in n:
+            return "Win Source"
+        if "rochester" in n or "rocelec" in n:
+            return "Rochester"
+        if "flip" in n:
+            return "Flip Electronics"
+        if "netcomponents" in n:
+            return "NetComponents"
+        if "rs component" in n or "rs-online" in n or n.strip() == "rs":
+            return "RS Components"
+        # Fallback: keep the full distributor name (title-cased) so the
+        # frontend's substring-based URL builder can still match it,
+        # instead of truncating to only the first word.
+        return name.strip().title()
+
+    @staticmethod
+    def extract_package(description: str) -> str:
+        """
+        Heuristically extracts a package/case type from a free-text
+        distributor description string (e.g. 'Buck, ... 8Soic, ...').
+        """
+        if not description:
+            return "N/A"
+        known_packages = [
+            "SOIC",
+            "SOT-23",
+            "SOT23",
+            "TSSOP",
+            "SSOP",
+            "QFN",
+            "DFN",
+            "TO-220",
+            "TO220",
+            "TO-92",
+            "TO92",
+            "TO-263",
+            "BGA",
+            "QFP",
+            "LQFP",
+            "TQFP",
+            "DIP",
+            "PDIP",
+            "SOP",
+            "MSOP",
+            "WSON",
+            "SOD",
+            "POWERPAD",
+            "DPAK",
+            "D2PAK",
+        ]
+        upper = description.upper()
+        for pkg in known_packages:
+            m = re.search(rf"(\d*-?{pkg}-?\d*)", upper)
+            if m:
+                return m.group(1).strip("-")
+        return "N/A"
+
+    @staticmethod
+    def extract_voltage(description: str) -> str:
+        """
+        Heuristically extracts a voltage range from a free-text
+        distributor description string (e.g. 'Input Voltage Min:3.5V, Input Voltage Max:28V').
+        """
+        if not description:
+            return "N/A"
+        min_m = re.search(
+            r"Input Voltage Min:\s*([\d.]+)\s*V", description, re.IGNORECASE
+        )
+        max_m = re.search(
+            r"Input Voltage Max:\s*([\d.]+)\s*V", description, re.IGNORECASE
+        )
+        if min_m and max_m:
+            return f"{min_m.group(1)}V-{max_m.group(1)}V"
+        single_m = re.search(r"(\d+(?:\.\d+)?)\s*V\b", description)
+        if single_m:
+            return f"{single_m.group(1)}V"
+        return "N/A"

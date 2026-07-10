@@ -151,37 +151,71 @@ export const MuzepartSearchPage: React.FC = () => {
 
           {phase === 'SCOUTING' && (
             <div className="fade-in space-y-6">
-              <div className="scout-container flex flex-col md:flex-row gap-6 items-center bg-white p-6 rounded-2xl border border-blue-200/85 shadow-sm">
-                <div className="relative w-24 h-24 flex-shrink-0 bg-blue-100 border border-blue-200/80 rounded-full overflow-hidden flex items-center justify-center">
-                  {/* Rotating sweep */}
-                  <div className="absolute w-full h-full animate-radar-sweep origin-center pointer-events-none z-10">
-                    <div 
-                      className="w-1/2 h-full border-r border-indigo-500/35"
-                      style={{
-                        background: 'linear-gradient(90deg, transparent 90%, rgba(99,102,241,0.08) 100%)',
-                        transform: 'rotate(-90deg)'
-                      }}
-                    />
+              <div className="relative overflow-hidden flex flex-col md:flex-row items-stretch bg-slate-900 rounded-2xl border border-slate-800 shadow-[0_0_50px_rgba(6,182,212,0.05)]">
+                {/* Radar Section */}
+                <div className="relative w-full md:w-64 flex-shrink-0 bg-slate-950/50 border-b md:border-b-0 md:border-r border-slate-800/80 overflow-hidden flex items-center justify-center p-8 min-h-[240px]">
+                  {/* Glowing background aura */}
+                  <div className="absolute inset-0 bg-cyan-500/10 blur-3xl rounded-full" />
+                  
+                  {/* Radar Base */}
+                  <div className="relative w-40 h-40 rounded-full border border-cyan-900/40 bg-slate-900 shadow-[inset_0_0_30px_rgba(6,182,212,0.1)] flex items-center justify-center overflow-hidden">
+                    {/* Crosshairs */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-full h-[1px] bg-cyan-500/20" />
+                      <div className="absolute h-full w-[1px] bg-cyan-500/20" />
+                    </div>
+                    
+                    {/* Concentric rings */}
+                    <svg className="w-full h-full absolute inset-0" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="15" fill="none" stroke="rgba(6,182,212,0.3)" strokeWidth="0.5" strokeDasharray="2 2" />
+                      <circle cx="50" cy="50" r="30" fill="none" stroke="rgba(6,182,212,0.2)" strokeWidth="0.5" />
+                      <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(6,182,212,0.15)" strokeWidth="0.5" />
+                    </svg>
+
+                    {/* Rotating Sweep */}
+                    <div className="absolute w-full h-full animate-spin" style={{ animationDuration: '3s', animationTimingFunction: 'linear' }}>
+                      <div 
+                        className="w-1/2 h-1/2 absolute top-0 left-0"
+                        style={{
+                          background: 'conic-gradient(from 0deg at 100% 100%, transparent 0deg, rgba(6,182,212,0.1) 60deg, rgba(6,182,212,0.6) 90deg)',
+                          borderBottom: '1.5px solid rgba(6,182,212,0.9)',
+                        }}
+                      />
+                    </div>
+
+                    {/* Blips */}
+                    <div className="absolute w-2 h-2 rounded-full bg-cyan-400 top-1/4 left-1/3 animate-ping" />
+                    <div className="absolute w-1.5 h-1.5 rounded-full bg-emerald-400 bottom-1/3 right-1/4 animate-pulse shadow-[0_0_8px_rgba(52,211,153,1)]" />
+                    
+                    {/* Center point */}
+                    <div className="absolute w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_15px_rgba(6,182,212,1)]" />
                   </div>
-                  {/* Concentric rings */}
-                  <svg className="w-full h-full absolute inset-0 z-10" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="15" fill="none" stroke="rgba(99,102,241,0.15)" strokeWidth="0.5" strokeDasharray="2 2" />
-                    <circle cx="50" cy="50" r="30" fill="none" stroke="rgba(99,102,241,0.08)" strokeWidth="0.5" />
-                    <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(99,102,241,0.05)" strokeWidth="0.5" />
-                    <line x1="50" y1="5" x2="50" y2="95" stroke="rgba(0,0,0,0.03)" strokeWidth="0.3" />
-                    <line x1="5" y1="50" x2="95" y2="50" stroke="rgba(0,0,0,0.03)" strokeWidth="0.3" />
-                  </svg>
-                  <div className="absolute w-2 h-2 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
                 </div>
-                <div className="flex-1 w-full">
-                  <h2 className="text-lg font-bold mb-3 font-sans text-indigo-700">Scouting Global Supply Chain...</h2>
-                  <div className="terminal-feed bg-blue-900 text-emerald-400 p-3 rounded-lg font-mono text-xs h-24 overflow-y-auto shadow-inner border border-blue-800">
+
+                {/* Terminal Section */}
+                <div className="flex-1 p-6 relative flex flex-col justify-center">
+                  <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                    <svg className="w-24 h-24 text-cyan-500" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+                    </svg>
+                  </div>
+                  
+                  <h2 className="text-sm font-black mb-4 font-mono text-cyan-400 uppercase tracking-widest flex items-center gap-3">
+                    <span className="w-2.5 h-2.5 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
+                    Scouting Global Supply Chain
+                  </h2>
+                  
+                  <div className="terminal-feed bg-[#050b14] text-emerald-400/90 p-5 rounded-xl font-mono text-xs h-36 overflow-y-auto border border-slate-800/80 shadow-[inset_0_4px_20px_rgba(0,0,0,0.5)]">
                       {logs.map((log: string, i: number) => (
-                          <div key={i} className="flex gap-4 mb-1">
-                              <span className="text-blue-500 text-[10px]">{new Date().toLocaleTimeString()}</span>
-                              <span className="event">{log}</span>
+                          <div key={i} className="flex gap-4 mb-2 opacity-90 hover:opacity-100 transition-opacity">
+                              <span className="text-slate-500 w-16 flex-shrink-0">[{new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}]</span>
+                              <span className="text-emerald-400 flex-1 break-all">{log}</span>
                           </div>
                       ))}
+                      <div className="flex gap-4 mt-2 opacity-60">
+                          <span className="text-slate-500 w-16">[{new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}]</span>
+                          <span className="text-cyan-500 animate-pulse">_</span>
+                      </div>
                   </div>
                 </div>
               </div>

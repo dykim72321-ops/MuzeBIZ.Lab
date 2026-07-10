@@ -21,6 +21,7 @@ except ImportError:
 
 from cache_manager import get_cache_manager
 from inventory_service import inventory_service
+from nexar_client import nexar_client
 from utils import PartNormalizer
 
 router = APIRouter(tags=["parts"])
@@ -190,6 +191,10 @@ class SourcingEngine:
                             "market_notes",
                             f"Stock availability score: {100-risk_score}/100",
                         ),
+                        package=ext.get("package", "N/A"),
+                        voltage=ext.get("voltage", "N/A"),
+                        temperature=ext.get("temperature", "N/A"),
+                        rohs=ext.get("rohs", True),
                         specs=specs,
                     )
                     standardized.append(part)
@@ -209,18 +214,27 @@ class SourcingEngine:
             return self.search_cache[q_norm]
 
         print(f"📡 [ENGINE] Triggering parallel scouting for: {q}...", flush=True)
-        if SearchAggregator is None:
-            print("❌ [ENGINE] SearchAggregator unavailable (playwright not installed)")
-            return await self._fetch_from_local(q)
-        aggregator = SearchAggregator()
 
-        tasks = [
-            asyncio.wait_for(
-                self._fetch_from_provider("Market Aggregator", aggregator, q),
-                timeout=30.0,
-            ),
-            asyncio.wait_for(self._fetch_from_local(q), timeout=5.0),
-        ]
+        tasks = [asyncio.wait_for(self._fetch_from_local(q), timeout=5.0)]
+
+        if SearchAggregator is not None:
+            aggregator = SearchAggregator()
+            tasks.append(
+                asyncio.wait_for(
+                    self._fetch_from_provider("Market Aggregator", aggregator, q),
+                    timeout=30.0,
+                )
+            )
+        else:
+            print("❌ [ENGINE] SearchAggregator unavailable (bs4/aiohttp missing)")
+
+        if nexar_client.is_configured:
+            tasks.append(
+                asyncio.wait_for(
+                    self._fetch_from_provider("Nexar (Octopart)", nexar_client, q),
+                    timeout=20.0,
+                )
+            )
 
         results_nested = await asyncio.gather(*tasks, return_exceptions=True)
         results = []

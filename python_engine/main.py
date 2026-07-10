@@ -708,6 +708,7 @@ async def run_quant_scan_internal(
                     last_bar_date = last_bar_date.date()
                 is_last_bar_today = last_bar_date == now_ny.date()
                 if progress < 1.0 and is_last_bar_today and len(df) > 0:
+                    df["Volume"] = df["Volume"].astype(float)
                     df.loc[df.index[-1], "Volume"] = df["Volume"].iloc[-1] / progress
 
                 df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()

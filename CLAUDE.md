@@ -452,6 +452,8 @@ TRADE_MODE=PAPER              # PAPER(기본) | LIVE(실계좌 — APCA_PAPER=fa
 DISCORD_WEBHOOK_URL
 ADMIN_SECRET_KEY
 DISABLE_ALPACA_STREAM=false   # true 시 WebSocket 비활성화 → REST 60초 폴링 모드
+NEXAR_CLIENT_ID               # Nexar(Octopart) 부품 검색 병행 소스, 비어있으면 자동 스킵
+NEXAR_CLIENT_SECRET
 ```
 
 ---
