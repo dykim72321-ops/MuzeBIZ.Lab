@@ -16,6 +16,7 @@ import math
 import os
 from typing import TYPE_CHECKING
 
+from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import OrderSide, OrderStatus, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.stream import TradingStream
@@ -68,18 +69,28 @@ class LiveTradingManager(PaperTradingManager):
     # ── Alpaca 주문 공통 헬퍼 ─────────────────────────────────────────────────
 
     async def _submit_alpaca_order(
-        self, ticker: str, side: OrderSide, qty: float
-    ) -> float | None:
+        self, ticker: str, side: OrderSide, qty: float, fallback_price: float
+    ) -> tuple[float, float] | None:
         """
         Alpaca 시장가 주문 제출 후 체결까지 확인.
 
         qty는 shares 단위. Alpaca 미지원 소수점 주식은 정수로 내림해 제출한다.
-        반환값: 실제 체결 수량(float, DB units 기준값) 또는 실패/미체결확인 시 None.
+        내림 결과가 0주(예산이 1주 가격에도 못 미침)이면 예산 상한을 초과 체결하는
+        대신 주문 자체를 차단한다 — 최소 1주 강제 매수는 MAX_BUY_BUDGET 캡을
+        크게 초과시킬 수 있다.
+        반환값: (실제 체결 수량, 실제 체결 단가) 또는 실패/미체결확인/예산초과 시 None.
+        체결 단가는 Alpaca가 반환한 filled_avg_price를 우선 사용하고, 값이 없으면
+        fallback_price(호출측 슬리피지 추정가)로 대체한다.
         """
         side_str = "BUY" if side == OrderSide.BUY else "SELL"
         try:
-            # 최소 1주 보장 (소수점 내림 시 0이 되는 케이스 차단)
-            int_qty = max(1, math.floor(qty))
+            int_qty = math.floor(qty)
+            if int_qty < 1:
+                print(
+                    f"⛔ [{ticker}] {side_str} 주문 차단 — 요청 수량 {qty:.4f}주가 "
+                    f"1주 미만 (강제 1주 매수 시 예산 상한 초과 위험)"
+                )
+                return None
             req = MarketOrderRequest(
                 symbol=ticker,
                 qty=int_qty,
@@ -111,35 +122,44 @@ class LiveTradingManager(PaperTradingManager):
 
             if order.status not in _FILLED_STATUSES:
                 # 타임아웃 내 체결 미확인 — 실거래 상태와 DB가 어긋날 수 있으므로
-                # 안전하게 실패로 취급해 DB 기록을 차단하고 수동 확인을 유도한다.
+                # 안전하게 실패로 취급해 DB 기록을 차단하고, 미체결 주문이 나중에
+                # 조용히 체결되어 로컬 DB에 안 잡히는 유령 실보유가 되지 않도록 취소한다.
                 print(
                     f"⚠️ [LIVE ORDER UNCONFIRMED] {ticker} {side_str} "
-                    f"order_id={order.id} status={order.status}"
+                    f"order_id={order.id} status={order.status} — 취소 시도"
                 )
+                try:
+                    await asyncio.to_thread(self.alpaca.cancel_order_by_id, order.id)
+                except Exception as cancel_err:
+                    print(
+                        f"⚠️ [LIVE ORDER 취소 실패] {ticker} order_id={order.id}: {cancel_err}"
+                    )
                 await self.webhook.send_alert(
                     title=f"⚠️ [LIVE ORDER 체결 미확인] {ticker}",
                     description=(
-                        f"{FILL_POLL_TIMEOUT_SEC:.0f}초 내 체결 확인 실패 "
-                        f"(order_id: `{order.id}`) — Alpaca에서 실제 상태를 확인하세요."
+                        f"{FILL_POLL_TIMEOUT_SEC:.0f}초 내 체결 확인 실패해 주문 취소를 시도했습니다 "
+                        f"(order_id: `{order.id}`) — Alpaca에서 실제 상태를 반드시 확인하세요."
                     ),
                     color=0xE67E22,
                 )
                 return None
 
             filled_qty = float(order.filled_qty or int_qty)
+            raw_fill_price = getattr(order, "filled_avg_price", None)
+            filled_price = float(raw_fill_price) if raw_fill_price else fallback_price
             print(
-                f"✅ [LIVE ORDER] {ticker} {side_str} {filled_qty:.2f}주 "
+                f"✅ [LIVE ORDER] {ticker} {side_str} {filled_qty:.2f}주 @ ${filled_price:.4f} "
                 f"→ order_id={order.id} status={order.status}"
             )
             await self.webhook.send_alert(
                 title=f"🔴 [LIVE {side_str}] {ticker}",
                 description=(
-                    f"체결수량: {filled_qty:.2f}주 | order_id: `{order.id}`\n"
+                    f"체결수량: {filled_qty:.2f}주 | 체결단가: ${filled_price:.4f} | order_id: `{order.id}`\n"
                     f"status: {order.status} | TIF: DAY"
                 ),
                 color=0xFF0000 if side == OrderSide.BUY else 0x8E44AD,
             )
-            return filled_qty
+            return filled_qty, filled_price
         except Exception as e:
             print(f"❌ [LIVE ORDER FAILED] {ticker} {side}: {e}")
             if side == OrderSide.SELL and _is_phantom_position_error(e):
@@ -167,13 +187,43 @@ class LiveTradingManager(PaperTradingManager):
              고아 상태가 되어 하루 종일 무방비로 방치됨). 삭제 전 반드시 Alpaca
              실제 보유 수량을 재조회해 남아있으면 units만 정정하고 관리를 유지한다.
         """
-        real_qty = None
         try:
             alpaca_pos = await asyncio.to_thread(self.alpaca.get_open_position, ticker)
             real_qty = abs(float(alpaca_pos.qty))
-        except Exception:
-            # get_open_position은 실제로 포지션이 없을 때 404를 던진다 — 이 경우 real_qty=None 유지(진짜 0주로 간주)
-            real_qty = 0.0
+        except APIError as e:
+            if e.status_code == 404:
+                # get_open_position이 명확히 404(포지션 없음)를 반환한 경우에만 진짜 0주로 확정
+                real_qty = 0.0
+            else:
+                # 404 외 API 오류(레이트리밋·인증 등)는 실보유 여부를 확인한 게 아니므로
+                # 절대 phantom으로 단정해 삭제하지 않는다 — 안전하게 관리 유지 + 수동 확인 유도
+                print(
+                    f"⚠️ [{ticker}] Phantom 여부 확인 실패 (APIError status={e.status_code}) "
+                    f"— DB 변경 없이 관리 유지"
+                )
+                await self.webhook.send_alert(
+                    title=f"⚠️ [Phantom 여부 확인 실패] {ticker}",
+                    description=(
+                        f"get_open_position 조회 실패(APIError status={e.status_code}): `{e}`\n"
+                        f"실보유 여부를 확인할 수 없어 DB를 변경하지 않았습니다. 수동으로 Alpaca 계좌를 확인하세요."
+                    ),
+                    color=0xE67E22,
+                )
+                return
+        except Exception as e:
+            # 네트워크 타임아웃 등 비-API 예외도 동일하게 확인 불가로 취급해 DB를 건드리지 않는다
+            print(
+                f"⚠️ [{ticker}] Phantom 여부 확인 실패 (알 수 없는 오류) — DB 변경 없이 관리 유지: {e}"
+            )
+            await self.webhook.send_alert(
+                title=f"⚠️ [Phantom 여부 확인 실패] {ticker}",
+                description=(
+                    f"get_open_position 조회 중 예상치 못한 오류: `{e}`\n"
+                    f"실보유 여부를 확인할 수 없어 DB를 변경하지 않았습니다. 수동으로 Alpaca 계좌를 확인하세요."
+                ),
+                color=0xE67E22,
+            )
+            return
 
         if real_qty and real_qty > 0:
             try:
@@ -241,15 +291,15 @@ class LiveTradingManager(PaperTradingManager):
 
     async def _on_order_buy(
         self, ticker: str, qty: float, price: float
-    ) -> float | None:
+    ) -> tuple[float, float] | None:
         print(f"🔴 [LIVE] BUY {ticker} {qty:.2f}주 @ ${price:.4f}")
-        return await self._submit_alpaca_order(ticker, OrderSide.BUY, qty)
+        return await self._submit_alpaca_order(ticker, OrderSide.BUY, qty, price)
 
     async def _on_order_sell(
         self, ticker: str, qty: float, price: float, reason: str
-    ) -> float | None:
+    ) -> tuple[float, float] | None:
         print(f"🔴 [LIVE] SELL {ticker} {qty:.2f}주 @ ${price:.4f} ({reason})")
-        return await self._submit_alpaca_order(ticker, OrderSide.SELL, qty)
+        return await self._submit_alpaca_order(ticker, OrderSide.SELL, qty, price)
 
 
 # ── Trade Update 스트림 ───────────────────────────────────────────────────────

@@ -353,18 +353,19 @@ class PaperTradingManager:
             )
 
     async def _on_order_buy(
-        self, _ticker: str, qty: float, _price: float
-    ) -> float | None:
-        """매수 실행 훅 — 반환값은 실제 체결 수량(실패 시 None).
-        LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
-        return qty
+        self, _ticker: str, qty: float, price: float
+    ) -> tuple[float, float] | None:
+        """매수 실행 훅 — 반환값은 (실제 체결 수량, 실제 체결 단가), 실패 시 None.
+        Paper 모드는 시뮬레이션 슬리피지 가격이 곧 체결가이므로 입력값을 그대로 반환.
+        LiveTradingManager는 Alpaca submit_order() 실체결가(filled_avg_price)로 오버라이드."""
+        return qty, price
 
     async def _on_order_sell(
-        self, _ticker: str, qty: float, _price: float, _reason: str
-    ) -> float | None:
-        """매도 실행 훅 — 반환값은 실제 체결 수량(실패 시 None).
-        LiveTradingManager에서 Alpaca submit_order()로 오버라이드."""
-        return qty
+        self, _ticker: str, qty: float, price: float, _reason: str
+    ) -> tuple[float, float] | None:
+        """매도 실행 훅 — 반환값은 (실제 체결 수량, 실제 체결 단가), 실패 시 None.
+        LiveTradingManager에서 Alpaca submit_order() 실체결가로 오버라이드."""
+        return qty, price
 
     async def _sync_watchlist_stop_loss(self, ticker: str, stop_loss: float):
         """트레일링 스탑 이동 시 관심종목 stop_loss 동기화."""
@@ -422,10 +423,8 @@ class PaperTradingManager:
             return None
 
         fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
-        executed_units = await self._on_order_sell(
-            ticker, units, fill_price, exit_reason
-        )
-        if executed_units is None:
+        executed = await self._on_order_sell(ticker, units, fill_price, exit_reason)
+        if executed is None:
             # 실주문 실패 — 클레임 해제(원래 상태로 복구)해 재시도 가능하게 유지
             await asyncio.to_thread(
                 self.supabase.table("paper_positions")
@@ -434,7 +433,7 @@ class PaperTradingManager:
                 .execute
             )
             return None
-        units = executed_units
+        units, fill_price = executed
 
         pnl_pct = (fill_price / entry_price - 1) * 100
         profit_amt = (fill_price - entry_price) * units
@@ -699,46 +698,88 @@ class PaperTradingManager:
                 )
                 return
 
-            # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결
-            fill_price = _apply_slippage(price, is_buy=True, is_penny=is_penny_signal)
-            units = buy_budget / fill_price
-
-            # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 체결 수량 반환. 실패 시 DB 기록 차단.
-            executed_units = await self._on_order_buy(ticker, units, fill_price)
-            if executed_units is None:
-                print(f"⚠️ [{ticker}] Live buy order rejected — DB write skipped")
-                return
-            units = executed_units
+            # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결 (실주문 전 추정치)
+            est_fill_price = _apply_slippage(
+                price, is_buy=True, is_penny=is_penny_signal
+            )
+            est_units = buy_budget / est_fill_price
             ts_init = PENNY_TS_INIT_PCT if is_penny_signal else TS_INIT_PCT
-            ts_threshold = fill_price * ts_init
 
-            new_pos = {
+            # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문
+            # 제출 전에 추정치로 먼저 INSERT해 unique violation으로 동시 프로세스의
+            # 중복 매수(예: 배포 중 신·구 컨테이너 오버랩)를 DB 레벨에서 차단한다.
+            # asyncio.Lock은 단일 프로세스만 보호하므로 이 클레임이 실질적 방어선이다.
+            claim_pos = {
                 "ticker": ticker.upper(),
-                "status": "HOLD",
+                "status": "ENTERING",
                 "weight": round(effective_fraction, 4),
-                "entry_price": fill_price,
+                "entry_price": est_fill_price,
                 "signal_price": price,
-                "entry_slippage": (fill_price / price - 1) * 100,
-                "current_price": fill_price,
-                "highest_price": fill_price,
-                "ts_threshold": ts_threshold,
-                "units": units,
+                "entry_slippage": (est_fill_price / price - 1) * 100,
+                "current_price": est_fill_price,
+                "highest_price": est_fill_price,
+                "ts_threshold": est_fill_price * ts_init,
+                "units": est_units,
                 "is_scaled_out": False,
                 "scale_out_bar_count": 0,
             }
+            try:
+                claim_res = await asyncio.to_thread(
+                    self.supabase.table("paper_positions").insert(claim_pos).execute
+                )
+            except Exception as e:
+                if "duplicate key" in str(e).lower() or "23505" in str(e):
+                    print(
+                        f"⏳ [{ticker}] 동시 진입 감지 — 다른 프로세스가 이미 클레임함, 스킵"
+                    )
+                    return
+                raise
+            if not claim_res.data:
+                print(f"⚠️ [{ticker}] 진입 클레임 INSERT가 빈 결과 반환 — 스킵")
+                return
+
+            # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 (체결 수량, 체결 단가) 반환.
+            # 실패 시 클레임 롤백 + DB 기록 차단.
+            executed = await self._on_order_buy(ticker, est_units, est_fill_price)
+            if executed is None:
+                print(f"⚠️ [{ticker}] Live buy order rejected — 클레임 롤백")
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .delete()
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                return
+            units, fill_price = executed
+            ts_threshold = fill_price * ts_init
 
             try:
+                # 클레임 행을 실체결 결과로 확정 (실거래 체결가·체결 수량 반영)
                 pos_res = await asyncio.to_thread(
-                    self.supabase.table("paper_positions").insert(new_pos).execute
+                    self.supabase.table("paper_positions")
+                    .update(
+                        {
+                            "status": "HOLD",
+                            "entry_price": fill_price,
+                            "entry_slippage": (fill_price / price - 1) * 100,
+                            "current_price": fill_price,
+                            "highest_price": fill_price,
+                            "ts_threshold": ts_threshold,
+                            "units": units,
+                        }
+                    )
+                    .eq("ticker", ticker)
+                    .execute
                 )
                 if not pos_res.data:
-                    raise RuntimeError(f"Position INSERT returned no data for {ticker}")
+                    raise RuntimeError(
+                        f"Position 확정 UPDATE returned no data for {ticker}"
+                    )
 
-                # INSERT 성공 확인 후에만 현금 차감 (원자성 보장)
-                # 실거래 체결 수량 기준으로 차감 — LIVE 모드는 정수 주 체결이라
-                # executed_units*fill_price가 buy_budget보다 작을 수 있음 (버그 수정:
-                # 이전엔 buy_budget 전액을 차감해 매수마다 장부 현금이 실체결액보다
-                # 더 새어나갔음)
+                # 확정 성공 후에만 현금 차감 (원자성 보장)
+                # 실거래 체결 수량·체결가 기준으로 차감 — LIVE 모드는 정수 주 체결이며
+                # 실체결가가 추정 슬리피지가와 다를 수 있음 (버그 수정: 이전엔 추정 예산
+                # 전액을 차감해 장부 현금이 실체결액과 어긋났음)
                 executed_cost = units * fill_price
                 new_cash = acc["cash_available"] - executed_cost
                 cash_res = await asyncio.to_thread(
@@ -748,7 +789,7 @@ class PaperTradingManager:
                     .execute
                 )
                 if not cash_res.data:
-                    # 현금 차감 실패 시 방금 INSERT한 포지션을 롤백
+                    # 현금 차감 실패 시 방금 확정한 포지션을 롤백
                     await asyncio.to_thread(
                         self.supabase.table("paper_positions")
                         .delete()
@@ -931,15 +972,15 @@ class PaperTradingManager:
                 fill_sell_price = _apply_slippage(
                     price, is_buy=False, is_penny=is_penny
                 )
-                executed_units = await self._on_order_sell(
+                executed = await self._on_order_sell(
                     ticker, sell_units, fill_sell_price, "Scale-Out"
                 )
-                if executed_units is None:
+                if executed is None:
                     print(
                         f"⚠️ [{ticker}] Live scale-out order rejected — retaining position"
                     )
                     return
-                sell_units = executed_units
+                sell_units, fill_sell_price = executed
                 profit_cash = sell_units * fill_sell_price
 
                 # 가상 계좌 업데이트 (cash_available만 갱신 — total_assets는 /api/broker/paper/account에서
