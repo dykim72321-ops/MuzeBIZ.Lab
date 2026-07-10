@@ -21,6 +21,21 @@ function percentile(sorted: number[], p: number): number {
   return sorted[Math.max(0, Math.min(idx, sorted.length - 1))];
 }
 
+function getCardStyles(status: 'good' | 'bad' | 'neutral') {
+  if (status === 'good') return {
+    borderColor: 'border-emerald-200',
+    bgAnimClass: 'bg-emerald-100/60 animate-[pulse_3s_ease-in-out_infinite]'
+  };
+  if (status === 'bad') return {
+    borderColor: 'border-rose-200',
+    bgAnimClass: 'bg-rose-100/60 animate-[pulse_3s_ease-in-out_infinite]'
+  };
+  return {
+    borderColor: 'border-slate-200',
+    bgAnimClass: 'bg-slate-50/80'
+  };
+}
+
 export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
   const metrics = useMemo(() => {
     if (!history || history.length === 0) return null;
@@ -72,39 +87,45 @@ export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
   const cards = [
     {
       label: 'Sharpe Ratio',
+      koLabel: '위험 대비 수익성',
       value: metrics?.sharpe.toFixed(2) ?? '—',
-      sub: metrics ? (metrics.sharpe > 1 ? '우수' : metrics.sharpe > 0 ? '보통' : '부정적') : '',
-      color: metrics ? (metrics.sharpe > 1 ? 'text-emerald-700' : metrics.sharpe > 0 ? 'text-amber-600' : 'text-rose-700') : 'text-blue-900',
+      color: metrics ? (metrics.sharpe > 1 ? 'text-emerald-700' : metrics.sharpe > 0 ? 'text-slate-700' : 'text-rose-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.sharpe > 1 ? 'good' : metrics.sharpe > 0 ? 'neutral' : 'bad') : 'neutral'),
     },
     {
       label: 'VaR 95%',
+      koLabel: '최대 예상 손실',
       value: metrics ? `${metrics.var95.toFixed(2)}%` : '—',
-      sub: '손실 상한 (95% 신뢰)',
-      color: 'text-rose-700',
+      color: metrics ? (metrics.var95 > -5 ? 'text-emerald-700' : metrics.var95 <= -10 ? 'text-rose-700' : 'text-slate-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.var95 > -5 ? 'good' : metrics.var95 <= -10 ? 'bad' : 'neutral') : 'neutral'),
     },
     {
       label: 'Win/Loss Ratio',
+      koLabel: '손익비',
       value: metrics?.winLossRatio.toFixed(2) ?? '—',
-      sub: metrics ? (metrics.winLossRatio > 1 ? '수익>손실' : '손실>수익') : '',
-      color: metrics ? (metrics.winLossRatio > 1 ? 'text-emerald-700' : 'text-rose-700') : 'text-blue-900',
+      color: metrics ? (metrics.winLossRatio > 1.2 ? 'text-emerald-700' : metrics.winLossRatio > 0.8 ? 'text-slate-700' : 'text-rose-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.winLossRatio > 1.2 ? 'good' : metrics.winLossRatio > 0.8 ? 'neutral' : 'bad') : 'neutral'),
     },
     {
       label: 'Max Drawdown',
+      koLabel: '최대 낙폭',
       value: metrics ? `${metrics.mdd.toFixed(2)}%` : '—',
-      sub: '최대 낙폭',
-      color: 'text-rose-700',
+      color: metrics ? (metrics.mdd < 5 ? 'text-emerald-700' : metrics.mdd > 15 ? 'text-rose-700' : 'text-slate-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.mdd < 5 ? 'good' : metrics.mdd > 15 ? 'bad' : 'neutral') : 'neutral'),
     },
     {
       label: 'Calmar Ratio',
+      koLabel: '회복 탄력성',
       value: metrics?.calmar.toFixed(2) ?? '—',
-      sub: '수익 / MDD',
-      color: metrics ? (metrics.calmar > 1 ? 'text-emerald-700' : 'text-amber-600') : 'text-blue-900',
+      color: metrics ? (metrics.calmar > 1 ? 'text-emerald-700' : metrics.calmar > 0 ? 'text-slate-700' : 'text-rose-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.calmar > 1 ? 'good' : metrics.calmar > 0 ? 'neutral' : 'bad') : 'neutral'),
     },
     {
       label: 'Avg Win / Loss',
+      koLabel: '평균 수익/손실률',
       value: metrics ? `${metrics.avgWin.toFixed(1)}% / ${metrics.avgLoss.toFixed(1)}%` : '—',
-      sub: '평균 익절 / 평균 손절',
-      color: 'text-black',
+      color: metrics ? (metrics.avgWin > Math.abs(metrics.avgLoss) ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.avgWin > Math.abs(metrics.avgLoss) ? 'good' : 'bad') : 'neutral'),
     },
   ];
 
@@ -117,10 +138,16 @@ export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
 
       <div className="p-4 grid grid-cols-2 gap-3">
         {cards.map(card => (
-          <div key={card.label} className="bg-blue-50 border-2 border-blue-100 rounded-md p-3">
-            <span className="text-[9px] font-black text-blue-950 uppercase tracking-widest block mb-1">{card.label}</span>
-            <span className={clsx('text-base font-black font-mono block', card.color)}>{card.value}</span>
-            {card.sub && <span className="text-[10px] font-black text-blue-800 block mt-0.5">{card.sub}</span>}
+          <div key={card.label} className={clsx("relative rounded-md overflow-hidden border", card.borderColor)}>
+            {/* 1. 배경 애니메이션 레이어 (투명도 조절로 깜빡임 구현, 글씨에는 영향 없음) */}
+            <div className={clsx("absolute inset-0", card.bgAnimClass)}></div>
+            
+            {/* 2. 글씨 레이어 (z-index 10으로 위로 올림) */}
+            <div className="relative z-10 p-3">
+              <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest block">{card.label}</span>
+              <span className="text-[11px] font-bold text-slate-500 block mb-1.5">{card.koLabel}</span>
+              <span className={clsx('text-lg font-black font-mono block', card.color)}>{card.value}</span>
+            </div>
           </div>
         ))}
       </div>

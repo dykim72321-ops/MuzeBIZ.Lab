@@ -20,7 +20,11 @@ import { DashboardControls } from '../components/dashboard/HeaderCommandBar';
 import { MetricsGrid } from '../components/dashboard/MetricsGrid';
 import { RiskAnalyticsPanel } from '../components/dashboard/RiskAnalyticsPanel';
 import { PositionAnalyticsPanel } from '../components/dashboard/PositionAnalyticsPanel';
+import { CompanyInfoModal } from '../components/dashboard/CompanyInfoModal';
+import type { CompanyInfo } from '../components/dashboard/CompanyInfoModal';
+import { apiClient } from '../services/apiClient';
 import type { PaperPosition, PaperHistory } from '../types/dashboard';
+import { useState } from 'react';
 
 const PENNY_ENGINE_THRESHOLD = 1.0;
 
@@ -34,6 +38,26 @@ export default function UnifiedDashboard() {
     setEdgeAlert, handleDeepDive, handleLiveHuntingTrigger, handleToggleArm, handleClosePosition,
     isHunting,
   } = useDashboardData();
+
+  const [selectedCompanyTicker, setSelectedCompanyTicker] = useState<string | null>(null);
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
+  const [isCompanyLoading, setIsCompanyLoading] = useState(false);
+  const [companyError, setCompanyError] = useState<string | null>(null);
+
+  const handleCompanyClick = async (ticker: string) => {
+    setSelectedCompanyTicker(ticker);
+    setIsCompanyLoading(true);
+    setCompanyError(null);
+    setCompanyInfo(null);
+    try {
+      const data = await apiClient.get<CompanyInfo>(`/api/market/company/${ticker}`);
+      setCompanyInfo(data);
+    } catch (err) {
+      setCompanyError(err instanceof Error ? err.message : 'Error loading company info');
+    } finally {
+      setIsCompanyLoading(false);
+    }
+  };
 
   return (
     <div className="p-4 md:p-8 lg:p-10 min-h-screen bg-slate-50 text-slate-800 relative overflow-x-hidden pb-12 font-sans selection:bg-indigo-100 selection:text-indigo-900">
@@ -238,22 +262,52 @@ export default function UnifiedDashboard() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                    <ComposedChart key={chartRange} data={chartData} margin={{ top: 10, right: 0, left: 10, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                          <stop offset="5%" stopColor="#2962ff" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="#2962ff" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="displayName" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis domain={['auto', 'auto']} stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `$${(val/1000).toFixed(1)}k`}/>
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '11px', color: '#0f172a', fontWeight: '500', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        labelFormatter={(label, payload) => payload?.[0]?.payload?.name ?? label}
-                        formatter={(val: number | undefined) => [`$${Number(val ?? 0).toLocaleString()}`, 'Total Assets']}
+                      <CartesianGrid strokeDasharray="2 2" vertical={true} stroke="#e2e8f0" />
+                      <XAxis 
+                        dataKey="id" 
+                        stroke="#64748b" 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        tickFormatter={(val) => chartData.find(d => d.id === val)?.displayName ?? ''} 
+                        tickMargin={10}
                       />
-                      <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorTotal)" />
+                      <YAxis 
+                        orientation="left"
+                        domain={['auto', 'auto']} 
+                        stroke="#64748b" 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        tickFormatter={(val) => `$${(val/1000).toFixed(1)}k`}
+                        tickMargin={5}
+                      />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px', color: '#0f172a', fontWeight: 'bold', padding: '8px 12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        labelStyle={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}
+                        labelFormatter={(label, payload) => payload?.[0]?.payload?.name ?? label}
+                        formatter={(val: number | undefined) => [`$${Number(val ?? 0).toLocaleString()}`, 'Portfolio']}
+                        cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }}
+                      />
+                      <Area 
+                        type="linear" 
+                        dataKey="value" 
+                        stroke="#2962ff" 
+                        strokeWidth={2} 
+                        fillOpacity={1} 
+                        fill="url(#colorTotal)" 
+                        activeDot={{ r: 4, strokeWidth: 2, fill: '#2962ff', stroke: '#ffffff' }}
+                        isAnimationActive={true}
+                        animationDuration={800}
+                        animationEasing="ease-in-out"
+                      />
                     </ComposedChart>
                   </ResponsiveContainer>
                 )}
@@ -299,7 +353,12 @@ export default function UnifiedDashboard() {
                           <tr key={pos.ticker} className={clsx("transition-colors bg-white", isHighTension ? (isProfit ? "bg-emerald-50/30 hover:bg-emerald-50/50 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 hover:bg-rose-50/50 animate-[pulse_3s_ease-in-out_infinite]") : "hover:bg-slate-50")}>
                             <td className="py-4 px-5 relative">
                               {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
-                              <span className="text-sm font-black text-black block tracking-tight">{pos.ticker}</span>
+                              <button 
+                                onClick={() => handleCompanyClick(pos.ticker)}
+                                className="text-sm font-black text-slate-800 hover:text-indigo-600 hover:underline block tracking-tight text-left transition-colors"
+                              >
+                                {pos.ticker}
+                              </button>
                               <span className="text-[10px] font-bold block text-slate-600 mt-0.5">{pos.isPenny ? 'Penny' : 'Standard'}</span>
                             </td>
                             <td className="py-4 px-3 text-right font-mono text-slate-800 text-xs font-bold hidden sm:table-cell">{Number(pos.units).toFixed(2)}</td>
@@ -465,6 +524,15 @@ export default function UnifiedDashboard() {
           data={terminalData}
         />
       )}
+
+      {/* ════════ COMPANY INFO MODAL ════════ */}
+      <CompanyInfoModal 
+        isOpen={selectedCompanyTicker !== null}
+        onClose={() => setSelectedCompanyTicker(null)}
+        info={companyInfo}
+        isLoading={isCompanyLoading}
+        error={companyError}
+      />
     </div>
   );
 }

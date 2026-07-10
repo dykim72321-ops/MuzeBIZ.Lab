@@ -1,11 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X,
     Fingerprint, Activity,
-    List
+    List, Building2, Briefcase, ExternalLink
 } from 'lucide-react';
 import clsx from 'clsx';
+import { apiClient } from '../../services/apiClient';
+import type { CompanyInfo } from './CompanyInfoModal';
 import {
     ResponsiveContainer,
     AreaChart,
@@ -387,6 +389,22 @@ export const StockTerminalModal = ({
         };
     }, [isOpen, onClose]);
 
+    const [activeTab, setActiveTab] = useState<'quant' | 'company'>('quant');
+    const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
+    const [isCompanyLoading, setIsCompanyLoading] = useState(false);
+    const [companyError, setCompanyError] = useState<string | null>(null);
+
+    const handleCompanyTabClick = () => {
+        setActiveTab('company');
+        if (!companyInfo && !isCompanyLoading && !companyError) {
+            setIsCompanyLoading(true);
+            apiClient.get<CompanyInfo>(`/api/market/company/${data.ticker}`)
+                .then(res => setCompanyInfo(res))
+                .catch((err: Error) => setCompanyError(err.message || 'Error fetching company info'))
+                .finally(() => setIsCompanyLoading(false));
+        }
+    };
+
     // ── RSI 정규화 (0~100 그대로) ──────────────────────────────────────────
     const displayData = data;
     const rsiVal = displayData.rsi ?? 0;
@@ -492,8 +510,33 @@ export const StockTerminalModal = ({
                                     </div>
                                 </div>
 
-                                {/* RIGHT: 퀀트 분석 매트릭스 */}
-                                <div className="bg-blue-50/50 rounded-2xl border border-blue-200 p-6 flex flex-col justify-center relative overflow-hidden group">
+                                {/* RIGHT: 탭 선택 및 컨텐츠 영역 */}
+                                <div className="flex flex-col gap-4">
+                                    {/* 탭 버튼 */}
+                                    <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+                                        <button 
+                                            onClick={() => setActiveTab('quant')}
+                                            className={clsx(
+                                                "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                                                activeTab === 'quant' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                            )}
+                                        >
+                                            📊 Quant Analysis
+                                        </button>
+                                        <button
+                                            onClick={handleCompanyTabClick}
+                                            className={clsx(
+                                                "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                                                activeTab === 'company' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                            )}
+                                        >
+                                            🏢 Company Profile
+                                        </button>
+                                    </div>
+
+                                    {/* 컨텐츠 (Quant) */}
+                                    {activeTab === 'quant' && (
+                                        <div className="bg-blue-50/50 rounded-2xl border border-blue-200 p-6 flex flex-col justify-center relative overflow-hidden group flex-1">
                                     <div className="absolute top-0 right-0 p-4 opacity-[0.06] group-hover:opacity-10 transition-opacity">
                                         <Fingerprint className="w-24 h-24 text-blue-900" />
                                     </div>
@@ -556,6 +599,74 @@ export const StockTerminalModal = ({
                                             />
                                         </div>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* 컨텐츠 (Company) */}
+                            {activeTab === 'company' && (
+                                        <div className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col relative overflow-hidden group flex-1">
+                                            {isCompanyLoading ? (
+                                                <div className="flex flex-col items-center justify-center flex-1 gap-3">
+                                                    <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                                                    <p className="text-sm font-bold text-slate-500">기업 정보를 불러오는 중...</p>
+                                                </div>
+                                            ) : companyError ? (
+                                                <div className="flex flex-col items-center justify-center flex-1">
+                                                    <div className="text-center text-rose-500 font-bold text-sm bg-rose-50 p-4 rounded-lg border border-rose-100">
+                                                        {companyError}
+                                                    </div>
+                                                </div>
+                                            ) : companyInfo ? (
+                                                <div className="space-y-6">
+                                                    {/* Badges */}
+                                                    {(companyInfo.sector || companyInfo.industry) && (
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {companyInfo.sector && (
+                                                                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-md border border-blue-100 text-xs font-bold">
+                                                                    <Building2 className="w-3.5 h-3.5" />
+                                                                    {companyInfo.sector}
+                                                                </div>
+                                                            )}
+                                                            {companyInfo.industry && (
+                                                                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-100 text-xs font-bold">
+                                                                    <Briefcase className="w-3.5 h-3.5" />
+                                                                    {companyInfo.industry}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Summary */}
+                                                    <div>
+                                                        <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest mb-2 flex items-center gap-2">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Business Summary
+                                                        </h3>
+                                                        <div className="text-sm text-slate-600 leading-relaxed font-medium bg-slate-50 p-4 rounded-lg border border-slate-100 max-h-48 overflow-y-auto custom-scrollbar">
+                                                            {companyInfo.summary ? (
+                                                                companyInfo.summary
+                                                            ) : (
+                                                                <span className="italic text-slate-400">기업 요약 정보가 제공되지 않았습니다.</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Links */}
+                                                    {companyInfo.website && (
+                                                        <div className="pt-2">
+                                                            <a 
+                                                                href={companyInfo.website} 
+                                                                target="_blank" 
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex items-center gap-2 text-sm font-bold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-3 py-2 rounded-md transition-colors"
+                                                            >
+                                                                공식 웹사이트 방문 <ExternalLink className="w-4 h-4" />
+                                                            </a>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

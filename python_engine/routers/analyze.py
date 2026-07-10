@@ -44,6 +44,15 @@ class ValidateRequest(BaseModel):
     tickers: List[str]
 
 
+class CompanyInfo(BaseModel):
+    symbol: str
+    name: Optional[str] = None
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    summary: Optional[str] = None
+    website: Optional[str] = None
+
+
 @router.post("/api/analyze", response_model=TechnicalIndicators)
 def analyze_stock(request: AnalyzeRequest):
     """지표 계산 API (기본 기능 - 인메모리 캐시)"""
@@ -159,3 +168,70 @@ async def validate_candidates(
             continue
 
     return valid_tickers
+
+
+import urllib.request
+import urllib.parse
+import json
+
+
+def translate_to_korean(text: str) -> str:
+    if not text:
+        return text
+    try:
+        url = (
+            "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q="
+            + urllib.parse.quote(text)
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        response = urllib.request.urlopen(req)
+        data = json.loads(response.read().decode("utf-8"))
+        return "".join([sentence[0] for sentence in data[0]])
+    except Exception as e:
+        print(f"Translation failed: {e}")
+        return text
+
+
+@router.get("/api/market/company/{ticker}", response_model=CompanyInfo)
+def get_company_info(ticker: str):
+    """Yahoo Finance를 이용해 회사 기본 정보 조회"""
+    cache_key = f"company_info_{ticker.upper()}"
+    if cache_key in analyze_cache:
+        return analyze_cache[cache_key]
+
+    try:
+        tkr = yf.Ticker(ticker.upper())
+        info = tkr.info
+
+        # 일부 페니 주식의 경우 info가 비어있을 수 있음
+        sector = info.get("sector")
+        industry = info.get("industry")
+        quoteType = info.get("quoteType")
+
+        if not sector and quoteType == "ETF":
+            sector = "ETF"
+            industry = info.get("category", "Fund")
+
+        summary_en = info.get("longBusinessSummary")
+        summary_ko = translate_to_korean(summary_en) if summary_en else None
+
+        company = CompanyInfo(
+            symbol=ticker.upper(),
+            name=info.get("longName") or info.get("shortName") or ticker.upper(),
+            sector=sector,
+            industry=industry,
+            summary=summary_ko,
+            website=info.get("website"),
+        )
+        analyze_cache[cache_key] = company
+        return company
+    except Exception as e:
+        # 에러 발생 시 최소한의 정보만 반환
+        fallback = CompanyInfo(
+            symbol=ticker.upper(),
+            name=ticker.upper(),
+            sector=None,
+            industry=None,
+            summary=f"Failed to fetch info: {str(e)}",
+        )
+        return fallback

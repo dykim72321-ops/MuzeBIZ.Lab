@@ -336,12 +336,12 @@ export const MuzepartSearchPage: React.FC = () => {
                   <table className="w-full text-sm text-left">
                     <thead className="bg-slate-100/80 border-b border-slate-200">
                       <tr>
-                        <th className={`px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'distributor', sortOrder)}`} onClick={() => handleSort('distributor')}>Distributor</th>
-                        <th className="px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">MPN / Manufacturer</th>
-                        <th className={`px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'stock', sortOrder)}`} onClick={() => handleSort('stock')}>Stock</th>
-                        <th className={`px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'price', sortOrder)}`} onClick={() => handleSort('price')}>Price</th>
-                        <th className="px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">Delivery</th>
-                        <th className="px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">Actions</th>
+                        <th className={`w-[15%] px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'distributor', sortOrder)}`} onClick={() => handleSort('distributor')}>Distributor</th>
+                        <th className="w-[30%] px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">Part Number</th>
+                        <th className={`w-[10%] px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'stock', sortOrder)}`} onClick={() => handleSort('stock')}>Stock</th>
+                        <th className={`w-[20%] px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'price', sortOrder)}`} onClick={() => handleSort('price')}>Price</th>
+                        <th className="w-[15%] px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">Delivery</th>
+                        <th className="w-[10%] px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-800">

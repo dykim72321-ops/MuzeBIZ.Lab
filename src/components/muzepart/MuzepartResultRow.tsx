@@ -17,9 +17,8 @@ interface MuzepartResultRowProps {
   onShowDetails: (part: ComponentPart) => void;
 }
 
-export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({ 
-  part, 
-  handleLock,
+export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
+  part,
   onShowDetails
 }) => {
   return (
@@ -64,7 +63,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
       </td>
       <td className="px-4 py-4">
         <div className="flex flex-col relative group/price">
-          <span className={`text-[14px] font-black font-mono tracking-tight text-slate-900 w-fit ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-slate-400' : ''}`}>
+          <span className={`text-[14px] font-black font-mono tracking-tight text-slate-900 w-fit whitespace-nowrap ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-slate-400' : ''}`}>
             {part.price > 0 ? `${part.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${part.currency}` : 'Quote'}
           </span>
           {part.priceBreaks && part.priceBreaks.length > 0 && (
@@ -133,20 +132,6 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
               <Info className="w-4 h-4" />
             </button>
           </div>
-          
-          <button 
-            onClick={() => handleLock(part)}
-            disabled={part.is_locked || part.is_processing}
-            className={`min-w-[80px] py-1.5 px-3 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-sm flex items-center justify-center cursor-pointer ${
-              part.is_locked 
-                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed' 
-                : part.is_processing
-                ? 'bg-indigo-50 text-indigo-400 border border-indigo-100 cursor-wait'
-                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-[0_2px_10px_rgba(79,70,229,0.25)] hover:shadow-[0_4px_15px_rgba(79,70,229,0.4)] border-none'
-            }`}
-          >
-            {part.is_locked ? 'Locked' : part.is_processing ? 'Wait...' : 'Lock'}
-          </button>
         </div>
       </td>
     </tr>

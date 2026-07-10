@@ -163,8 +163,8 @@ export function useDashboardData() {
     if (!liveHistory || liveHistory.length === 0) {
       if (currentActualValue != null) {
         return [
-          { name: startLabel, value: BASE, ts: 0, ma: BASE },
-          { name: '현재', value: currentActualValue, ts: now, ma: currentActualValue },
+          { name: startLabel, value: BASE, ts: 0, ma: BASE, id: '0', displayName: startLabel },
+          { name: '현재', value: currentActualValue, ts: now, ma: currentActualValue, id: '1', displayName: '현재' },
         ];
       }
       return [];
@@ -233,16 +233,17 @@ export function useDashboardData() {
     // but keep it in tooltip if possible? Actually, if we just empty the name, XAxis won't show it.
     let lastSeenName = '';
     const cleanSeries = series.map((s, idx) => {
-      if (idx === 0 || idx === series.length - 1) return s; // Always keep start and end
+      const base = { ...s, id: idx.toString() };
+      if (idx === 0 || idx === series.length - 1) {
+        lastSeenName = s.name;
+        return { ...base, displayName: s.name };
+      }
       if (s.name === lastSeenName) {
-        return { ...s, displayName: '' }; // displayName used for Axis
+        return { ...base, displayName: '' };
       }
       lastSeenName = s.name;
-      return { ...s, displayName: s.name };
+      return { ...base, displayName: s.name };
     });
-    cleanSeries[0].displayName = cleanSeries[0].name;
-    cleanSeries[cleanSeries.length - 1].displayName = cleanSeries[cleanSeries.length - 1].name;
-
     return cleanSeries;
   }, [liveHistory, chartRange, displayedAccount]);
 
