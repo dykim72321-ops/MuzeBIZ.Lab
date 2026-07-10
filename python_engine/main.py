@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 from datetime import datetime, time as dtime, timedelta, timezone
+import pytz
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -287,31 +288,32 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     latest = df.iloc[-1]
 
     dynamic_kelly_weight = None
-    recent_pnls = None
+    recent_trades = None
     _cached_pnls = stats_cache.get("recent_pnls")
     if _cached_pnls:
-        recent_pnls = _cached_pnls
+        recent_trades = _cached_pnls
     elif app_state.supabase:
         try:
             res = (
                 app_state.supabase.table("paper_history")
-                .select("pnl_pct")
+                .select("ticker,entry_price,pnl_pct,profit_amt")
                 .order("closed_at", desc=True)
                 .limit(50)
                 .execute()
             )
             if res.data:
-                recent_pnls = [
-                    float(row.get("pnl_pct") or 0.0) for row in reversed(res.data)
-                ]
+                recent_trades = list(reversed(res.data))
                 with _stats_cache_lock:
-                    stats_cache["recent_pnls"] = recent_pnls
+                    stats_cache["recent_pnls"] = recent_trades
         except Exception as e:
             print(f"⚠️ [Dynamic Kelly DB Fetch Error] {e}")
 
-    if recent_pnls and len(recent_pnls) >= 10:
-        d_weight, _, _ = calculate_dynamic_kelly(recent_pnls, min_trades=10)
-        dynamic_kelly_weight = d_weight if d_weight > 0 else None
+    if recent_trades and len(recent_trades) >= 10:
+        d_weight, _, _ = calculate_dynamic_kelly(recent_trades, min_trades=10)
+        # d_weight<=0(엣지 없음으로 실측)은 낙관적 기본값(승률55%/손익비2.0)으로
+        # 대체하지 않고 0을 그대로 흘려보내 calculate_position_sizing의
+        # kelly_f<=0 가드가 실제로 발동해 비중을 0으로 만들도록 한다.
+        dynamic_kelly_weight = d_weight if d_weight is not None else None
 
     sizing = calculate_position_sizing(
         df_raw, dynamic_kelly_weight=dynamic_kelly_weight
@@ -352,6 +354,7 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         "vol_weight": sizing["vol_weight"],
         "kelly_f": sizing["kelly_f"],
         "recommended_weight": sizing["recommended_weight"],
+        "atr": sizing.get("atr", 0.0),
         "price": round(float(latest["Close"]), 2),
         "indicator": "Micro-Cap Hybrid Pulse",
         "value": round(float(latest["Close"]), 2),
@@ -489,7 +492,7 @@ async def run_quant_scan_internal(
                 trading_client.get_all_assets, assets_req
             )
 
-            _SKIP_PATTERN = _re.compile(r"\." r"|W[SR]?$" r"|[0-9]$" r"|R$")
+            _SKIP_PATTERN = _re.compile(r"\.|[0-9]$")
             tradable = [
                 a.symbol
                 for a in all_assets
@@ -497,6 +500,7 @@ async def run_quant_scan_internal(
                 and a.exchange in ("NASDAQ", "NYSE", "AMEX", "ARCA")
                 and not _SKIP_PATTERN.search(a.symbol)
                 and len(a.symbol) <= 5
+                and not (len(a.symbol) == 5 and a.symbol[-1] in ("W", "R", "Q"))
             ]
             print(f"📡 [Scan] Alpaca universe: {len(tradable)} tradable US equities")
 
@@ -525,7 +529,7 @@ async def run_quant_scan_internal(
                 [t for t in tradable if t not in pool_set],
                 min(500, len(tradable)),
             )
-            sampled = fresh_sample + pool_tickers
+            sampled = pool_tickers + fresh_sample
             print(
                 f"🔀 [Scan] Universe mix: {len(fresh_sample)} fresh + {len(pool_tickers)} pool = {len(sampled)} total"
             )
@@ -637,137 +641,198 @@ async def run_quant_scan_internal(
             print(f"⚠️ [Scan Pool] UPSERT skipped: {upsert_err}")
 
     results = []
-    for ticker in scan_tickers[:80]:
-        if ticker in _yf_no_data_cache:
-            continue
+    valid_tickers = [t for t in scan_tickers[:80] if t not in _yf_no_data_cache]
+    if valid_tickers:
+        print(f"📥 [Scan] Batch downloading {len(valid_tickers)} tickers...")
+        batch_str = " ".join(valid_tickers)
         try:
-            tk = yf.Ticker(ticker)
-            df = await asyncio.to_thread(
-                tk.history, period=PENNY_DATA_LOOKBACK, interval="1d"
+            df_all = await asyncio.to_thread(
+                yf.download,
+                batch_str,
+                period=PENNY_DATA_LOOKBACK,
+                interval="1d",
+                group_by="ticker",
+                progress=False,
+                threads=True,
             )
-            if df is None or df.empty or len(df) < 30:
-                _yf_no_data_cache.add(ticker)
-                continue
-
-            df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
-
-            macd_ind = ta.trend.MACD(
-                df["Close"], window_slow=26, window_fast=12, window_sign=9
-            )
-            df["MACD_Diff"] = macd_ind.macd_diff()
-
-            adx_ind = ta.trend.ADXIndicator(
-                high=df["High"], low=df["Low"], close=df["Close"], window=14
-            )
-            df["ADX"] = adx_ind.adx()
-            df["+DI"] = adx_ind.adx_pos()
-            df["-DI"] = adx_ind.adx_neg()
-
-            df["Avg_Vol"] = (
-                df["Volume"].shift(1).rolling(window=30, min_periods=1).median()
-            )
-            df["RVOL"] = df["Volume"] / (df["Avg_Vol"] + 1e-9)
-
-            ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
-            df["Is_Extended"] = (
-                (df["Close"] > df["Open"] * 1.25)
-                | (df["Close"] > df["Close"].shift(1) * 1.25)
-                | (df["Close"] > ma20 * 1.30)
-            )
-
-            latest = df.iloc[-1]
-            prev = df.iloc[-2] if len(df) >= 2 else latest
-
-            rsi = float(latest["RSI"]) if not pd.isna(latest["RSI"]) else 50.0
-            macd_diff = (
-                float(latest["MACD_Diff"]) if not pd.isna(latest["MACD_Diff"]) else 0.0
-            )
-            macd_diff_prev = (
-                float(prev["MACD_Diff"]) if not pd.isna(prev["MACD_Diff"]) else 0.0
-            )
-            adx = (
-                float(latest["ADX"])
-                if "ADX" in latest.index and not pd.isna(latest["ADX"])
-                else 0.0
-            )
-            rvol = (
-                float(latest["RVOL"])
-                if "RVOL" in latest.index and not pd.isna(latest["RVOL"])
-                else 1.0
-            )
-            is_extended = (
-                bool(latest["Is_Extended"]) if "Is_Extended" in latest.index else False
-            )
-            price = float(latest["Close"])
-            change_pct = 0.0
-            if len(df) >= 2:
-                prev_close = float(df["Close"].iloc[-2])
-                if prev_close > 0:
-                    change_pct = round((price / prev_close - 1) * 100, 2)
-
-            volume = int(latest["Volume"]) if not pd.isna(latest["Volume"]) else 0
-
-            dna_score = calculate_dna_score(
-                rsi=rsi,
-                macd_diff=macd_diff,
-                macd_diff_prev=macd_diff_prev,
-                adx=adx,
-                di_plus=(
-                    float(latest["+DI"])
-                    if "+DI" in latest.index and not pd.isna(latest["+DI"])
-                    else 0.0
-                ),
-                di_minus=(
-                    float(latest["-DI"])
-                    if "-DI" in latest.index and not pd.isna(latest["-DI"])
-                    else 0.0
-                ),
-                rvol=rvol,
-                is_extended=is_extended,
-            )
-
-            signal_type = "HOLD"
-            strength = "NORMAL"
-
-            if dna_score >= 85.0:
-                signal_type = "BUY"
-                strength = "STRONG"
-            elif dna_score >= 80.0:
-                signal_type = "BUY"
-                strength = "NORMAL"
-            elif dna_score <= 40.0:
-                signal_type = "SELL"
-                strength = "STRONG"
-
-            results.append(
-                {
-                    "ticker": ticker,
-                    "price": round(price, 4),
-                    "change_pct": change_pct,
-                    "volume": volume,
-                    "dna_score": dna_score,
-                    "rsi": round(rsi, 2),
-                    "macd_diff": round(macd_diff, 4),
-                    "adx": round(adx, 2),
-                    "rvol": round(rvol, 2),
-                    "signal": signal_type,
-                    "strength": strength,
-                    "is_extended": is_extended,
-                }
-            )
-            if supabase:
-                try:
-                    await asyncio.to_thread(
-                        supabase.table("penny_universe_pool")
-                        .update({"last_price": round(price, 4)})
-                        .eq("ticker", ticker)
-                        .execute
-                    )
-                except Exception:
-                    pass
         except Exception as e:
-            print(f"⚠️ [Scan] {ticker} analysis error: {e}")
-            continue
+            print(f"⚠️ [Scan] Batch download failed: {e}")
+            df_all = None
+
+        ny_tz = pytz.timezone("America/New_York")
+        now_ny = datetime.now(ny_tz)
+        market_open = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
+        market_close = now_ny.replace(hour=16, minute=0, second=0, microsecond=0)
+
+        def get_u_shape_progress(elapsed: float) -> float:
+            if elapsed <= 30:
+                return (elapsed / 30) * 0.20
+            if elapsed <= 90:
+                return 0.20 + ((elapsed - 30) / 60) * 0.15
+            if elapsed <= 150:
+                return 0.35 + ((elapsed - 90) / 60) * 0.10
+            if elapsed <= 210:
+                return 0.45 + ((elapsed - 150) / 60) * 0.08
+            if elapsed <= 270:
+                return 0.53 + ((elapsed - 210) / 60) * 0.08
+            if elapsed <= 330:
+                return 0.61 + ((elapsed - 270) / 60) * 0.14
+            if elapsed <= 360:
+                return 0.75 + ((elapsed - 330) / 30) * 0.10
+            return min(0.85 + ((elapsed - 360) / 30) * 0.15, 1.0)
+
+        progress = 1.0
+        if market_open <= now_ny <= market_close:
+            elapsed_minutes = (now_ny - market_open).total_seconds() / 60.0
+            progress = max(get_u_shape_progress(elapsed_minutes), 0.05)
+
+        for ticker in valid_tickers:
+            if df_all is None or df_all.empty:
+                continue
+            try:
+                if len(valid_tickers) == 1:
+                    df = df_all.copy()
+                else:
+                    if ticker not in df_all.columns.levels[0]:
+                        _yf_no_data_cache.add(ticker)
+                        continue
+                    df = df_all[ticker].copy()
+
+                df.dropna(subset=["Close", "Volume"], inplace=True)
+                if df.empty or len(df) < 30:
+                    _yf_no_data_cache.add(ticker)
+                    continue
+
+                last_bar_date = df.index[-1]
+                if hasattr(last_bar_date, "date"):
+                    last_bar_date = last_bar_date.date()
+                is_last_bar_today = last_bar_date == now_ny.date()
+                if progress < 1.0 and is_last_bar_today and len(df) > 0:
+                    df.loc[df.index[-1], "Volume"] = df["Volume"].iloc[-1] / progress
+
+                df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
+
+                macd_ind = ta.trend.MACD(
+                    df["Close"], window_slow=26, window_fast=12, window_sign=9
+                )
+                df["MACD_Diff"] = macd_ind.macd_diff()
+
+                adx_ind = ta.trend.ADXIndicator(
+                    high=df["High"], low=df["Low"], close=df["Close"], window=14
+                )
+                df["ADX"] = adx_ind.adx()
+                df["+DI"] = adx_ind.adx_pos()
+                df["-DI"] = adx_ind.adx_neg()
+
+                df["Avg_Vol"] = (
+                    df["Volume"].shift(1).rolling(window=30, min_periods=1).median()
+                )
+                df["RVOL"] = df["Volume"] / (df["Avg_Vol"] + 1e-9)
+
+                ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
+                df["Is_Extended"] = (
+                    (df["Close"] > df["Open"] * 1.25)
+                    | (df["Close"] > df["Close"].shift(1) * 1.25)
+                    | (df["Close"] > ma20 * 1.30)
+                )
+
+                latest = df.iloc[-1]
+                prev = df.iloc[-2] if len(df) >= 2 else latest
+
+                rsi = float(latest["RSI"]) if not pd.isna(latest["RSI"]) else 50.0
+                macd_diff = (
+                    float(latest["MACD_Diff"])
+                    if not pd.isna(latest["MACD_Diff"])
+                    else 0.0
+                )
+                macd_diff_prev = (
+                    float(prev["MACD_Diff"]) if not pd.isna(prev["MACD_Diff"]) else 0.0
+                )
+                adx = (
+                    float(latest["ADX"])
+                    if "ADX" in latest.index and not pd.isna(latest["ADX"])
+                    else 0.0
+                )
+                rvol = (
+                    float(latest["RVOL"])
+                    if "RVOL" in latest.index and not pd.isna(latest["RVOL"])
+                    else 1.0
+                )
+                is_extended = (
+                    bool(latest["Is_Extended"])
+                    if "Is_Extended" in latest.index
+                    else False
+                )
+                price = float(latest["Close"])
+                change_pct = 0.0
+                if len(df) >= 2:
+                    prev_close = float(df["Close"].iloc[-2])
+                    if prev_close > 0:
+                        change_pct = round((price / prev_close - 1) * 100, 2)
+
+                volume = int(latest["Volume"]) if not pd.isna(latest["Volume"]) else 0
+
+                dna_score = calculate_dna_score(
+                    rsi=rsi,
+                    macd_diff=macd_diff,
+                    macd_diff_prev=macd_diff_prev,
+                    adx=adx,
+                    di_plus=(
+                        float(latest["+DI"])
+                        if "+DI" in latest.index and not pd.isna(latest["+DI"])
+                        else 0.0
+                    ),
+                    di_minus=(
+                        float(latest["-DI"])
+                        if "-DI" in latest.index and not pd.isna(latest["-DI"])
+                        else 0.0
+                    ),
+                    rvol=rvol,
+                    is_extended=is_extended,
+                )
+
+                signal_type = "HOLD"
+                strength = "NORMAL"
+
+                if dna_score >= 85.0:
+                    signal_type = "BUY"
+                    strength = "STRONG"
+                elif dna_score >= 80.0:
+                    signal_type = "BUY"
+                    strength = "NORMAL"
+                elif dna_score <= 40.0:
+                    signal_type = "SELL"
+                    strength = "STRONG"
+
+                results.append(
+                    {
+                        "ticker": ticker,
+                        "price": round(price, 4),
+                        "change_pct": change_pct,
+                        "volume": volume,
+                        "dna_score": dna_score,
+                        "rsi": round(rsi, 2),
+                        "macd_diff": round(macd_diff, 4),
+                        "adx": round(adx, 2),
+                        "rvol": round(rvol, 2),
+                        "signal": signal_type,
+                        "strength": strength,
+                        "is_extended": is_extended,
+                    }
+                )
+                if supabase:
+                    try:
+                        await asyncio.to_thread(
+                            supabase.table("penny_universe_pool")
+                            .update({"last_price": round(price, 4)})
+                            .eq("ticker", ticker)
+                            .execute
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"⚠️ [Scan] {ticker} analysis error: {e}")
+                continue
 
     results.sort(key=lambda x: x["dna_score"], reverse=True)
     for i, r in enumerate(results):
@@ -777,6 +842,8 @@ async def run_quant_scan_internal(
     auto_registered: List[str] = []
     if supabase and results:
         for item in results[:top_n]:
+            if item.get("dna_score", 0) < 70:
+                continue
             try:
                 payload = {
                     "ticker": item["ticker"],
@@ -959,7 +1026,7 @@ async def on_minute_bar_closed(bar):
                     iex_total = float(df_hist["_raw_iex_volume"].fillna(0).sum())
                     yf_total = float(yf_1m["Volume"].sum())
                     if iex_total > 0 and yf_total > iex_total:
-                        multiplier = min(yf_total / iex_total, 20.0)
+                        multiplier = min(yf_total / iex_total, 50.0)
                         _candle_state.volume_multiplier[ticker_symbol] = multiplier
                         _candle_state.history[ticker_symbol]["Volume"] = (
                             _candle_state.history[ticker_symbol][
@@ -1018,12 +1085,12 @@ async def on_minute_bar_closed(bar):
                         )
 
                         if yf_window_total > iex_total:
-                            multiplier = min(yf_window_total / iex_total, 20.0)
+                            multiplier = min(yf_window_total / iex_total, 50.0)
                         else:
                             # 시간대 매칭이 안 되면 전체 일봉 비율로 추정
                             yf_total = float(yf_1m["Volume"].sum())
                             multiplier = (
-                                min(yf_total / iex_total, 20.0)
+                                min(yf_total / iex_total, 50.0)
                                 if yf_total > iex_total
                                 else 1.0
                             )
@@ -1298,7 +1365,7 @@ async def on_minute_bar_closed(bar):
                     )
 
                 if app_state.active_engine:
-                    await app_state.active_engine.process_signal(
+                    buy_executed = await app_state.active_engine.process_signal(
                         ticker=ticker_symbol,
                         price=payload.get("price"),
                         signal_type=payload.get("signal"),
@@ -1313,12 +1380,7 @@ async def on_minute_bar_closed(bar):
                         atr=float(payload.get("atr", 0.0)),
                         smoothed_er=float(payload.get("smoothed_er", 0.5)),
                     )
-                    if (
-                        payload.get("signal") == "BUY"
-                        and payload.get("strength") == "STRONG"
-                        and app_state.SYSTEM_ARMED
-                        and dna_val >= (60 if current_price <= 1.0 else 75)
-                    ):
+                    if buy_executed:
                         app_state._held_tickers.add(ticker_symbol)
 
                 print(

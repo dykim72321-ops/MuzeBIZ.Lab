@@ -83,24 +83,35 @@ def calculate_dynamic_kelly(paper_history_records, current_atr, current_price):
     if not paper_history_records:
         return 0.05  # 역사적 데이터 부족 시 락인할 보수적 하한선 비중 (5%)
 
+    grouped_trades = {}
+    for r in paper_history_records:
+        ticker = r.get("ticker", "unknown")
+        entry_price = r.get("entry_price", 0.0)
+        profit_amt = r.get("profit_amt", 0.0) or 0.0
+        pnl_pct = r.get("pnl_pct", 0.0) or 0.0
+
+        # paper_history는 entry_value/qty를 저장하지 않으므로
+        # 해당 청산분(Scale-Out 포함)의 투입 금액을 profit_amt/pnl_pct로 역산한다.
+        entry_val = (profit_amt / (pnl_pct / 100.0)) if pnl_pct else 0.0
+
+        key = f"{ticker}_{round(entry_price, 4)}"
+        if key not in grouped_trades:
+            grouped_trades[key] = {"total_pnl": 0.0, "total_entry_val": 0.0}
+
+        grouped_trades[key]["total_pnl"] += profit_amt
+        grouped_trades[key]["total_entry_val"] += entry_val
+
     win_pcts = []
     loss_pcts = []
 
-    for r in paper_history_records:
-        # DB 레코드에 pnl_pct가 없을 경우를 대비해 금액 대비 수익률을 안전하게 역산
-        if "pnl_pct" in r and r["pnl_pct"] is not None:
-            pct = r["pnl_pct"]
-        else:
-            entry_val = r.get("entry_value", 0) or (
-                r.get("buy_price", 0) * r.get("qty", 0)
-            )
-            if entry_val <= 0:
-                continue
-            pct = r["pnl"] / entry_val
+    for key, data in grouped_trades.items():
+        if data["total_entry_val"] <= 0:
+            continue
+        pct = data["total_pnl"] / data["total_entry_val"]
 
         if pct > 0:
             win_pcts.append(pct)
-        else:
+        elif pct < 0:
             loss_pcts.append(abs(pct))
 
     total_trades = len(win_pcts) + len(loss_pcts)
@@ -501,17 +512,17 @@ class PaperTradingManager:
         price: float,
         signal_type: str,
         strength: str,
-        rsi: float,
+        rsi: float | None = None,
         ai_report: str = "",
         is_armed: bool = False,
-        dna_score: float = 85.0,
+        dna_score: float = 0.0,
         recommended_weight: float = 0.0,
         atr: float = 0.0,
         smoothed_er: float = 0.5,
-    ):
+    ) -> bool:
         """동일 티커에 대한 진입/청산이 겹쳐 실행되지 않도록 락으로 직렬화."""
         async with self._get_lock(ticker):
-            await self._process_signal_locked(
+            return await self._process_signal_locked(
                 ticker,
                 price,
                 signal_type,
@@ -531,14 +542,14 @@ class PaperTradingManager:
         price: float,
         signal_type: str,
         strength: str,
-        rsi: float,
+        rsi: float | None = None,
         ai_report: str = "",
         is_armed: bool = False,
-        dna_score: float = 85.0,
+        dna_score: float = 0.0,
         recommended_weight: float = 0.0,
         atr: float = 0.0,
         smoothed_er: float = 0.5,
-    ):
+    ) -> bool:
         """
         v4 State Machine:
         1. STRONG BUY (DNA≥80) → 매수 (recommended_weight 비중 or 기본 KELLY_FRACTION) + 관심종목 자동 등록 (HOLDING)
@@ -651,11 +662,12 @@ class PaperTradingManager:
             # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
             # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
             if recommended_weight <= 0:
-                # paper_history에는 pnl_pct만 실제로 존재한다 (pnl/buy_price/qty 컬럼 없음
-                # — 이전엔 존재하지 않는 컬럼을 select하여 42703 에러로 매 폴백마다 크래시했음).
+                # paper_history 실제 컬럼: ticker/entry_price/pnl_pct/profit_amt
+                # (buy_price/qty/pnl/entry_value 컬럼은 존재하지 않음 — 존재하지 않는
+                # 컬럼을 select하면 42703 에러로 매 폴백마다 크래시했던 이력이 있음).
                 res = await asyncio.to_thread(
                     self.supabase.table("paper_history")
-                    .select("pnl_pct")
+                    .select("ticker,entry_price,pnl_pct,profit_amt")
                     .order("closed_at", desc=True)
                     .limit(50)
                     .execute
@@ -767,6 +779,7 @@ class PaperTradingManager:
                 await self._sync_watchlist_buy(
                     ticker, fill_price, ts_threshold, dna_score
                 )
+                return True
             except Exception as e:
                 print(f"❌ Buy Error: {e}")
                 raise
@@ -1052,3 +1065,5 @@ class PaperTradingManager:
                 # TS가 상향된 경우에만 watchlist stop_loss 동기화 (매 봉 불필요한 쓰기 방지)
                 if ts_threshold > pos["ts_threshold"]:
                     await self._sync_watchlist_stop_loss(ticker, ts_threshold)
+
+        return False

@@ -10,6 +10,7 @@ import numpy as np
 from cachetools import TTLCache
 from fastapi import APIRouter
 
+from paper_engine import INITIAL_CAPITAL
 from state import app_state
 
 router = APIRouter(prefix="/api/strategy", tags=["strategy"])
@@ -56,14 +57,12 @@ def _compute_bucket_stats(trades: list) -> dict:
     win_count = 0
     gross_profit = 0.0
     gross_loss = 0.0
-    pnl_sum = 0.0
-    pnl_arr = np.empty(total_trades, dtype=np.float64)
+    profit_arr = np.empty(total_trades, dtype=np.float64)
 
     for i, t in enumerate(trades):
         pnl = float(t.get("pnl_pct") or 0)
         amt = float(t.get("profit_amt") or 0)
-        pnl_arr[i] = pnl
-        pnl_sum += pnl
+        profit_arr[i] = amt
         if pnl > 0:
             win_count += 1
         if amt > 0:
@@ -72,16 +71,33 @@ def _compute_bucket_stats(trades: list) -> dict:
             gross_loss -= amt
 
     win_rate = round(win_count / total_trades * 100, 1)
-    avg_pnl = round(pnl_sum / total_trades, 2)
+
+    # avg_pnl should be average dollar amount to match the UI which displays '$'
+    net_profit = gross_profit - gross_loss
+    avg_pnl = round(net_profit / total_trades, 2)
+
     profit_factor = (
         round(gross_profit / gross_loss, 2)
         if gross_loss > 0
         else (_MAX_PROFIT_FACTOR if gross_profit > 0 else 0.0)
     )
 
-    cumulative = np.cumsum(pnl_arr)
-    running_max = np.maximum.accumulate(cumulative)
-    mdd = round(float(np.min(cumulative - running_max)), 2)
+    # MDD는 거래별 pnl_pct를 그대로 복리(cumprod)하면 안 된다 — 각 거래는
+    # 계좌 전체가 아니라 실제 투입 금액(최대 $5,000, 계좌의 일부)에 대한
+    # 수익률이고, 여러 종목이 동시에 병렬 보유되므로 시간순으로 이어붙여
+    # 복리 계산하면 드로다운이 극단적으로 과장된다(예: -90%대).
+    # 대신 실제 달러 손익(profit_amt)을 paper_engine.INITIAL_CAPITAL 기준
+    # 계좌 자산곡선에 순차 누적해 진짜 계좌 단위 MDD를 계산한다.
+    equity_curve = INITIAL_CAPITAL + np.cumsum(profit_arr)
+    running_max = np.maximum.accumulate(equity_curve)
+
+    drawdowns = np.zeros_like(equity_curve)
+    mask = running_max > 0
+    drawdowns[mask] = (
+        (equity_curve[mask] - running_max[mask]) / running_max[mask] * 100.0
+    )
+
+    mdd = round(float(np.min(drawdowns)), 2)
 
     return {
         "win_rate": win_rate,
@@ -107,7 +123,7 @@ async def get_strategy_stats():
     try:
         res = await asyncio.to_thread(
             supabase.table("paper_history")
-            .select("pnl_pct,profit_amt,closed_at,ticker,exit_reason")
+            .select("pnl_pct,profit_amt,closed_at,ticker,entry_price,exit_reason")
             .order("closed_at", desc=False)
             .execute
         )
@@ -141,9 +157,17 @@ async def get_strategy_stats():
         bucket_stats = _compute_bucket_stats(trades)
 
         with _stats_cache_lock:
-            stats_cache["recent_pnls"] = [float(t.get("pnl_pct") or 0) for t in trades][
-                -50:
-            ]
+            # calculate_dynamic_kelly()가 ticker+entry_price로 그룹핑해 Scale-Out
+            # 부분청산을 하나의 왕복매매로 합산하도록 원본 레코드를 그대로 캐시한다.
+            stats_cache["recent_pnls"] = [
+                {
+                    "ticker": t.get("ticker"),
+                    "entry_price": t.get("entry_price"),
+                    "pnl_pct": t.get("pnl_pct"),
+                    "profit_amt": t.get("profit_amt"),
+                }
+                for t in trades
+            ][-50:]
 
         win_rate = bucket_stats["win_rate"]
         profit_factor = bucket_stats["profit_factor"]

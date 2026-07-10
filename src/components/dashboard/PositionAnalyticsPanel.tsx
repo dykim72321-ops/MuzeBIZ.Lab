@@ -76,13 +76,13 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
                   paddingAngle={2}
                   stroke="none"
                 >
-                  {weightData.map((_entry, index) => (
+                  {weightData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip
                   contentStyle={{ background: '#ffffff', border: '2px solid #bfdbfe', borderRadius: '4px', fontSize: '11px', color: '#000000', fontWeight: 'bold' }}
-                  formatter={(v, name) => [`${Number(v ?? 0).toFixed(2)}%`, String(name)]}
+                  formatter={(v: any, name: any) => [`${Number(v ?? 0).toFixed(2)}%`, String(name)]}
                 />
               </RechartsPieChart>
             </ResponsiveContainer>

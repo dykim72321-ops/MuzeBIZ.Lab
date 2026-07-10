@@ -352,12 +352,7 @@ class MomentumValidator:
                 f"RVOL 부족 (현재: {rvol:.1f}x < 기준: {self.rvol_threshold}x)",
             )
 
-        # 2. MTF (15분봉 20 EMA) 검증 — DNA ≥ 80이면 강한 시그널이므로 EMA 검증 스킵
-        if dna_score >= 80.0:
-            print(
-                f"🚀 [Interceptor] {ticker} DNA {dna_score:.0f} ≥ 80 — EMA 검증 스킵 (고확신 시그널)"
-            )
-            return True, f"DNA {dna_score:.0f} 고확신 (EMA 스킵)"
+        # 2. MTF (15분봉 20 EMA) 검증 — 하락 추세 중인 종목 매수 방지
 
         ema_15m = self.mtf_cache.get_15m_ema(ticker)
         if ema_15m is not None:

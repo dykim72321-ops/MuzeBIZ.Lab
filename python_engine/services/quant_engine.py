@@ -121,23 +121,31 @@ def calculate_advanced_signals(
     score = pd.Series(50.0, index=df.index)
 
     score += np.where(
-        df["RSI"] < 30,
-        20,
+        df["RSI"].isna(),
+        0,
         np.where(
-            df["RSI"] < 45,
-            20 - (df["RSI"] - 30) / 15 * 5,
+            df["RSI"] < 30,
+            20,
             np.where(
-                df["RSI"] < 55,
-                15 * (55 - df["RSI"]) / 10,
+                df["RSI"] < 45,
+                20 - (df["RSI"] - 30) / 15 * 5,
                 np.where(
-                    df["RSI"] < 65,
-                    np.where(df["RVOL"] >= 3.0, 0, -((df["RSI"] - 55) / 10 * 10)),
+                    df["RSI"] < 55,
+                    15 * (55 - df["RSI"]) / 10,
                     np.where(
-                        df["RSI"] < 75,
+                        df["RSI"] < 65,
+                        np.where(df["RVOL"] >= 3.0, 0, -((df["RSI"] - 55) / 10 * 10)),
                         np.where(
-                            df["RVOL"] >= 3.0, 0, -(10 + (df["RSI"] - 65) / 10 * 10)
+                            df["RSI"] < 75,
+                            np.where(
+                                df["RVOL"] >= 3.0, 0, -(10 + (df["RSI"] - 65) / 10 * 10)
+                            ),
+                            np.where(
+                                df["RVOL"] >= 5.0,
+                                -5,
+                                np.where(df["RVOL"] >= 3.0, -10, -20),
+                            ),
                         ),
-                        np.where(df["RVOL"] >= 5.0, -10, -20),
                     ),
                 ),
             ),
@@ -145,13 +153,25 @@ def calculate_advanced_signals(
     )
 
     macd_diff = df["MACD_Diff"]
-    macd_diff_prev = df["MACD_Diff"].shift(1).fillna(0.0)
+    macd_diff_prev = df["MACD_Diff"].shift(1).bfill()
     is_golden = (macd_diff > 0) & (macd_diff_prev <= 0)
     is_dead = (macd_diff < 0) & (macd_diff_prev >= 0)
     score += np.where(
-        is_golden,
-        20,
-        np.where(is_dead, -20, np.where(macd_diff > macd_diff_prev, 18, -8)),
+        macd_diff.isna(),
+        0,
+        np.where(
+            is_golden,
+            20,
+            np.where(
+                is_dead,
+                -20,
+                np.where(
+                    macd_diff > macd_diff_prev,
+                    5,
+                    np.where(macd_diff == macd_diff_prev, 0, -8),
+                ),
+            ),
+        ),
     )
 
     adx_is_bearish = df["-DI"] > df["+DI"]
@@ -211,7 +231,7 @@ def calculate_advanced_signals(
     )
 
     is_penny = df["Close"] <= 1.0
-    tier1 = (~is_penny) & (df["DNA_Score"] >= 80.0)
+    tier1 = (~is_penny) & (df["DNA_Score"] >= 80.0) & (df["RVOL"] > 1.0)
     tier2 = (~is_penny) & (df["DNA_Score"] >= 75.0) & (df["RVOL"] > 1.5)
     tier_penny = is_penny & (df["DNA_Score"] >= 65.0)
 
@@ -242,7 +262,9 @@ def calculate_dna_score(
     score = 50.0
     d_rsi = d_macd = d_adx = d_rvol = d_ext = 0.0
 
-    if rsi < 30:
+    if pd.isna(rsi):
+        d_rsi = 0.0
+    elif rsi < 30:
         d_rsi = 20
     elif rsi < 45:
         d_rsi = 20 - (rsi - 30) / 15 * 5
@@ -253,15 +275,19 @@ def calculate_dna_score(
     elif rsi < 75:
         d_rsi = 0 if rvol >= 3.0 else -(10 + (rsi - 65) / 10 * 10)
     else:
-        d_rsi = -10 if rvol >= 5.0 else -20
+        d_rsi = -5 if rvol >= 5.0 else (-10 if rvol >= 3.0 else -20)
     score += d_rsi
 
-    if macd_diff > 0 and macd_diff_prev <= 0:
+    if pd.isna(macd_diff) or pd.isna(macd_diff_prev):
+        d_macd = 0.0
+    elif macd_diff > 0 and macd_diff_prev <= 0:
         d_macd = 20
     elif macd_diff < 0 and macd_diff_prev >= 0:
         d_macd = -20
     elif macd_diff > macd_diff_prev:
-        d_macd = 18
+        d_macd = 5
+    elif macd_diff == macd_diff_prev:
+        d_macd = 0
     else:
         d_macd = -8
     score += d_macd
@@ -306,18 +332,46 @@ def calculate_dna_score(
 
 
 def calculate_dynamic_kelly(
-    recent_pnl_list: list,
+    recent_trades: list,
     max_weight: float = 0.20,
     half_kelly: bool = True,
     min_trades: int = 10,
 ):
-    """최근 N번의 매매 수익률 리스트 기반으로 동적 켈리 비중 산출"""
-    if len(recent_pnl_list) < min_trades:
+    """
+    최근 N번의 매매 기록(ticker/entry_price/pnl_pct/profit_amt) 기반으로 동적 켈리 비중 산출.
+
+    Scale-Out은 동일 포지션(ticker+entry_price)의 청산을 여러 paper_history 행으로
+    남기므로, 행 단위로 승/패를 세면 한 번의 왕복매매가 여러 개의 "승리"로
+    중복 집계되어 승률이 부풀려진다. ticker+entry_price로 그룹핑해
+    포지션 단위 손익률로 환산한 뒤 승/패를 판정한다.
+    """
+    grouped: dict[str, dict[str, float]] = {}
+    for r in recent_trades:
+        ticker = r.get("ticker", "unknown")
+        entry_price = r.get("entry_price", 0.0) or 0.0
+        profit_amt = r.get("profit_amt", 0.0) or 0.0
+        pnl_pct = r.get("pnl_pct", 0.0) or 0.0
+
+        # entry_value(투입 금액) 자체는 저장되지 않으므로 profit_amt/pnl_pct로 역산
+        entry_val = (profit_amt / (pnl_pct / 100.0)) if pnl_pct else 0.0
+
+        key = f"{ticker}_{round(entry_price, 4)}"
+        bucket = grouped.setdefault(key, {"total_pnl": 0.0, "total_entry_val": 0.0})
+        bucket["total_pnl"] += profit_amt
+        bucket["total_entry_val"] += entry_val
+
+    position_pcts = [
+        b["total_pnl"] / b["total_entry_val"]
+        for b in grouped.values()
+        if b["total_entry_val"] > 0
+    ]
+
+    if len(position_pcts) < min_trades:
         return None, 0.0, 0.0
 
-    pnl_array = np.array(recent_pnl_list)
+    pnl_array = np.array(position_pcts)
     wins = pnl_array[pnl_array > 0]
-    losses = pnl_array[pnl_array <= 0]
+    losses = pnl_array[pnl_array < 0]
 
     p = len(wins) / len(pnl_array)
     avg_win = np.mean(wins) if len(wins) > 0 else 0.0
@@ -385,8 +439,11 @@ def calculate_position_sizing(
         kelly_f = (b * p - q) / b if b > 0 else 0
         optimal_kelly = max(0, kelly_f) * kelly_fraction
 
-    avg_weight = (vol_weight + optimal_kelly) / 2.0
-    final_weight = min(avg_weight, vol_weight * 2.0, 1.0)
+    if kelly_f <= 0:
+        final_weight = 0.0
+    else:
+        avg_weight = (vol_weight + optimal_kelly) / 2.0
+        final_weight = min(avg_weight, vol_weight * 2.0, 1.0)
 
     rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns else 1.0
 

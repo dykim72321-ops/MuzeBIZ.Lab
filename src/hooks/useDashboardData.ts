@@ -275,7 +275,7 @@ export function useDashboardData() {
         price: stock.price || 0,
         change: `${(stock.change_percent || stock.changePercent || 0).toFixed(2)}%`,
         efficiencyRatio: stock.efficiency_ratio || stock.efficiencyRatio || 0,
-        kellyWeight: stock.kelly_weight || stock.kellyWeight || 0,
+        kellyWeight: stock.kelly_weight ?? stock.kellyWeight,
         quantData,
         rsi: stock.rsi,
         macdDiff: stock.macdDiff ?? stock.macd_diff,

@@ -13,7 +13,8 @@ import {
     XAxis,
     YAxis,
     Tooltip,
-    ReferenceLine
+    ReferenceLine,
+    CartesianGrid
 } from 'recharts';
 
 // ── Candlestick Chart (SVG-based) ──────────────────────────────────────
@@ -154,56 +155,70 @@ const PriceTrajectoryChart = ({
     }
 
     return (
-        <div className="relative w-full h-52 bg-blue-50/50 rounded-2xl border border-blue-200 overflow-hidden">
+        <div className="relative w-full h-[260px] bg-white rounded-2xl border border-slate-100 shadow-[0_2px_20px_-8px_rgba(0,0,0,0.05)] overflow-hidden pt-4 pr-2">
             <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 12, right: 12, bottom: 4, left: 4 }}>
+                <AreaChart data={chartData} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
                     <defs>
                         <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={isUp ? "#10b981" : "#f43f5e"} stopOpacity={0.25} />
-                            <stop offset="95%" stopColor={isUp ? "#10b981" : "#f43f5e"} stopOpacity={0} />
+                            <stop offset="0%" stopColor={isUp ? "#10b981" : "#f43f5e"} stopOpacity={0.15} />
+                            <stop offset="100%" stopColor={isUp ? "#10b981" : "#f43f5e"} stopOpacity={0} />
                         </linearGradient>
+                        <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                            <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor={isUp ? "#10b981" : "#f43f5e"} floodOpacity="0.2" />
+                        </filter>
                     </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                     <XAxis
                         dataKey="date"
                         tickFormatter={formatDate}
-                        tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'monospace' }}
-                        axisLine={{ stroke: '#e2e8f0' }}
+                        tick={{ fill: '#94a3b8', fontSize: 10, fontFamily: 'monospace', fontWeight: 600 }}
+                        axisLine={false}
                         tickLine={false}
                         interval="preserveStartEnd"
-                        minTickGap={50}
+                        minTickGap={40}
+                        dy={10}
                     />
                     <YAxis
                         domain={[domainMin, domainMax]}
-                        hide
+                        orientation="right"
+                        tick={{ fill: '#94a3b8', fontSize: 10, fontFamily: 'monospace', fontWeight: 600 }}
+                        tickFormatter={(val) => `$${val.toFixed(2)}`}
+                        axisLine={false}
+                        tickLine={false}
+                        width={45}
+                        dx={5}
                     />
                     <Tooltip
                         contentStyle={{
                             background: '#ffffff',
                             border: '1px solid #e2e8f0',
                             borderRadius: '12px',
-                            padding: '8px 12px',
-                            fontSize: '11px',
+                            padding: '10px 14px',
+                            fontSize: '12px',
                             fontFamily: 'monospace',
-                            boxShadow: '0 4px 24px -8px rgba(0,0,0,0.12)',
+                            fontWeight: 'bold',
+                            boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
                         }}
-                        labelStyle={{ color: '#334155' }}
+                        labelStyle={{ color: '#64748b', fontSize: '10px', marginBottom: '4px' }}
+                        itemStyle={{ color: '#0f172a' }}
                         labelFormatter={(label) => {
                             try { return new Date(label).toLocaleDateString('ko-KR'); } catch { return ''; }
                         }}
-                        formatter={(value: number | undefined) => [`$${Number(value ?? 0).toFixed(4)}`, '가격']}
+                        formatter={(value: number | undefined) => [`$${Number(value ?? 0).toFixed(4)}`, 'Price']}
                     />
                     {/* 매수가 기준선 */}
                     {buyPrice && buyPrice > 0 && (
                         <ReferenceLine
                             y={buyPrice}
                             stroke="#6366f1"
-                            strokeDasharray="6 3"
+                            strokeDasharray="4 4"
                             strokeWidth={1.5}
                             label={{
-                                value: `매수 $${buyPrice.toFixed(2)}`,
-                                position: 'left',
+                                value: `ENTRY $${buyPrice.toFixed(2)}`,
+                                position: 'insideBottomLeft',
                                 fill: '#4f46e5',
-                                fontSize: 9,
+                                fontSize: 10,
+                                fontWeight: 800,
                                 fontFamily: 'monospace',
                             }}
                         />
@@ -213,13 +228,14 @@ const PriceTrajectoryChart = ({
                         <ReferenceLine
                             y={targetPrice}
                             stroke="#10b981"
-                            strokeDasharray="4 4"
+                            strokeDasharray="3 3"
                             strokeWidth={1}
                             label={{
-                                value: `목표 $${targetPrice.toFixed(2)}`,
-                                position: 'right',
+                                value: `TARGET $${targetPrice.toFixed(2)}`,
+                                position: 'insideTopLeft',
                                 fill: '#059669',
-                                fontSize: 9,
+                                fontSize: 10,
+                                fontWeight: 800,
                                 fontFamily: 'monospace',
                             }}
                         />
@@ -229,13 +245,14 @@ const PriceTrajectoryChart = ({
                         <ReferenceLine
                             y={stopPrice}
                             stroke="#f43f5e"
-                            strokeDasharray="4 4"
+                            strokeDasharray="3 3"
                             strokeWidth={1}
                             label={{
-                                value: `손절 $${stopPrice.toFixed(2)}`,
-                                position: 'right',
+                                value: `STOP $${stopPrice.toFixed(2)}`,
+                                position: 'insideBottomLeft',
                                 fill: '#e11d48',
-                                fontSize: 9,
+                                fontSize: 10,
+                                fontWeight: 800,
                                 fontFamily: 'monospace',
                             }}
                         />
@@ -246,9 +263,10 @@ const PriceTrajectoryChart = ({
                         stroke={isUp ? "#10b981" : "#f43f5e"}
                         fillOpacity={1}
                         fill="url(#priceGrad)"
-                        strokeWidth={2}
+                        strokeWidth={2.5}
+                        style={{ filter: 'url(#glow)' }}
                         dot={false}
-                        activeDot={{ r: 4, stroke: isUp ? '#10b981' : '#f43f5e', strokeWidth: 2, fill: '#ffffff' }}
+                        activeDot={{ r: 5, stroke: isUp ? '#10b981' : '#f43f5e', strokeWidth: 2.5, fill: '#ffffff', filter: 'drop-shadow(0px 2px 4px rgba(0,0,0,0.1))' }}
                     />
                 </AreaChart>
             </ResponsiveContainer>
@@ -394,7 +412,7 @@ export const StockTerminalModal = ({
     return (
         <AnimatePresence>
             {isOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-8 md:p-16 py-12">
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
 
                     <motion.div
@@ -427,7 +445,7 @@ export const StockTerminalModal = ({
                         </div>
 
                         {/* ─── 2. Content ────────────────────────────────────────── */}
-                        <div className="p-8 space-y-8 overflow-y-auto max-h-[70vh] custom-scrollbar relative z-10">
+                        <div className="p-8 space-y-8 overflow-y-auto max-h-[60vh] custom-scrollbar relative z-10">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
                                 {/* LEFT: 가격 추이 차트 + 시장 데이터 */}
                                 <div className="space-y-3">
@@ -469,6 +487,12 @@ export const StockTerminalModal = ({
                                                 {displayData.volume && displayData.volume > 0
                                                     ? formatVolume(displayData.volume)
                                                     : '—'}
+                                            </span>
+                                        </div>
+                                        <div className="bg-indigo-50/50 p-3.5 rounded-xl border border-indigo-200 font-mono">
+                                            <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block mb-1 font-sans">Kelly 비중</span>
+                                            <span className="text-lg font-black text-indigo-700">
+                                                {displayData.kellyWeight !== undefined ? `${(displayData.kellyWeight * 100).toFixed(1)}%` : '—'}
                                             </span>
                                         </div>
                                     </div>
@@ -554,10 +578,6 @@ export const StockTerminalModal = ({
                                 )}
                             </div>
 
-                            <div className="hidden md:flex flex-col items-end mr-2 text-right">
-                                <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest font-sans">Kelly 적정 비중</span>
-                                <span className="text-xs font-black text-indigo-600">{displayData.kellyWeight?.toFixed(1) ?? '—'}%</span>
-                            </div>
                         </div>
                     </motion.div>
                 </div>
