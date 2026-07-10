@@ -735,7 +735,12 @@ class PaperTradingManager:
                     raise RuntimeError(f"Position INSERT returned no data for {ticker}")
 
                 # INSERT 성공 확인 후에만 현금 차감 (원자성 보장)
-                new_cash = acc["cash_available"] - buy_budget
+                # 실거래 체결 수량 기준으로 차감 — LIVE 모드는 정수 주 체결이라
+                # executed_units*fill_price가 buy_budget보다 작을 수 있음 (버그 수정:
+                # 이전엔 buy_budget 전액을 차감해 매수마다 장부 현금이 실체결액보다
+                # 더 새어나갔음)
+                executed_cost = units * fill_price
+                new_cash = acc["cash_available"] - executed_cost
                 cash_res = await asyncio.to_thread(
                     self.supabase.table("paper_account")
                     .update({"cash_available": new_cash})

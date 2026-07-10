@@ -421,7 +421,7 @@ async def close_specific_position(
     try:
         symbol = req.ticker.upper()
         result = await asyncio.to_thread(
-            trading_client.close_position_by_symbol, symbol
+            trading_client.close_position, symbol_or_asset_id=symbol
         )
 
         if webhook:

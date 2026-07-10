@@ -154,12 +154,59 @@ class LiveTradingManager(PaperTradingManager):
 
     async def _reconcile_phantom_position(self, ticker: str, error: Exception) -> None:
         """
-        Alpaca가 "실제 보유하지 않은 주식"이라는 이유로 매도를 거절한 경우(42210000 등),
-        DB(paper_positions/watchlist)가 실계좌와 어긋난 phantom position이다.
-        방치하면 매 봉마다 동일한 매도 주문이 재시도·재거절되며 알림이 반복 발생하므로
-        DB 쪽을 EXITED로 정리해 재시도 루프를 끊는다. (실제 체결이 없었으므로
-        paper_history/현금 기록은 남기지 않는다 — 회계상 실제 거래가 아님)
+        Alpaca가 매도를 거절한 경우(42210000 등), DB(paper_positions)가 실계좌와
+        어긋난 상태다. 두 가지 경우를 구분해야 한다:
+
+          1. 실계좌에 정말 0주 — 진짜 phantom position. DB를 EXITED로 정리해
+             재시도 루프를 끊는다. (실제 체결이 없었으므로 paper_history/현금
+             기록은 남기지 않는다 — 회계상 실제 거래가 아님)
+          2. 실계좌에 DB가 알던 것보다 적은/다른 수량이 남아있음 — DB의 units가
+             틀렸을 뿐 포지션은 여전히 살아있다. 이 경우 무조건 삭제하면 실제
+             보유 물량이 트레일링 스탑 관리 대상에서 영원히 이탈해 방치된다
+             (2026-07-10 실사고: JLHL/VRXA/PHGE 등 12개 포지션이 이 경로로
+             고아 상태가 되어 하루 종일 무방비로 방치됨). 삭제 전 반드시 Alpaca
+             실제 보유 수량을 재조회해 남아있으면 units만 정정하고 관리를 유지한다.
         """
+        real_qty = None
+        try:
+            alpaca_pos = await asyncio.to_thread(self.alpaca.get_open_position, ticker)
+            real_qty = abs(float(alpaca_pos.qty))
+        except Exception:
+            # get_open_position은 실제로 포지션이 없을 때 404를 던진다 — 이 경우 real_qty=None 유지(진짜 0주로 간주)
+            real_qty = 0.0
+
+        if real_qty and real_qty > 0:
+            try:
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .update({"units": real_qty, "status": "HOLD"})
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                print(
+                    f"🔧 [POSITION 수량 정정] {ticker} — 실계좌 실보유 {real_qty}주로 units 정정, 관리 유지"
+                )
+                await self.webhook.send_alert(
+                    title=f"🔧 [Position 수량 정정] {ticker}",
+                    description=(
+                        f"Alpaca가 매도를 거절했습니다 (DB 수량 불일치): `{error}`\n"
+                        f"실계좌 실제 보유량({real_qty}주)으로 DB units를 정정했습니다. "
+                        f"포지션은 계속 트레일링 스탑 관리 대상입니다."
+                    ),
+                    color=0xF1C40F,
+                )
+            except Exception as sync_err:
+                print(f"⚠️ [Position 수량 정정 실패] {ticker}: {sync_err}")
+                await self.webhook.send_alert(
+                    title=f"🚨 [Position 수량 정정 실패] {ticker}",
+                    description=(
+                        f"원인: `{error}`\nDB 정정 중 추가 오류: `{sync_err}`\n"
+                        f"수동으로 paper_positions를 확인하세요."
+                    ),
+                    color=0xFF0000,
+                )
+            return
+
         try:
             await asyncio.to_thread(
                 self.supabase.table("paper_positions")
@@ -169,12 +216,12 @@ class LiveTradingManager(PaperTradingManager):
             )
             await self._sync_watchlist_exit(ticker)
             print(
-                f"🧹 [PHANTOM POSITION 정리] {ticker} — DB 포지션 삭제 + watchlist EXITED"
+                f"🧹 [PHANTOM POSITION 정리] {ticker} — 실계좌 보유 0주 확인, DB 포지션 삭제 + watchlist EXITED"
             )
             await self.webhook.send_alert(
                 title=f"🧹 [Phantom Position 정리] {ticker}",
                 description=(
-                    f"Alpaca가 매도를 거절했습니다 (실계좌에 실제 보유 없음): `{error}`\n"
+                    f"Alpaca가 매도를 거절했습니다 (실계좌 보유량 0주 확인됨): `{error}`\n"
                     f"DB의 paper_positions 기록을 삭제하고 watchlist를 EXITED로 동기화했습니다."
                 ),
                 color=0xE67E22,
