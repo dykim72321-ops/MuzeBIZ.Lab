@@ -283,50 +283,107 @@ class MTFCache:
 
     def __init__(self):
         self.ema_15m_20: Dict[str, float] = {}
+        api_key = os.getenv("APCA_API_KEY_ID")
+        api_secret = os.getenv("APCA_API_SECRET_KEY")
+        self.alpaca_client = None
+        if api_key and api_secret:
+            try:
+                self.alpaca_client = StockHistoricalDataClient(api_key, api_secret)
+            except Exception as e:
+                print(f"⚠️ [MTF Cache] Alpaca client init failed: {e}")
 
     async def update_cache(self, tickers: List[str]):
-        """yfinance를 통해 15분봉 20 EMA 계산 및 갱신 (15분 스케줄러용)"""
+        """Alpaca 기반 15분봉 20 EMA 계산 (15분 스케줄러용) + yfinance Fallback"""
         if not tickers:
             return
 
         print(f"🔄 [MTF Cache] Updating 15m 20 EMA for {len(tickers)} tickers...")
+        fallback_tickers = list(tickers)
 
-        batch_str = " ".join(tickers)
-        try:
-            df_15m = await asyncio.to_thread(
-                yf.download,
-                batch_str,
-                period="5d",
-                interval="15m",
-                progress=False,
-                threads=True,
+        if self.alpaca_client:
+            try:
+                from alpaca.data.requests import StockBarsRequest
+                from alpaca.data.timeframe import TimeFrameUnit
+                import datetime
+
+                end_dt = datetime.datetime.now()
+                start_dt = end_dt - datetime.timedelta(days=5)
+
+                req = StockBarsRequest(
+                    symbol_or_symbols=tickers,
+                    timeframe=TimeFrame(15, TimeFrameUnit.Minute),
+                    start=start_dt,
+                    end=end_dt,
+                    feed=DataFeed.IEX,
+                )
+
+                bars = await asyncio.to_thread(self.alpaca_client.get_stock_bars, req)
+                if bars and bars.df is not None and not bars.df.empty:
+                    all_df = bars.df
+                    for ticker in tickers:
+                        if ticker in all_df.index:
+                            ticker_df = all_df.loc[ticker]
+                            if len(ticker_df) >= 20:
+                                ema_20 = ta.trend.EMAIndicator(
+                                    ticker_df["close"], window=20
+                                ).ema_indicator()
+                                if not ema_20.empty and not pd.isna(ema_20.iloc[-1]):
+                                    self.ema_15m_20[ticker] = float(ema_20.iloc[-1])
+                                    if ticker in fallback_tickers:
+                                        fallback_tickers.remove(ticker)
+            except Exception as e:
+                print(f"⚠️ [MTF Cache] (Alpaca) fetch failed, falling back: {e}")
+
+        if fallback_tickers:
+            print(
+                f"🔄 [MTF Cache] (yfinance fallback) for {len(fallback_tickers)} tickers..."
             )
+            batch_str = " ".join(fallback_tickers)
+            try:
+                df_15m = await asyncio.to_thread(
+                    yf.download,
+                    batch_str,
+                    period="5d",
+                    interval="15m",
+                    progress=False,
+                    threads=True,
+                )
 
-            if df_15m is None or df_15m.empty:
-                return
-
-            close_data = df_15m.get("Close")
-            if close_data is None or close_data.empty:
-                return
-
-            if isinstance(close_data, pd.Series):
-                ema_20 = ta.trend.EMAIndicator(close_data, window=20).ema_indicator()
-                if not ema_20.empty and not pd.isna(ema_20.iloc[-1]):
-                    self.ema_15m_20[tickers[0]] = float(ema_20.iloc[-1])
-            else:
-                for ticker in tickers:
-                    if ticker in close_data.columns:
-                        series = close_data[ticker].dropna()
-                        if len(series) >= 20:
+                if df_15m is not None and not df_15m.empty:
+                    close_data = df_15m.get("Close")
+                    if close_data is not None and not close_data.empty:
+                        if isinstance(close_data, pd.Series):
                             ema_20 = ta.trend.EMAIndicator(
-                                series, window=20
+                                close_data.dropna(), window=20
                             ).ema_indicator()
                             if not ema_20.empty and not pd.isna(ema_20.iloc[-1]):
-                                self.ema_15m_20[ticker] = float(ema_20.iloc[-1])
+                                self.ema_15m_20[fallback_tickers[0]] = float(
+                                    ema_20.iloc[-1]
+                                )
+                        else:
+                            for ticker in fallback_tickers:
+                                if ticker in close_data.columns:
+                                    series = close_data[ticker].dropna()
+                                    if len(series) >= 20:
+                                        ema_20 = ta.trend.EMAIndicator(
+                                            series, window=20
+                                        ).ema_indicator()
+                                        if not ema_20.empty and not pd.isna(
+                                            ema_20.iloc[-1]
+                                        ):
+                                            self.ema_15m_20[ticker] = float(
+                                                ema_20.iloc[-1]
+                                            )
+            except Exception as e:
+                print(f"⚠️ [MTF Cache] yfinance fallback failed: {e}")
+            finally:
+                if "df_15m" in locals() and df_15m is not None:
+                    del df_15m
+                import gc
 
-            print("✅ [MTF Cache] 15m 20 EMA update complete.")
-        except Exception as e:
-            print(f"⚠️ [MTF Cache] Update failed: {e}")
+                gc.collect()
+
+        print("✅ [MTF Cache] 15m 20 EMA update complete.")
 
     def get_15m_ema(self, ticker: str) -> Optional[float]:
         return self.ema_15m_20.get(ticker)
