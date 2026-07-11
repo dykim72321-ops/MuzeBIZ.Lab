@@ -149,12 +149,19 @@ export function useDashboardData() {
           : Infinity;
 
     let startLabel = 'Start';
+    let startTs = now - 7 * 86_400_000;
+    
     if (chartRange === '7d') {
-      const d = new Date(now - 7 * 86_400_000);
+      startTs = now - 7 * 86_400_000;
+      const d = new Date(startTs);
       startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
     } else if (chartRange === '30d') {
-      const d = new Date(now - 30 * 86_400_000);
+      startTs = now - 30 * 86_400_000;
+      const d = new Date(startTs);
       startLabel = `${d.getMonth() + 1}/${d.getDate()}`;
+    } else if (chartRange === 'all') {
+      startLabel = '시작';
+      startTs = now - 86_400_000; // fallback if no data
     }
 
     const currentActualValue =
@@ -163,7 +170,7 @@ export function useDashboardData() {
     if (!liveHistory || liveHistory.length === 0) {
       if (currentActualValue != null) {
         return [
-          { name: startLabel, value: BASE, ts: 0, ma: BASE, id: '0', displayName: startLabel },
+          { name: startLabel, value: BASE, ts: startTs, ma: BASE, id: '0', displayName: startLabel },
           { name: '현재', value: currentActualValue, ts: now, ma: currentActualValue, id: '1', displayName: '현재' },
         ];
       }
@@ -185,7 +192,6 @@ export function useDashboardData() {
       return { name, value: Math.round(running), ts: new Date(item.created_at ?? 0).getTime() };
     });
 
-    let startTs = 0;
     if (chartRange === '7d') {
       startTs = now - 7 * 86_400_000;
       startLabel = '7일전';

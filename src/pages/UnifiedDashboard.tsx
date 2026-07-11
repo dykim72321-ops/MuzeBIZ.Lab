@@ -262,7 +262,7 @@ export default function UnifiedDashboard() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart key={chartRange} data={chartData} margin={{ top: 10, right: 0, left: 10, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 10, right: 0, left: 10, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#2962ff" stopOpacity={0.2}/>
@@ -271,13 +271,19 @@ export default function UnifiedDashboard() {
                       </defs>
                       <CartesianGrid strokeDasharray="2 2" vertical={true} stroke="#e2e8f0" />
                       <XAxis 
-                        dataKey="id" 
+                        dataKey="ts" 
+                        type="number"
+                        domain={['dataMin', 'dataMax']}
                         stroke="#64748b" 
                         fontSize={10} 
                         tickLine={false} 
                         axisLine={false} 
-                        tickFormatter={(val) => chartData.find(d => d.id === val)?.displayName ?? ''} 
+                        tickFormatter={(val) => {
+                          const date = new Date(val);
+                          return `${date.getMonth() + 1}/${date.getDate()}`;
+                        }} 
                         tickMargin={10}
+                        minTickGap={30}
                       />
                       <YAxis 
                         orientation="left"
