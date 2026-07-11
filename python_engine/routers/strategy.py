@@ -213,8 +213,8 @@ async def get_strategy_stats():
 
 @router.get("/reports")
 async def get_strategy_reports(period: str = "month"):
-    """paper_history를 주간/월간 버킷으로 그룹핑해 기간별 성과 리포트 반환."""
-    if period not in ("week", "month"):
+    """paper_history를 일간/주간/월간 버킷으로 그룹핑해 기간별 성과 리포트 반환."""
+    if period not in ("day", "week", "month"):
         period = "month"
 
     supabase = app_state.supabase
@@ -246,7 +246,9 @@ async def get_strategy_reports(period: str = "month"):
             if not closed_at:
                 continue
             dt = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
-            if period == "week":
+            if period == "day":
+                label = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+            elif period == "week":
                 iso_year, iso_week, _ = dt.isocalendar()
                 label = f"{iso_year}-W{iso_week:02d}"
             else:

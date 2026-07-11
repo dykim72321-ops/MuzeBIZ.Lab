@@ -399,9 +399,9 @@ export async function fetchStrategyStats(): Promise<StrategyStats | null> {
 }
 
 /**
- * 주간/월간 전략 성과 리포트 조회
+ * 일간/주간/월간 전략 성과 리포트 조회
  */
-export async function fetchStrategyReports(period: 'week' | 'month' = 'month'): Promise<StrategyReportsResponse | null> {
+export async function fetchStrategyReports(period: 'day' | 'week' | 'month' = 'month'): Promise<StrategyReportsResponse | null> {
   try {
     return await apiClient.get<StrategyReportsResponse>(`/api/strategy/reports?period=${period}`);
   } catch (error) {
