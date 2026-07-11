@@ -1703,6 +1703,17 @@ async def auto_paper_history_cleanup_scheduler():
         await asyncio.sleep(24 * 3600)
 
 
+async def auto_checklist_eval_scheduler():
+    """매일 1회 실행: 실계좌 전환 체크리스트 자동 판정 항목 갱신 (routers/checklist.py 위임)."""
+    while True:
+        try:
+            await checklist.evaluate_checklist()
+        except Exception as e:
+            print(f"❌ [Checklist Eval Error] {e}")
+
+        await asyncio.sleep(86400)
+
+
 async def _stop_current_stream():
     """현재 실행 중인 Alpaca 스트림 태스크를 취소하고 종료를 기다린다."""
     task: asyncio.Task = app_state._current_stream_task  # type: ignore[assignment]
@@ -2129,6 +2140,9 @@ async def run_startup_sequence():
 
     # paper_history 누적 방지 자동 정리 스케줄러 시작
     asyncio.create_task(auto_paper_history_cleanup_scheduler())
+
+    # 실계좌 전환 체크리스트 매일 검증 스케줄러 시작
+    asyncio.create_task(auto_checklist_eval_scheduler())
 
     # 실거래 모드: Alpaca Trade Update 스트림 기동
     if app_state.TRADE_MODE == "LIVE" and app_state.live_engine is not None:

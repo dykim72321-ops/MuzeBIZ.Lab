@@ -417,6 +417,8 @@ export interface ChecklistItem {
   is_checked: boolean;
   checked_at: string | null;
   sort_order: number;
+  is_automated?: boolean;
+  auto_note?: string;
 }
 
 /**
