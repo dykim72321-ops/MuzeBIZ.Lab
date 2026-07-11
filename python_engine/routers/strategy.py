@@ -63,9 +63,8 @@ def _compute_bucket_stats(trades: list) -> dict:
         pnl = float(t.get("pnl_pct") or 0)
         amt = float(t.get("profit_amt") or 0)
         profit_arr[i] = amt
-        if pnl > 0:
-            win_count += 1
         if amt > 0:
+            win_count += 1
             gross_profit += amt
         elif amt < 0:
             gross_loss -= amt
@@ -88,7 +87,10 @@ def _compute_bucket_stats(trades: list) -> dict:
     # 복리 계산하면 드로다운이 극단적으로 과장된다(예: -90%대).
     # 대신 실제 달러 손익(profit_amt)을 paper_engine.INITIAL_CAPITAL 기준
     # 계좌 자산곡선에 순차 누적해 진짜 계좌 단위 MDD를 계산한다.
-    equity_curve = INITIAL_CAPITAL + np.cumsum(profit_arr)
+    # [수정] INITIAL_CAPITAL 부터 시작하도록 배열 맨 앞에 기준 자본금을 추가하여, 첫 거래부터의 낙폭도 정확히 계산합니다.
+    equity_curve = np.concatenate(
+        ([INITIAL_CAPITAL], INITIAL_CAPITAL + np.cumsum(profit_arr))
+    )
     running_max = np.maximum.accumulate(equity_curve)
 
     drawdowns = np.zeros_like(equity_curve)

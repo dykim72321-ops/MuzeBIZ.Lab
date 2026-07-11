@@ -60,15 +60,15 @@ export default function UnifiedDashboard() {
   };
 
   return (
-    <div className="p-4 md:p-8 lg:p-10 min-h-screen bg-slate-50 text-slate-800 relative overflow-x-hidden pb-12 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+    <div className="p-4 md:p-8 lg:p-10 min-h-screen bg-slate-50 text-slate-800 relative overflow-x-hidden pb-12 font-sans selection:bg-slate-200 selection:text-slate-900">
       {/* Subtle Ambient Glow */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[300px] bg-indigo-500/5 blur-[120px] pointer-events-none rounded-full" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[300px] bg-slate-500/5 blur-[120px] pointer-events-none rounded-full" />
 
       {/* SYNC INDICATOR (Top Right) */}
       {loading && (
-        <div className="fixed top-20 right-6 z-[100] flex items-center gap-3 bg-white/95 backdrop-blur-md px-4 py-2.5 border border-slate-200 rounded-xl shadow-lg animate-in fade-in">
-          <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
-          <span className="text-[11px] font-extrabold text-slate-800 uppercase tracking-widest font-mono">Syncing Data...</span>
+        <div className="fixed top-20 right-6 z-[100] flex items-center gap-3 bg-white px-4 py-3 rounded-xl shadow-lg animate-in fade-in border border-slate-100">
+          <div className="w-2.5 h-2.5 bg-black rounded-full animate-pulse shadow-sm" />
+          <span className="text-[11px] font-bold text-slate-800 uppercase tracking-widest font-mono">Syncing Data...</span>
         </div>
       )}
 
@@ -85,31 +85,39 @@ export default function UnifiedDashboard() {
       <div className="w-full mx-auto space-y-5 animate-in fade-in duration-700 relative z-10 px-4 md:px-6 mt-4">
         
         {/* ════════ TOP: HEADER & GLOBAL METRICS ════════ */}
-        <div className="flex flex-col lg:flex-row justify-end items-start lg:items-center gap-6 mb-8 w-full">
-          <div className="bg-white/80 backdrop-blur-xl px-6 py-5 rounded-2xl flex flex-col xl:flex-row xl:items-center gap-6 border border-slate-200 shadow-sm w-full">
-            <div className="flex-shrink-0">
-              <DashboardControls
-                isArmed={isArmed}
-                pennyScanStatus={pennyScanStatus}
-                onToggleArm={handleToggleArm}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-              />
-            </div>
-            
-            <div className="hidden xl:block h-12 w-[1px] bg-slate-200 flex-shrink-0" />
-            
-            <div className="w-full xl:w-auto flex-1">
-              <MetricsGrid
-                displayedAccount={displayedAccount}
-                totalPnl={totalPnl}
-                displayedPositions={livePositions}
-                displayedWinRate={displayedWinRate}
-                displayedTotalTrades={displayedTotalTrades}
-                concentrationPct={concentrationPct}
-                investedCapital={investedCapital}
-                hasTradeData={liveHistory.length > 0}
-              />
-            </div>
+        <div className="flex items-center gap-4 mb-10 w-full">
+          <div className="sfdc-icon-badge">
+            <Activity className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">Operations Center</p>
+            <h1 className="text-3xl font-black text-slate-900 leading-tight tracking-tighter">통합 지휘소</h1>
+          </div>
+        </div>
+
+        <div className="sfdc-card flex flex-col xl:flex-row xl:items-center gap-6 p-6 w-full bg-white mb-8">
+          <div className="flex-shrink-0">
+            <DashboardControls
+              isArmed={isArmed}
+              pennyScanStatus={pennyScanStatus}
+              onToggleArm={handleToggleArm}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+            />
+          </div>
+
+          <div className="hidden xl:block h-12 w-[1px] bg-slate-100 flex-shrink-0" />
+
+          <div className="w-full xl:w-auto flex-1">
+            <MetricsGrid
+              displayedAccount={displayedAccount}
+              totalPnl={totalPnl}
+              displayedPositions={livePositions}
+              displayedWinRate={displayedWinRate}
+              displayedTotalTrades={displayedTotalTrades}
+              concentrationPct={concentrationPct}
+              investedCapital={investedCapital}
+              hasTradeData={liveHistory.length > 0}
+            />
           </div>
         </div>
 
@@ -140,10 +148,10 @@ export default function UnifiedDashboard() {
           {/* ── LEFT COLUMN: Alpha Discovery & Status (Span 3) ── */}
           <div className="xl:col-span-3 flex flex-col gap-5">
             
-            <div className="sfdc-card p-5">
+            <div className="sfdc-card p-6">
               <div className="flex items-center gap-2 mb-3">
-                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse shadow-sm" />
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-600 font-mono">System Status</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-sm" />
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500 font-mono">System Status</span>
               </div>
               <p className="text-[13px] text-slate-800 font-bold leading-relaxed">
                 {isArmed
@@ -155,7 +163,7 @@ export default function UnifiedDashboard() {
             <div className="sfdc-card">
               <div className="sfdc-card-header">
                 <h2 className="text-sm font-black flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-indigo-500" /> Action Center
+                  <Activity className="w-4 h-4 text-slate-900" /> Action Center
                 </h2>
               </div>
               <div className="p-5 bg-white">
@@ -174,9 +182,9 @@ export default function UnifiedDashboard() {
               <div className="sfdc-card-header">
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2">
-                    <TestTube className="w-4 h-4 text-indigo-500" /> 오늘의 알파 종목
+                    <TestTube className="w-4 h-4 text-slate-900" /> 오늘의 알파 종목
                   </h2>
-                  <p className="text-[11px] text-slate-600 font-bold mt-1">DNA 70점 이상 엄선</p>
+                  <p className="text-[11px] text-slate-500 font-bold mt-1">DNA 70점 이상 엄선</p>
                 </div>
               </div>
               <div className="p-4 flex-1 overflow-y-auto min-h-0 bg-slate-50/50">
@@ -192,15 +200,15 @@ export default function UnifiedDashboard() {
                       <div
                         key={stock.ticker}
                         onClick={() => handleDeepDive(stock)}
-                        className="bg-white border border-slate-100 hover:border-indigo-300 rounded-xl p-4 cursor-pointer transition-colors group shadow-sm hover:shadow-md"
+                        className="bg-white border border-slate-100 hover:border-slate-300 rounded-xl p-4 cursor-pointer transition-colors group shadow-sm hover:shadow-md"
                       >
                         <div className="flex justify-between items-start mb-3">
                           <div>
                             <span className="text-lg font-black text-black block tracking-tight">{stock.ticker}</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-100 group-hover:bg-indigo-50 group-hover:border-indigo-100 transition-colors">
-                              <TestTube className="w-3.5 h-3.5 text-slate-600 group-hover:text-indigo-500 transition-colors" />
+                            <div className="w-7 h-7 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-100 group-hover:bg-slate-100 group-hover:border-slate-200 transition-colors">
+                              <TestTube className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-900 transition-colors" />
                             </div>
                           </div>
                         </div>
@@ -230,7 +238,7 @@ export default function UnifiedDashboard() {
             <div className="sfdc-card flex flex-col h-[320px]">
               <div className="sfdc-card-header flex justify-between items-center pb-3 border-b-0">
                 <h2 className="text-sm font-black flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-indigo-500" /> 포트폴리오 자산 성장
+                  <Activity className="w-4 h-4 text-slate-900" /> 포트폴리오 자산 성장
                 </h2>
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-[10px] text-slate-600 font-bold hidden sm:inline">{lastFetchedTime}</span>
@@ -250,12 +258,12 @@ export default function UnifiedDashboard() {
               <div className="flex-1 px-5 pb-5 bg-white relative">
                 {chartData.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-xl text-slate-600 font-bold bg-slate-50/50 relative overflow-hidden">
-                    <svg className="absolute inset-0 w-full h-full opacity-10 animate-pulse text-indigo-400" preserveAspectRatio="none" viewBox="0 0 1440 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="absolute inset-0 w-full h-full opacity-10 animate-pulse text-slate-400" preserveAspectRatio="none" viewBox="0 0 1440 320" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M0 256L48 245.3C96 235 192 213 288 218.7C384 224 480 256 576 250.7C672 245 768 203 864 192C960 181 1056 203 1152 208C1248 213 1344 203 1392 197.3L1440 192V320H1392C1344 320 1248 320 1152 320C1056 320 960 320 864 320C768 320 672 320 576 320C480 320 384 320 288 320C192 320 96 320 48 320H0V256Z" fill="currentColor"/>
                     </svg>
                     <div className="z-10 flex flex-col items-center gap-3">
                       <div className="w-12 h-12 rounded-full bg-white border border-slate-100 flex items-center justify-center shadow-sm">
-                        <AreaChart className="w-6 h-6 text-indigo-400 animate-pulse" />
+                        <AreaChart className="w-6 h-6 text-slate-400 animate-pulse" />
                       </div>
                       <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-600 font-mono">Awaiting Data</span>
                     </div>
@@ -324,7 +332,7 @@ export default function UnifiedDashboard() {
               <div className="sfdc-card-header">
                 <div className="flex items-center gap-3">
                   <h2 className="text-sm font-black flex items-center gap-2">
-                    <LayoutGrid className="w-4 h-4 text-indigo-500" /> Active Positions
+                    <LayoutGrid className="w-4 h-4 text-slate-900" /> Active Positions
                   </h2>
                   <span className="px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-extrabold border border-emerald-100">
                     {livePositions.length}
@@ -361,7 +369,7 @@ export default function UnifiedDashboard() {
                               {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
                               <button 
                                 onClick={() => handleCompanyClick(pos.ticker)}
-                                className="text-sm font-black text-slate-800 hover:text-indigo-600 hover:underline block tracking-tight text-left transition-colors"
+                                className="text-sm font-black text-slate-800 hover:text-black hover:underline block tracking-tight text-left transition-colors"
                               >
                                 {pos.ticker}
                               </button>
@@ -455,7 +463,7 @@ export default function UnifiedDashboard() {
             <div className="sfdc-card flex-1 flex flex-col min-h-[250px] max-h-[420px]">
               <div className="sfdc-card-header">
                 <h2 className="text-sm font-black flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-indigo-500" /> Recent Exits
+                  <Clock className="w-4 h-4 text-slate-900" /> Recent Exits
                 </h2>
               </div>
               <div className="p-4 flex-1 min-h-0 overflow-y-auto bg-slate-50/50">

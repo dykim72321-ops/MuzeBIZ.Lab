@@ -22,7 +22,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
   onShowDetails
 }) => {
   return (
-    <tr key={`${part.id}-${part.distributor}`} className="hover:bg-indigo-50/40 hover:shadow-[0_2px_15px_rgba(59,130,246,0.06)] transition-all duration-300 group border-b border-slate-100 last:border-0 relative">
+    <tr key={`${part.id}-${part.distributor}`} className="hover:bg-slate-50 transition-all duration-300 group border-b border-slate-100 last:border-0 relative">
       <td className="px-4 py-4">
         <div className="flex flex-col gap-1.5">
           <span className={`distributor-badge ${getDistributorBadgeClass(part.distributor)}`}>
@@ -71,7 +71,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
               <div className="bg-white/95 backdrop-blur-xl text-slate-900 rounded-2xl p-4 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.25)] border border-slate-300 min-w-[180px]">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 pb-2 border-b border-slate-200 flex items-center justify-between">
                   <span>Tiered Pricing</span>
-                  <span className="text-indigo-500 bg-indigo-50 px-1.5 rounded">{part.currency}</span>
+                  <span className="text-slate-600 bg-slate-100 px-1.5 rounded">{part.currency}</span>
                 </p>
                 <div className="space-y-2">
                   {part.priceBreaks.map((pb, idx) => (
@@ -119,15 +119,15 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
               href={getDistributorUrl(part)}
               target="_blank"
               rel="noreferrer noopener"
-              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-all cursor-pointer"
+              className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-all cursor-pointer"
               title="Buy / Site"
             >
               <Globe className="w-4 h-4" />
             </a>
             <button
               onClick={() => onShowDetails(part)}
-              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-all cursor-pointer"
-              title="상세 정보 (Specs)"
+              className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-all cursor-pointer"
+              title="상세 스펙 열기"
             >
               <Info className="w-4 h-4" />
             </button>

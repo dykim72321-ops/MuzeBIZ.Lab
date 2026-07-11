@@ -106,30 +106,35 @@
 @layer components {
   /* High Contrast Input */
   .sfdc-input {
-    @apply w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 transition-all outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder:text-slate-400 shadow-sm font-medium;
+    @apply w-full bg-slate-50/50 border-b border-slate-200 px-4 py-3 text-base text-slate-900 transition-all outline-none focus:border-black focus:bg-white placeholder:text-slate-400 font-medium rounded-none;
   }
 
   .sfdc-label {
-    @apply block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider;
+    @apply block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-widest;
   }
 
-  /* Primary Button */
+  /* Primary Button (Public.com style: pure black, rounded-full) */
   .sfdc-button-primary {
-    @apply px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl transition-all text-sm font-medium active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-md flex items-center justify-center gap-2;
+    @apply px-8 py-3.5 bg-black hover:bg-slate-800 text-white rounded-full transition-all text-sm font-bold active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2;
   }
 
   /* Secondary Button */
   .sfdc-button-secondary {
-    @apply px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 rounded-xl transition-all text-sm font-medium active:scale-95 shadow-sm flex items-center justify-center gap-2;
+    @apply px-8 py-3.5 bg-slate-100 hover:bg-slate-200 text-black rounded-full transition-all text-sm font-bold active:scale-95 flex items-center justify-center gap-2;
   }
 
-  /* Bento Box Card - Modern Floating */
+  /* Bento Box Card - Modern Floating, Borderless */
   .sfdc-card {
-    @apply bg-white border border-slate-100/80 rounded-2xl shadow-[0_4px_24px_-8px_rgba(0,0,0,0.06)] overflow-hidden transition-all duration-300;
+    @apply bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden transition-all duration-300;
   }
 
   .sfdc-card-header {
-    @apply p-5 border-b border-slate-100 bg-white/50 backdrop-blur flex items-center justify-between text-slate-900 font-semibold;
+    @apply p-6 bg-white flex items-center justify-between text-slate-900 font-bold;
+  }
+
+  /* Page-header icon badge (black rounded square, white icon) */
+  .sfdc-icon-badge {
+    @apply p-3 bg-black rounded-xl shadow-lg;
   }
 
   /* Terminal Mono Font */

@@ -23,9 +23,9 @@ export const MuzepartResultCard: React.FC<MuzepartResultCardProps> = ({
   onShowDetails
 }) => {
   return (
-    <div className="bg-white/95 backdrop-blur-xl p-5 hover:shadow-[0_8px_30px_rgba(59,130,246,0.12)] transition-all duration-300 border border-slate-100 rounded-[20px] flex flex-col group relative overflow-hidden">
-      {/* Subtle ambient hover background */}
-      <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/0 rounded-full blur-[40px] pointer-events-none transform translate-x-1/2 -translate-y-1/2 group-hover:bg-blue-500/5 transition-colors duration-500" />
+    <div className="bg-white/95 backdrop-blur-xl p-5 hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] transition-all duration-300 border border-slate-100 rounded-[20px] flex flex-col group relative overflow-hidden">
+      {/* Subtle hover glow */}
+      <div className="absolute top-0 right-0 w-32 h-32 bg-slate-200/0 rounded-full blur-[40px] pointer-events-none transform translate-x-1/2 -translate-y-1/2 group-hover:bg-slate-200/50 transition-colors duration-500" />
 
       <div className="flex justify-between items-start mb-5 relative z-10">
         <div className="flex items-start gap-3.5">
@@ -59,14 +59,14 @@ export const MuzepartResultCard: React.FC<MuzepartResultCardProps> = ({
             )}
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">재고 현황</p>
           </div>
-          <p className={`text-[15px] font-black font-mono tracking-tight ${part.stock > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+          <p className={`text-[15px] font-black font-mono tracking-tight ${part.stock > 0 ? 'text-slate-800' : 'text-rose-500'}`}>
             {part.stock > 0 ? `${part.stock.toLocaleString()} 개` : '확인 필요'}
           </p>
         </div>
         
         <div className="p-3.5 bg-slate-50/80 border border-slate-100 rounded-[14px] flex flex-col justify-center relative group/price">
           <div className="flex items-center gap-1.5 mb-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-800 shadow-[0_0_8px_rgba(30,41,59,0.8)]" />
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">구매 단가</p>
           </div>
           <p className={`text-[15px] font-black font-mono tracking-tight text-slate-800 w-fit ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-slate-300' : ''}`}>
@@ -79,7 +79,7 @@ export const MuzepartResultCard: React.FC<MuzepartResultCardProps> = ({
               <div className="bg-white/95 backdrop-blur-xl text-slate-800 rounded-2xl p-4 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.2)] border border-slate-200 min-w-[180px]">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 pb-2 border-b border-slate-100 flex items-center justify-between">
                   <span>Tiered Pricing</span>
-                  <span className="text-blue-500 bg-blue-50 px-1.5 rounded">{part.currency}</span>
+                  <span className="text-slate-600 bg-slate-100 px-1.5 rounded">{part.currency}</span>
                 </p>
                 <div className="space-y-2">
                   {part.priceBreaks.map((pb, idx) => (
@@ -121,7 +121,7 @@ export const MuzepartResultCard: React.FC<MuzepartResultCardProps> = ({
             href={part.datasheet}
             target="_blank"
             rel="noreferrer noopener"
-            className="flex items-center justify-center p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm"
+            className="flex items-center justify-center p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm"
             title="데이터시트 (PDF)"
           >
             <FileText className="w-4 h-4" />
@@ -148,8 +148,8 @@ export const MuzepartResultCard: React.FC<MuzepartResultCardProps> = ({
             part.is_locked 
               ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed' 
               : part.is_processing
-              ? 'bg-indigo-50 text-indigo-400 border border-indigo-100 cursor-wait'
-              : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-[0_4px_15px_rgba(59,130,246,0.3)] hover:shadow-[0_4px_20px_rgba(59,130,246,0.5)] border-none'
+              ? 'bg-slate-200 text-slate-500 border border-slate-300 cursor-wait'
+              : 'bg-black hover:bg-slate-800 text-white shadow-sm border-none'
           }`}
         >
           {part.is_locked ? 'Locked' : part.is_processing ? 'Wait...' : 'Lock'}

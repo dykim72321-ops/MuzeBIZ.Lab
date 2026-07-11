@@ -69,18 +69,18 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6 bg-slate-50 p-4 md:p-8 lg:p-10 min-h-screen text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900">
       {/* Page Header */}
-      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-8 w-full">
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 w-full">
         <div className="flex items-center gap-4 w-full lg:w-auto flex-shrink-0">
-          <div className="p-3 bg-indigo-50 border border-indigo-150 rounded-xl shadow-sm">
-            <BarChart3 className="w-6 h-6 text-indigo-600" />
+          <div className="sfdc-icon-badge">
+            <BarChart3 className="w-6 h-6 text-white" />
           </div>
           <div>
-            <p className="text-xs font-bold text-indigo-700 uppercase tracking-widest mb-0.5 font-mono">Performance Reports</p>
-            <h1 className="text-3xl font-black text-black leading-tight">성과 리포트</h1>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">Performance Reports</p>
+            <h1 className="text-3xl font-black text-slate-900 leading-tight tracking-tighter">성과 리포트</h1>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 bg-slate-100/50 p-1 rounded-xl border border-slate-200">
+        <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl">
           <button
             onClick={() => setTimeRange('day')}
             className={clsx(
@@ -139,9 +139,9 @@ export default function ReportsPage() {
             <div className="lg:col-span-8 flex flex-col gap-6">
               
               {/* Win Rate Trend Chart */}
-              <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm">
-                <h2 className="text-sm font-black text-black flex items-center gap-2 mb-6">
-                  <BarChart3 className="w-4 h-4 text-indigo-500" />
+              <div className="sfdc-card p-8">
+                <h2 className="text-sm font-black text-slate-900 flex items-center gap-2 mb-8 uppercase tracking-widest">
+                  <BarChart3 className="w-4 h-4 text-slate-400" />
                   승률 트렌드 ({TIME_RANGE_LABELS[timeRange]})
                 </h2>
                 <div className="w-full h-[300px]">
@@ -170,67 +170,65 @@ export default function ReportsPage() {
               </div>
 
               {/* Data Table */}
-              <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                <div className="p-5 border-b border-slate-100 bg-white">
-                  <h2 className="text-sm font-black text-black flex items-center gap-2">
-                    <CalendarDays className="w-4 h-4 text-indigo-500" />
+              <div className="sfdc-card overflow-hidden flex flex-col">
+                <div className="p-8 pb-4">
+                  <h2 className="text-sm font-black text-slate-900 flex items-center gap-2 uppercase tracking-widest">
+                    <CalendarDays className="w-4 h-4 text-slate-400" />
                     기간별 성과 상세
                   </h2>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto px-8 pb-8">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-50/50 text-[11px] font-black font-mono text-slate-800 uppercase tracking-widest border-b border-slate-100 whitespace-nowrap">
-                        <th className="py-3 px-2 lg:px-3">기간</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">순이익</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">총수익</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">총손실</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">승률</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">총 거래</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">평균 PnL</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">Profit Factor</th>
-                        <th className="py-3 px-2 lg:px-3 text-right">MDD</th>
+                      <tr className="text-[10px] font-black font-mono text-slate-400 uppercase tracking-widest whitespace-nowrap">
+                        <th className="py-4 px-2 lg:px-3">기간</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">순이익</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">총수익</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">총손실</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">승률</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">총 거래</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">평균 PnL</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">Profit Factor</th>
+                        <th className="py-4 px-2 lg:px-3 text-right">MDD</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y-0">
+                    <tbody className="divide-y divide-slate-50">
                       {reportData.map((row, idx) => {
                         const netProfit = row.gross_profit - row.gross_loss;
                         return (
-                          <tr key={idx} className="group border-b border-slate-100 last:border-0 hover:bg-indigo-50/30 transition-all duration-300 whitespace-nowrap">
-                            <td className="py-4 px-2 lg:px-3">
-                              <div className="text-sm font-bold text-slate-700 bg-slate-100/50 inline-block px-3 py-1.5 rounded-lg border border-slate-200/60 shadow-sm">
+                          <tr key={idx} className="group hover:bg-slate-50/50 transition-all duration-300 whitespace-nowrap">
+                            <td className="py-3 px-2 lg:px-3">
+                              <div className="text-sm font-bold text-slate-800 tracking-tight">
                                 {row.period_label}
                               </div>
                             </td>
-                            <td className="py-4 px-2 lg:px-3 text-right">
+                            <td className="py-3 px-2 lg:px-3 text-right">
                               <span className={clsx(
-                                "inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-bold font-mono border shadow-sm",
-                                netProfit >= 0 
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200/60" 
-                                  : "bg-rose-50 text-rose-700 border-rose-200/60"
+                                "text-base font-bold tracking-tight",
+                                netProfit >= 0 ? "text-emerald-600" : "text-rose-600"
                               )}>
                                 {netProfit >= 0 ? '+' : '-'}${Math.abs(netProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                             </td>
-                            <td className="py-4 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-emerald-600">
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-400 group-hover:text-emerald-500 transition-colors">
                               +${row.gross_profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
-                            <td className="py-4 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-rose-500">
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-400 group-hover:text-rose-500 transition-colors">
                               -${row.gross_loss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
-                            <td className="py-4 px-2 lg:px-3 text-right font-mono text-sm font-bold">
-                              <span className={clsx(row.win_rate >= 50 ? "text-emerald-600" : "text-rose-500")}>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold">
+                              <span className={clsx(row.win_rate >= 50 ? "text-slate-800" : "text-rose-600")}>
                                 {row.win_rate.toFixed(1)}%
                               </span>
                             </td>
-                            <td className="py-4 px-2 lg:px-3 text-right font-mono text-sm font-medium text-slate-500">{row.total_trades}</td>
-                            <td className="py-4 px-2 lg:px-3 text-right font-mono text-sm font-medium">
-                              <span className={clsx(row.avg_pnl >= 0 ? "text-emerald-600" : "text-rose-500")}>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-500">{row.total_trades}</td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold">
+                              <span className={clsx(row.avg_pnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
                                 {row.avg_pnl >= 0 ? '+' : '-'}${Math.abs(row.avg_pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                             </td>
-                            <td className="py-4 px-2 lg:px-3 text-right font-mono text-sm font-bold text-slate-700">{row.profit_factor.toFixed(2)}</td>
-                            <td className="py-4 px-2 lg:px-3 text-right font-mono text-sm font-bold text-rose-500">{row.mdd.toFixed(1)}%</td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-800">{row.profit_factor.toFixed(2)}</td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-rose-600">{row.mdd.toFixed(1)}%</td>
                           </tr>
                         );
                       })}

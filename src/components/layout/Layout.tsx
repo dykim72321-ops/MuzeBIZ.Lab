@@ -10,13 +10,12 @@ export const Layout = () => {
     <div className="flex flex-col min-h-screen bg-transparent text-blue-800 font-sans selection:bg-blue-500/20 selection:text-blue-800">
       <Toaster position="bottom-right" theme="light" richColors />
 
-
       {/* 상단 네비게이션 */}
       <TopNav />
 
       {/* 메인 콘텐츠 영역 */}
       <main className="flex-1 relative min-h-screen overflow-y-auto overflow-x-hidden pt-16 pb-20 lg:pb-0 transition-all duration-300">
-        <div className="w-full mx-auto">
+        <div className="w-full mx-auto relative z-10">
           <Outlet />
         </div>
       </main>
@@ -31,7 +30,6 @@ export const Layout = () => {
           <Search className="w-5 h-5" />
           <span className="text-[10px] font-bold">부품검색</span>
         </NavLink>
-
       </div>
     </div>
   );

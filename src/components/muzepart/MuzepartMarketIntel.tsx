@@ -15,14 +15,14 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch mb-6">
       {/* Global Inventory Card */}
-      <div className="lg:col-span-4 bg-white/95 backdrop-blur-xl border border-white shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgba(59,130,246,0.12)] p-6 rounded-[24px] transition-all duration-500 flex flex-col group relative overflow-hidden h-[340px]">
+      <div className="lg:col-span-4 bg-white/95 backdrop-blur-xl border border-white shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] p-6 rounded-[24px] transition-all duration-500 flex flex-col group relative overflow-hidden h-[340px]">
         {/* Decorative ambient background */}
-        <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-[40px] pointer-events-none transform translate-x-1/2 -translate-y-1/2 group-hover:bg-blue-500/10 transition-colors duration-500" />
+        <div className="absolute top-0 right-0 w-32 h-32 bg-slate-200/50 rounded-full blur-[40px] pointer-events-none transform translate-x-1/2 -translate-y-1/2 group-hover:bg-slate-300/50 transition-colors duration-500" />
         
         <div className="relative z-10 flex flex-col h-full">
           <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-100/60 flex-shrink-0">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-[14px] text-white shadow-[0_4px_20px_rgba(59,130,246,0.3)] group-hover:scale-105 transition-transform duration-500">
+              <div className="p-3 bg-black rounded-2xl text-white shadow-lg group-hover:scale-105 transition-transform duration-500">
                 <Globe className="w-5 h-5" />
               </div>
               <div>
@@ -243,7 +243,7 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
                     <div className="w-[1px] h-6 bg-slate-200" />
                     <div className="flex flex-col items-center">
                       <span className="text-slate-400 text-[9px] uppercase tracking-wider mb-1">Avg</span>
-                      <span className="text-blue-500 font-mono text-xs">${intelData.priceStats.avg.toFixed(2)}</span>
+                      <span className="text-slate-800 font-mono text-xs">${intelData.priceStats.avg.toFixed(2)}</span>
                     </div>
                     <div className="w-[1px] h-6 bg-slate-200" />
                     <div className="flex flex-col items-center">

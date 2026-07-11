@@ -53,7 +53,7 @@ export const MuzepartSearchPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('table');
 
   return (
-    <div className="space-y-6 bg-[#fbfdff] p-4 md:p-8 lg:p-10 min-h-screen">
+    <div className="space-y-6 bg-slate-50 p-4 md:p-8 lg:p-10 min-h-screen">
       {/* Connection Error Banner */}
       {!isBackendConnected && (
         <div className="flex items-center gap-3 p-4 bg-rose-50 border border-rose-200 rounded-xl text-sm shadow-sm">
@@ -66,27 +66,27 @@ export const MuzepartSearchPage: React.FC = () => {
       )}
 
       {/* Page Header */}
-      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-8 w-full">
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 w-full">
         <div className="flex items-center gap-4 w-full lg:w-auto flex-shrink-0">
-          <div className="p-3 bg-cyan-50 border border-cyan-150 rounded-xl shadow-sm">
-            <Search className="w-6 h-6 text-cyan-600" />
+          <div className="sfdc-icon-badge">
+            <Search className="w-6 h-6 text-white" />
           </div>
           <div>
-            <p className="text-xs font-bold text-cyan-700 uppercase tracking-widest mb-0.5 font-mono">Global Sourcing</p>
-            <h1 className="text-3xl font-black text-blue-900 leading-tight">제품 검색</h1>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">Global Sourcing</p>
+            <h1 className="text-3xl font-black text-slate-900 leading-tight tracking-tighter">제품 검색</h1>
           </div>
         </div>
         
-        <div className="bg-white/80 backdrop-blur-xl px-6 py-4 rounded-xl flex items-center gap-6 border border-blue-200 shadow-sm w-full lg:w-auto">
+        <div className="bg-white px-6 py-4 rounded-full flex items-center gap-6 sfdc-card shadow-sm w-full lg:w-auto">
           <form onSubmit={handleSearch} className="flex items-center gap-2 w-full">
             <input
               type="text"
               placeholder="부품번호 (MPN) 입력..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full sm:w-72 bg-white border border-blue-200 rounded-xl px-4 py-2.5 text-xs font-bold placeholder-blue-400 focus:border-indigo-500 focus:bg-white transition-all text-blue-800 font-mono outline-none focus:ring-2 focus:ring-indigo-500/15"
+              className="w-full sm:w-72 bg-slate-50 border border-slate-200 rounded-full px-5 py-2.5 text-xs font-bold placeholder-slate-400 focus:border-slate-300 focus:bg-white transition-all text-slate-800 font-mono outline-none focus:ring-2 focus:ring-slate-100"
             />
-            <button type="submit" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all text-xs font-bold uppercase tracking-wider shadow-sm hover:shadow active:scale-95 cursor-pointer font-sans">
+            <button type="submit" className="sfdc-button-primary px-6 py-2.5 text-xs uppercase tracking-wider shadow-md hover:shadow-lg">
               검색
             </button>
           </form>
