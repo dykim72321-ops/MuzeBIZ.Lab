@@ -44,8 +44,8 @@ from paper_engine import (
     CHANDELIER_K_PENNY,
     _apply_slippage,
     update_reversible_trailing_stop,  # NEW
-    calculate_dynamic_kelly,  # NEW
 )
+from services.kelly_sizer import KellySizer  # NEW
 from services.quant_engine import (
     calculate_advanced_signals as new_calculate_advanced_signals,
 )
@@ -183,7 +183,12 @@ class Portfolio:
             frac = KELLY_FRACTION_OLD
         else:
             safe_atr = atr if atr > 0 else price * 0.02
-            frac = calculate_dynamic_kelly(self.closed_trades, safe_atr, price)
+            sizer = KellySizer()
+            frac, _, _ = sizer.compute(
+                self.closed_trades, current_atr=safe_atr, current_price=price
+            )
+            if frac is None:
+                frac = 0.05
 
         budget = min(self.cash * frac, MAX_BUY_BUDGET)
         if budget < MIN_BUY_BUDGET:

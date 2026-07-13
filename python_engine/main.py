@@ -316,7 +316,7 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         dynamic_kelly_weight = d_weight if d_weight is not None else None
 
     sizing = calculate_position_sizing(
-        df_raw, dynamic_kelly_weight=dynamic_kelly_weight
+        df_raw, dynamic_kelly_weight=dynamic_kelly_weight, bars_per_day=390
     )
 
     signal_type = "HOLD"
@@ -988,6 +988,20 @@ def _atr14_last(df: pd.DataFrame) -> float:
         return 0.0
 
 
+def _er14_last(df: pd.DataFrame) -> float:
+    """Kaufman's Efficiency Ratio (ER) 14주기 경량 계산"""
+    try:
+        if len(df) < 15:
+            return 0.5
+        prices = df["Close"].iloc[-15:].values
+        net_change = abs(prices[-1] - prices[0])
+        price_diffs = np.diff(prices)
+        sum_vol = np.sum(np.abs(price_diffs))
+        return float(net_change / sum_vol) if sum_vol > 0 else 1.0
+    except Exception:
+        return 0.5
+
+
 # ── 1분봉 콜백 ──────────────────────────────────────────────────────────────
 
 
@@ -1130,9 +1144,10 @@ async def on_minute_bar_closed(bar):
 
         # ── 경량 모니터 경로 (HOLD 포지션 전용) ────────────────────────────
         if ticker_symbol in app_state._held_tickers and app_state.paper_engine:
-            rsi_val, atr_val = await asyncio.gather(
+            rsi_val, atr_val, er_val = await asyncio.gather(
                 asyncio.to_thread(_rsi14_last, df_hist),
                 asyncio.to_thread(_atr14_last, df_hist),
+                asyncio.to_thread(_er14_last, df_hist),
             )
 
             now_et = datetime.now(ZoneInfo("America/New_York"))
@@ -1159,7 +1174,7 @@ async def on_minute_bar_closed(bar):
                 dna_score=0.0,
                 recommended_weight=0.0,
                 atr=atr_val,
-                smoothed_er=0.5,
+                smoothed_er=er_val,
             )
             if app_state.supabase:
                 try:
@@ -1340,7 +1355,9 @@ async def on_minute_bar_closed(bar):
 
                     _vol_ann = float(payload.get("volatility_ann") or 0.0)
                     _atr_pct = (
-                        round(_vol_ann / _math.sqrt(252), 4) if _vol_ann > 0 else 0.0
+                        round(_vol_ann / _math.sqrt(252 * 390), 4)
+                        if _vol_ann > 0
+                        else 0.0
                     )
                     await asyncio.to_thread(
                         app_state.supabase.table("daily_discovery")

@@ -151,7 +151,6 @@ async def evaluate_checklist():
     )
     current_state = {item["item_key"]: item for item in (current_res.data or [])}
 
-    changed_rows = []
     for key, new_checked, new_note in conditions:
         curr = current_state.get(key)
         if not curr:
@@ -161,19 +160,22 @@ async def evaluate_checklist():
         if old_checked == new_checked and old_note == new_note:
             continue
 
-        row = {"item_key": key, "is_checked": new_checked, "auto_note": new_note}
+        # 항목은 마이그레이션 시딩 시 이미 생성되어 있고 여기선 갱신만 하므로,
+        # upsert(INSERT ... ON CONFLICT) 대신 update를 사용한다. upsert는 충돌 여부와
+        # 무관하게 후보 INSERT 행이 NOT NULL 컬럼(category/label 등, 이 payload엔 없음)
+        # 검증을 먼저 통과해야 해서 기존 행이 있어도 실패한다.
+        update_fields = {"is_checked": new_checked, "auto_note": new_note}
         if new_checked and not old_checked:
-            row["checked_at"] = now_utc.isoformat()
+            update_fields["checked_at"] = now_utc.isoformat()
         elif not new_checked and old_checked:
-            row["checked_at"] = None
-        changed_rows.append(row)
-        print(
-            f"✅ [Checklist Eval] {key} 갱신: {old_checked}->{new_checked} ({new_note})"
-        )
+            update_fields["checked_at"] = None
 
-    if changed_rows:
         await asyncio.to_thread(
             supabase.table("live_transition_checklist")
-            .upsert(changed_rows, on_conflict="item_key")
+            .update(update_fields)
+            .eq("item_key", key)
             .execute
+        )
+        print(
+            f"✅ [Checklist Eval] {key} 갱신: {old_checked}->{new_checked} ({new_note})"
         )

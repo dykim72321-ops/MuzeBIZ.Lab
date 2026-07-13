@@ -72,75 +72,9 @@ def _apply_slippage(
         return round(price * (1.0 - base_pct), 6)
 
 
-def calculate_dynamic_kelly(paper_history_records, current_atr, current_price):
-    """
-    화폐 스케일 및 포지션 크기 왜곡이 100% 차단된 퍼센트 차원의 베이지안 평활화 모델
-    """
-    kappa = 5.0  # 사전 신뢰도 가중치 (샘플 5개 분량의 제동력)
-    mu_global_win_pct = 0.05  # 글로벌 기대 수익률 5%
-    mu_global_loss_pct = 0.03  # 글로벌 기대 손실률 3%
+from services.kelly_sizer import KellySizer
 
-    if not paper_history_records:
-        return 0.05  # 역사적 데이터 부족 시 락인할 보수적 하한선 비중 (5%)
-
-    grouped_trades = {}
-    for r in paper_history_records:
-        ticker = r.get("ticker", "unknown")
-        entry_price = r.get("entry_price", 0.0)
-        profit_amt = r.get("profit_amt", 0.0) or 0.0
-        pnl_pct = r.get("pnl_pct", 0.0) or 0.0
-
-        # paper_history는 entry_value/qty를 저장하지 않으므로
-        # 해당 청산분(Scale-Out 포함)의 투입 금액을 profit_amt/pnl_pct로 역산한다.
-        entry_val = (profit_amt / (pnl_pct / 100.0)) if pnl_pct else 0.0
-
-        key = f"{ticker}_{round(entry_price, 4)}"
-        if key not in grouped_trades:
-            grouped_trades[key] = {"total_pnl": 0.0, "total_entry_val": 0.0}
-
-        grouped_trades[key]["total_pnl"] += profit_amt
-        grouped_trades[key]["total_entry_val"] += entry_val
-
-    win_pcts = []
-    loss_pcts = []
-
-    for key, data in grouped_trades.items():
-        if data["total_entry_val"] <= 0:
-            continue
-        pct = data["total_pnl"] / data["total_entry_val"]
-
-        if pct > 0:
-            win_pcts.append(pct)
-        elif pct < 0:
-            loss_pcts.append(abs(pct))
-
-    total_trades = len(win_pcts) + len(loss_pcts)
-    if total_trades == 0:
-        return 0.05
-
-    p = len(win_pcts) / total_trades
-
-    # 차원 일치를 위해 퍼센트 스케일 공간에서 수축 추정 수행
-    avg_win_smoothed = (sum(win_pcts) + kappa * mu_global_win_pct) / (
-        len(win_pcts) + kappa
-    )
-    avg_loss_smoothed = (sum(loss_pcts) + kappa * mu_global_loss_pct) / (
-        len(loss_pcts) + kappa
-    )
-
-    b = avg_win_smoothed / avg_loss_smoothed if avg_loss_smoothed > 0 else 1.0
-
-    # 켈리 공식 도출 및 자산 보호 기댓값(EV) 가드
-    raw_kelly = (p * b - (1 - p)) / b if b > 0 else 0.0
-    if (p * avg_win_smoothed) - ((1 - p) * avg_loss_smoothed) <= 0:
-        return 0.02  # 기댓값 음수 혹은 제로 시 최소 비중으로 제한
-
-    # 변동성 패널티 오버레이 및 최종 방어적 Half-Kelly 적용
-    volatility_ratio = current_atr / current_price
-    penalty_factor = 1.0 / (1.0 + 10.0 * volatility_ratio)
-
-    dynamic_fraction = raw_kelly * 0.5 * penalty_factor
-    return max(0.02, min(0.15, dynamic_fraction))
+_kelly_sizer = KellySizer()
 
 
 def _compute_locked_floor(
@@ -173,9 +107,9 @@ def update_reversible_trailing_stop(
 
     '적응형(soft)' 스탑과 '락인(hard floor)' 스탑을 분리한다:
       - 적응형 구간(highest_price - k_t*ATR)은 smoothed_er 레짐에 따라 k_t가 변하며
-        실제로 오르내릴 수 있다 — 추세 레짐(er↑)에서는 k_t가 작아져 타이트하게 조이고,
-        횡보 레짐(er↓) 진입 시에는 k_t가 커져 스탑이 다시 느슨해진다. 이것이 없으면
-        "가역적"이라는 이름이 무의미해진다 (단순 max() 래칫은 절대 되돌아가지 못함).
+        실제로 오르내릴 수 있다 — 모멘텀 전략에 맞춰 추세 레짐(er↑)에서는 k_t가 커져
+        여유를 주고, 횡보 레짐(er↓) 진입 시에는 k_t가 작아져 스탑을 조인다.
+        이것이 없으면 "가역적"이라는 이름이 무의미해진다 (단순 max() 래칫은 절대 되돌아가지 못함).
       - 락인 구간(_compute_locked_floor)만 비가역적으로 유지되어, 이미 확보한
         리스크 방어선(초기 스탑·페니 본전 락인)이 regime 변화로 침식되지 않도록 보장한다.
 
@@ -185,8 +119,10 @@ def update_reversible_trailing_stop(
     k_max = 3.0
     k_min = 1.2
 
-    # 레짐 강도에 비례한 ATR 승수 결정
-    k_t = k_min + (k_max - k_min) * (1.0 - current_smoothed_er)
+    # 모멘텀 전략 정합: 추세가 강할수록(ER↑) k_t가 커져 스탑에 여유를 줌
+    # → "winner를 달리게 하고, 횡보장에서는 스탑을 조여 빠르게 탈출"
+    # 기존(1-ER)은 추세 강할 때 타이트하게 조여 스탑헌팅에 취약했음
+    k_t = k_min + (k_max - k_min) * current_smoothed_er
     adaptive_stop = highest_price - (k_t * atr_value)
 
     locked_floor = _compute_locked_floor(entry_price, highest_price, is_penny)
@@ -673,9 +609,10 @@ class PaperTradingManager:
                 )
                 paper_history_records = res.data or []
                 safe_atr = atr if atr > 0 else (price * 0.02)
-                effective_fraction = calculate_dynamic_kelly(
-                    paper_history_records, safe_atr, price
+                weight, _, _ = _kelly_sizer.compute(
+                    paper_history_records, current_atr=safe_atr, current_price=price
                 )
+                effective_fraction = weight if weight is not None else 0.05
                 print(
                     f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
                 )

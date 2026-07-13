@@ -96,15 +96,17 @@ class DNAValidator:
         return final_score
 
     def calculate_kelly_weight(self, win_prob, win_loss_ratio):
-        """Fractional Kelly Criterion (Quarter-Kelly)"""
+        """Fractional Kelly Criterion — KellySizer와 동일한 Half Kelly + max_weight 캡"""
         # 손익비(r)를 최대 5.0으로 캡핑
         r = min(5.0, max(0.1, win_loss_ratio))
         p = win_prob / 100.0
         kelly = p - (1 - p) / r
 
-        # Quarter-Kelly 적용 (최대 25% 제한)
-        quarter_kelly = max(0, kelly / 4.0)
-        return round(quarter_kelly * 100, 1)
+        # Half-Kelly 적용 (KellySizer.half_kelly=True와 동일)
+        # 기존 Quarter-Kelly(kelly/4)에서 변경 — 라이브 엔진과의 일관성 확보
+        half_kelly = max(0, kelly * 0.5)
+        # KellySizer.max_weight=0.15 기본값과 동일한 캡
+        return round(min(half_kelly, 0.15) * 100, 1)
 
     def preprocess_data(self, data):
         """Mean Reversion 전략을 위한 지표 계산"""
@@ -255,12 +257,37 @@ class DNAValidator:
                     entry_price, current_close, target_price, stop_price, days_held, er
                 )
 
-                # Kelly Weight 및 Time Stop 로직
+                # Kelly Weight 계산 (실제 라이브와 동일하게 과거 시뮬레이션 거래 내역 기반)
                 risk_denominator = entry_price - stop_price
                 risk_reward = (target_price - entry_price) / (
                     risk_denominator if risk_denominator > 0 else 0.1
                 )
-                kelly_weight = self.calculate_kelly_weight(score, risk_reward)
+
+                # 라이브와 동일한 방식의 KellySizer 주입
+                from services.kelly_sizer import KellySizer
+
+                _sizer = KellySizer()
+
+                formatted_trades = [
+                    {
+                        "ticker": t["ticker"],
+                        "entry_price": t["entry_price"],
+                        "profit_amt": t["pnl"] * 100,
+                        "pnl_pct": t["pnl"] * 100,
+                    }
+                    for t in trades
+                ]
+                k_frac, _, _ = _sizer.compute(
+                    formatted_trades,
+                    current_atr=effective_atr,
+                    current_price=current_close,
+                )
+
+                if k_frac is None:
+                    # 초기 거래거나 데이터 부족 시 DNA Score 기반 폴백
+                    kelly_weight = self.calculate_kelly_weight(score, risk_reward)
+                else:
+                    kelly_weight = k_frac * 100.0
 
                 # [전략 변경] 극한의 Time Stop 로직 (3일 초과 시 무조건 청산)
                 if days_held > 3:

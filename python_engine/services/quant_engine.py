@@ -4,7 +4,7 @@ quant_engine.py — Quantitative Signal & Scoring Engine
 main.py에서 분리된 퀀트 핵심 로직:
   - calculate_advanced_signals(): RSI + MACD + ADX + RVOL 기반 DNA 신호 엔진
   - calculate_dna_score(): 단일 시점의 DNA 점수 계산 (스칼라 버전)
-  - calculate_dynamic_kelly(): 동적 Kelly Criterion 비중 산출
+  - calculate_dynamic_kelly(): 동적 Kelly Criterion 비중 산출 (KellySizer 위임)
   - calculate_position_sizing(): ATR + Kelly 결합 포지션 사이징
   - generate_ai_investment_report(): 결정론적 AI 투자 리포트 생성
 
@@ -338,61 +338,18 @@ def calculate_dynamic_kelly(
     min_trades: int = 10,
 ):
     """
-    최근 N번의 매매 기록(ticker/entry_price/pnl_pct/profit_amt) 기반으로 동적 켈리 비중 산출.
+    하위 호환 래퍼 — 내부적으로 KellySizer를 사용.
 
-    Scale-Out은 동일 포지션(ticker+entry_price)의 청산을 여러 paper_history 행으로
-    남기므로, 행 단위로 승/패를 세면 한 번의 왕복매매가 여러 개의 "승리"로
-    중복 집계되어 승률이 부풀려진다. ticker+entry_price로 그룹핑해
-    포지션 단위 손익률로 환산한 뒤 승/패를 판정한다.
+    반환: (kelly_weight, win_rate, payoff_ratio)
     """
-    grouped: dict[str, dict[str, float]] = {}
-    for r in recent_trades:
-        ticker = r.get("ticker", "unknown")
-        entry_price = r.get("entry_price", 0.0) or 0.0
-        profit_amt = r.get("profit_amt", 0.0) or 0.0
-        pnl_pct = r.get("pnl_pct", 0.0) or 0.0
+    from services.kelly_sizer import KellySizer
 
-        # entry_value(투입 금액) 자체는 저장되지 않으므로 profit_amt/pnl_pct로 역산
-        entry_val = (profit_amt / (pnl_pct / 100.0)) if pnl_pct else 0.0
-
-        key = f"{ticker}_{round(entry_price, 4)}"
-        bucket = grouped.setdefault(key, {"total_pnl": 0.0, "total_entry_val": 0.0})
-        bucket["total_pnl"] += profit_amt
-        bucket["total_entry_val"] += entry_val
-
-    position_pcts = [
-        b["total_pnl"] / b["total_entry_val"]
-        for b in grouped.values()
-        if b["total_entry_val"] > 0
-    ]
-
-    if len(position_pcts) < min_trades:
-        return None, 0.0, 0.0
-
-    pnl_array = np.array(position_pcts)
-    wins = pnl_array[pnl_array > 0]
-    losses = pnl_array[pnl_array < 0]
-
-    p = len(wins) / len(pnl_array)
-    avg_win = np.mean(wins) if len(wins) > 0 else 0.0
-    avg_loss = abs(np.mean(losses)) if len(losses) > 0 else 0.0
-
-    if avg_loss == 0:
-        b = float("inf")
-        kelly_fraction = p
-    elif avg_win == 0:
-        b = 0.0
-        kelly_fraction = 0.0
-    else:
-        b = avg_win / avg_loss
-        kelly_fraction = p - ((1 - p) / b)
-
-    kelly_fraction = max(0.0, float(kelly_fraction))
-    if half_kelly:
-        kelly_fraction *= 0.5
-
-    final_weight = min(kelly_fraction, max_weight)
-    return final_weight, p, b
+    sizer = KellySizer(
+        half_kelly=half_kelly,
+        max_weight=max_weight,
+        min_trades=min_trades,
+    )
+    return sizer.compute(recent_trades)
 
 
 # ── Position Sizing Engine ────────────────────────────────────────────────────
@@ -405,8 +362,18 @@ def calculate_position_sizing(
     target_vol: float = 0.15,
     kelly_fraction: float = 0.25,
     dynamic_kelly_weight: float = None,
+    bars_per_day: int = 1,
 ):
-    """1단계(ATR 기반 변동성 조절)와 3단계(동적 켈리 공식)를 결합한 포지션 사이징 엔진"""
+    """1단계(ATR 기반 변동성 조절)와 3단계(동적 켈리 공식)를 결합한 포지션 사이징 엔진
+
+    Parameters
+    ----------
+    bars_per_day : int
+        데이터의 시간프레임에 따른 하루당 바 수.
+        - 일봉: 1 (기본값, 백테스터 호환)
+        - 1분봉: 390 (미국 정규장 6.5시간 × 60분)
+        연율화 공식: ann_vol = atr_pct × √(252 × bars_per_day)
+    """
     if len(df) < 15:
         rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns and len(df) > 0 else 1.0
         return {
@@ -426,7 +393,7 @@ def calculate_position_sizing(
     current_price = df["Close"].iloc[-1]
 
     atr_pct = atr / current_price if current_price > 0 else 1e-9
-    ann_vol = atr_pct * np.sqrt(252)
+    ann_vol = atr_pct * np.sqrt(252 * bars_per_day)
     vol_weight = target_vol / (ann_vol + 1e-9)
 
     if dynamic_kelly_weight is not None:
@@ -442,8 +409,9 @@ def calculate_position_sizing(
     if kelly_f <= 0:
         final_weight = 0.0
     else:
-        avg_weight = (vol_weight + optimal_kelly) / 2.0
-        final_weight = min(avg_weight, vol_weight * 2.0, 1.0)
+        # 보수적 결합: 두 리스크 모델(변동성·켈리) 중 작은 값을 채택
+        # 기존 산술평균은 서로 다른 차원의 비중을 의미 없이 평균해 이론적 근거가 없었음
+        final_weight = min(vol_weight, optimal_kelly, 1.0)
 
     rvol = df["RVOL"].iloc[-1] if "RVOL" in df.columns else 1.0
 
