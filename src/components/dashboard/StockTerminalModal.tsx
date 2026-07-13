@@ -438,10 +438,10 @@ export const StockTerminalModal = ({
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
                         transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-                        className="relative w-full max-w-4xl bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col"
+                        className="relative w-full max-w-4xl max-h-[85vh] bg-white border border-slate-200 rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col"
                     >
                         {/* ─── 1. Header ─────────────────────────────────────────── */}
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-gradient-to-b from-blue-50/60 to-transparent relative z-10">
+                        <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-gradient-to-b from-blue-50/60 to-transparent relative z-10 shrink-0">
                             <div className="flex items-center gap-6">
                                 <img src="/logo.png" alt="MuzeBiz.Lab" className="w-20 h-20 object-contain" />
                                 <div>
@@ -463,7 +463,7 @@ export const StockTerminalModal = ({
                         </div>
 
                         {/* ─── 2. Content ────────────────────────────────────────── */}
-                        <div className="p-6 space-y-6 overflow-y-auto max-h-[85vh] custom-scrollbar relative z-10">
+                        <div className="p-6 space-y-6 overflow-y-auto flex-1 custom-scrollbar relative z-10">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
                                 {/* LEFT: 가격 추이 차트 + 시장 데이터 */}
                                 <div className="space-y-3">

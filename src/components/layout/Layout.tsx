@@ -15,7 +15,7 @@ export const Layout = () => {
 
       {/* 메인 콘텐츠 영역 */}
       <main className="flex-1 relative min-h-screen overflow-y-auto overflow-x-hidden pt-16 pb-20 lg:pb-0 transition-all duration-300">
-        <div className="w-full mx-auto relative z-10">
+        <div className="w-full mx-auto">
           <Outlet />
         </div>
       </main>
