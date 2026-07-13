@@ -500,7 +500,10 @@ async def run_quant_scan_internal(
                 and a.exchange in ("NASDAQ", "NYSE", "AMEX", "ARCA")
                 and not _SKIP_PATTERN.search(a.symbol)
                 and len(a.symbol) <= 5
-                and not (len(a.symbol) == 5 and a.symbol[-1] in ("W", "R", "Q"))
+                and not (
+                    len(a.symbol) == 5
+                    and a.symbol[-1] in ("W", "R", "Q", "U", "P", "Y")
+                )
             ]
             print(f"📡 [Scan] Alpaca universe: {len(tradable)} tradable US equities")
 
@@ -517,7 +520,16 @@ async def run_quant_scan_internal(
                         .execute
                     )
                     if pool_res.data:
-                        pool_tickers = [r["ticker"] for r in pool_res.data]
+                        pool_tickers = [
+                            r["ticker"]
+                            for r in pool_res.data
+                            if not _SKIP_PATTERN.search(r["ticker"])
+                            and len(r["ticker"]) <= 5
+                            and not (
+                                len(r["ticker"]) == 5
+                                and r["ticker"][-1] in ("W", "R", "Q", "U", "P", "Y")
+                            )
+                        ]
                         print(
                             f"📦 [Scan Pool] Loaded {len(pool_tickers)} tickers from accumulated pool"
                         )
