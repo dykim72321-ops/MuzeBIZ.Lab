@@ -10,7 +10,7 @@ import sys
 import os
 
 # 실행 위치: python_engine/ 디렉토리에서 실행
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
 
@@ -25,7 +25,10 @@ FAIL = "❌ FAIL"
 # =============================================================================
 async def test_volume_calibration():
     print("\n[Test 1] Volume Calibration Multiplier")
-    from main import candle_state
+    import main  # noqa: F401 — app_state.candle_state를 주입하기 위한 부팅 트리거
+    from state import app_state
+
+    candle_state = app_state.candle_state
 
     # 더미 warm_up 없이 직접 volume_multiplier 설정 시뮬레이션
     candle_state.volume_multiplier["AAPL"] = 15.3
@@ -103,8 +106,11 @@ async def test_data_source_tagging():
     )
 
     # volume_multiplier 등록
-    from main import candle_state, run_pulse_engine
+    import main  # noqa: F401 — app_state.candle_state를 주입하기 위한 부팅 트리거
+    from state import app_state
+    from core.pulse import run_pulse_engine
 
+    candle_state = app_state.candle_state
     candle_state.volume_multiplier["TEST"] = 14.2
 
     payload = run_pulse_engine("TEST", df)

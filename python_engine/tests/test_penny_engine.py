@@ -5,10 +5,10 @@ import sys
 import os
 
 # Add python_engine to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Mock WebhookManager before importing paper_engine
-with patch("webhook_manager.WebhookManager") as mock_webhook_mgr:
+with patch("infra.webhook_manager.WebhookManager") as mock_webhook_mgr:
     mock_webhook = MagicMock()
     mock_webhook.send_alert = AsyncMock()
     mock_webhook_mgr.return_value = mock_webhook
@@ -27,6 +27,11 @@ class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):
         self.mock_table_account = MagicMock()
         self.mock_table_watchlist = MagicMock()
         self.mock_table_history = MagicMock()
+        # 휩쏘 방지/재진입 쿨다운 체크(recent_history_rows)가 조회하는
+        # paper_history.select(...).eq(...).order(...).limit(...).execute().data 체인.
+        self.mock_table_history.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = (
+            []
+        )
 
         def table_side_effect(table_name):
             if table_name == "paper_positions":
