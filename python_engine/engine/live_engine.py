@@ -84,16 +84,20 @@ class LiveTradingManager(PaperTradingManager):
         """
         side_str = "BUY" if side == OrderSide.BUY else "SELL"
         try:
-            int_qty = math.floor(qty)
-            if int_qty < 1:
+            # 매수(BUY)일 때만 정수로 내림 처리하여 예산 초과 방지
+            # 매도(SELL)일 때는 소수점(부분/분할) 수량을 그대로 전송해야 잔여 수량이 묶이지 않음
+            order_qty = float(math.floor(qty)) if side == OrderSide.BUY else float(qty)
+
+            if side == OrderSide.BUY and order_qty < 1:
                 print(
                     f"⛔ [{ticker}] {side_str} 주문 차단 — 요청 수량 {qty:.4f}주가 "
                     f"1주 미만 (강제 1주 매수 시 예산 상한 초과 위험)"
                 )
                 return None
+
             req = MarketOrderRequest(
                 symbol=ticker,
-                qty=int_qty,
+                qty=order_qty,
                 side=side,
                 time_in_force=TimeInForce.DAY,
             )
