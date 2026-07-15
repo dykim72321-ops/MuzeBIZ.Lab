@@ -498,9 +498,15 @@ async def start_rest_polling(tickers: Optional[List[str]] = None):
         discovery_tickers = await asyncio.to_thread(
             app_state.db.get_active_tickers, limit=30
         )
+        watchlist_tickers = await asyncio.to_thread(
+            app_state.db.get_watchlist_tickers, limit=30
+        )
         # HOLD 중인 포지션이 daily_discovery 순위 밖으로 밀려나도 반드시 폴링 대상에
         # 포함해야 한다 — 그렇지 않으면 current_price가 진입가에 고정된다.
-        active_tickers = list(set(discovery_tickers) | app_state._held_tickers)
+        # 매수 전 WATCHING 종목도 순위 밖으로 밀리면 STRONG BUY 신호를 놓치므로 포함.
+        active_tickers = list(
+            set(discovery_tickers) | set(watchlist_tickers) | app_state._held_tickers
+        )
 
     if not active_tickers:
         print("⚠️ [REST Polling] No active tickers. Standby.")
@@ -573,10 +579,18 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
             discovery_tickers = await asyncio.to_thread(
                 app_state.db.get_active_tickers, limit=30
             )
+            watchlist_tickers = await asyncio.to_thread(
+                app_state.db.get_watchlist_tickers, limit=30
+            )
             # 현재 HOLD 중인 포지션은 daily_discovery 순위 밖으로 밀려나도
             # 반드시 구독을 유지해야 current_price가 갱신된다 (그렇지 않으면
             # 평가 손익이 진입가에 고정되어 항상 +$0.00으로 표시됨).
-            active_tickers = list(set(discovery_tickers) | app_state._held_tickers)
+            # 매수 전 WATCHING 종목도 동일한 사각지대에 놓이므로 함께 구독한다.
+            active_tickers = list(
+                set(discovery_tickers)
+                | set(watchlist_tickers)
+                | app_state._held_tickers
+            )
 
         if not active_tickers:
             print("⚠️ No active tickers to monitor. Pulse engine standby.")

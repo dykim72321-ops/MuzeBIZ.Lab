@@ -110,6 +110,30 @@ class DBManager:
 
         return tickers[:limit]
 
+    def get_watchlist_tickers(self, limit=30):
+        """
+        매수 전 관심종목(watchlist status=WATCHING, 엔진 자동 등록분)의 실시간
+        구독 대상 목록. daily_discovery 순위 밖으로 밀려도 이 목록으로 스트림
+        구독을 보장해야 STRONG BUY 신호를 놓치지 않는다.
+        """
+        if not self.supabase:
+            return []
+
+        try:
+            res = (
+                self.supabase.table("watchlist")
+                .select("ticker")
+                .eq("status", "WATCHING")
+                .is_("user_id", "null")
+                .order("initial_dna_score", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return [row["ticker"] for row in (res.data or []) if row.get("ticker")]
+        except Exception as e:
+            print(f"⚠️ watchlist fetch error: {e}")
+            return []
+
 
 if __name__ == "__main__":
     db = DBManager()
