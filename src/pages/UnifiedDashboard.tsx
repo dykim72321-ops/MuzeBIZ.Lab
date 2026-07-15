@@ -15,7 +15,8 @@ import { useDashboardData } from '../hooks/useDashboardData';
 import { CommandSettings } from '../components/dashboard/CommandSettings';
 import { BacktestPanel } from '../components/dashboard/BacktestPanel';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
-import { PennyQuantScoreBar } from '../components/penny/PennyQuantScoreBar';
+import { TensionGauge } from '../components/dashboard/TensionGauge';
+import { PositionHealthBar } from '../components/dashboard/PositionHealthBar';
 import { DashboardControls } from '../components/dashboard/HeaderCommandBar';
 import { MetricsGrid } from '../components/dashboard/MetricsGrid';
 import { RiskAnalyticsPanel } from '../components/dashboard/RiskAnalyticsPanel';
@@ -207,6 +208,7 @@ export default function UnifiedDashboard() {
                             <span className="text-lg font-black text-black block tracking-tight">{stock.ticker}</span>
                           </div>
                           <div className="flex items-center gap-2">
+                            <span className="text-xs font-black font-mono text-slate-900">{Number(stock.dna_score).toFixed(1)}</span>
                             <div className="w-7 h-7 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-100 group-hover:bg-slate-100 group-hover:border-slate-200 transition-colors">
                               <TestTube className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-900 transition-colors" />
                             </div>
@@ -219,8 +221,9 @@ export default function UnifiedDashboard() {
                               {Number(stock.change_percent ?? 0) >= 0 ? '+' : ''}{Number(stock.change_percent ?? 0).toFixed(2)}%
                             </span>
                           </div>
-                          <div className="w-16">
-                            <PennyQuantScoreBar score={stock.dna_score} size="sm" showLabel={false} />
+                          <div className="w-16 flex flex-col gap-1 items-end">
+                            <span className="text-[10px] font-mono font-bold text-slate-500">TENSION</span>
+                            <TensionGauge score={stock.dna_score} />
                           </div>
                         </div>
                       </div>
@@ -369,31 +372,42 @@ export default function UnifiedDashboard() {
                               {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
                               <button 
                                 onClick={() => handleCompanyClick(pos.ticker)}
-                                className="text-sm font-black text-slate-800 hover:text-black hover:underline block tracking-tight text-left transition-colors"
+                                className="text-base font-black text-slate-900 hover:text-black hover:underline block tracking-tight text-left transition-colors"
                               >
                                 {pos.ticker}
                               </button>
-                              <span className="text-[10px] font-bold block text-slate-600 mt-0.5">{pos.isPenny ? 'Penny' : 'Standard'}</span>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[10px] font-bold text-slate-500">{pos.isPenny ? 'Penny' : 'Standard'}</span>
+                              </div>
                             </td>
-                            <td className="py-4 px-3 text-right font-mono text-slate-800 text-xs font-bold hidden sm:table-cell">{Number(pos.units).toFixed(2)}</td>
-                            <td className="py-4 px-3 text-right font-mono text-slate-800 text-xs font-bold">${Number(pos.entry_price).toFixed(dec)}</td>
-                            <td className="py-4 px-3 text-right font-mono text-black text-sm font-extrabold">
+                            <td className="py-4 px-3 text-right font-mono text-slate-900 text-sm font-extrabold hidden sm:table-cell">{Number(pos.units).toFixed(2)}</td>
+                            <td className="py-4 px-3 text-right font-mono text-slate-900 text-sm font-extrabold">${Number(pos.entry_price).toFixed(dec)}</td>
+                            <td className="py-4 px-3 text-right font-mono text-black text-base font-black">
                               ${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}
                             </td>
                             <td className="py-4 px-3 text-right font-mono text-slate-600 text-xs font-bold hidden md:table-cell">
                               ${pos.trailing_stop ? Number(pos.trailing_stop).toFixed(dec) : '-'}
                             </td>
                             <td className={clsx("py-4 px-5 text-right font-mono text-xs font-extrabold", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
-                              <span className="block">{hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl ?? 0).toFixed(2)}` : '-'}</span>
+                              <span className="block">{hasPnl ? `${isProfit ? '+' : '-'}$${Math.abs(Number(pos.unrealized_pl ?? 0)).toFixed(2)}` : '-'}</span>
                               <span className="block text-[10px] mt-1">{hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}</span>
                             </td>
-                            <td className="py-4 px-5 text-center">
-                              <button
-                                onClick={() => handleClosePosition(pos.ticker)}
-                                className="btn-ghost-rose text-[11px] px-3 py-1.5"
-                              >
-                                정산
-                              </button>
+                            <td className="py-4 px-5 align-middle">
+                              <div className="flex flex-col items-center gap-1.5 w-full max-w-[80px] mx-auto">
+                                <button
+                                  onClick={() => handleClosePosition(pos.ticker)}
+                                  className="btn-ghost-rose text-[11px] px-3 py-1.5 w-full"
+                                >
+                                  정산
+                                </button>
+                                <div className="w-full">
+                                  <PositionHealthBar 
+                                    currentPrice={pos.current_price} 
+                                    highestPrice={pos.highest_price} 
+                                    tsThreshold={pos.ts_threshold ?? (pos.current_price ?? 0)} 
+                                  />
+                                </div>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -418,26 +432,26 @@ export default function UnifiedDashboard() {
                           {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
                           <div className="flex justify-between items-start mb-4">
                             <div>
-                              <span className="text-base font-black text-black tracking-tight">{pos.ticker}</span>
+                              <span className="text-lg font-black text-black tracking-tight">{pos.ticker}</span>
                               <span className="text-[11px] font-bold block text-slate-600 mt-1">{pos.isPenny ? 'Penny' : 'Standard'} • {Number(pos.units).toFixed(2)} Shares</span>
                             </div>
                             <div className="text-right">
                               <span className={clsx("text-sm font-mono font-extrabold block", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
-                                {hasPnl ? `${isProfit ? '+' : ''}$${Number(pos.unrealized_pl ?? 0).toFixed(2)}` : '-'}
+                                {hasPnl ? `${isProfit ? '+' : '-'}$${Math.abs(Number(pos.unrealized_pl ?? 0)).toFixed(2)}` : '-'}
                               </span>
                               <span className={clsx("text-[11px] font-mono font-bold block mt-1", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
                                 {hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}
                               </span>
                             </div>
                           </div>
-                          <div className="flex justify-between items-center text-[11px] font-mono mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                          <div className="flex justify-between items-center text-xs font-mono mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
                             <div className="flex flex-col">
-                              <span className="text-slate-600">진입가</span>
-                              <span className="font-extrabold text-black mt-0.5">${Number(pos.entry_price).toFixed(dec)}</span>
+                              <span className="text-slate-600 font-bold">진입가</span>
+                              <span className="font-black text-black text-sm mt-0.5">${Number(pos.entry_price).toFixed(dec)}</span>
                             </div>
                             <div className="flex flex-col text-right">
-                              <span className="text-slate-600">현재가</span>
-                              <span className="font-extrabold text-black mt-0.5">${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}</span>
+                              <span className="text-slate-600 font-bold">현재가</span>
+                              <span className="font-black text-black text-sm mt-0.5">${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}</span>
                             </div>
                           </div>
                           <button
@@ -446,6 +460,13 @@ export default function UnifiedDashboard() {
                           >
                             정산하기
                           </button>
+                          <div className="mt-4 px-1">
+                            <PositionHealthBar 
+                              currentPrice={pos.current_price} 
+                              highestPrice={pos.highest_price} 
+                              tsThreshold={pos.ts_threshold ?? (pos.current_price ?? 0)} 
+                            />
+                          </div>
                         </div>
                       );
                     })
@@ -492,7 +513,7 @@ export default function UnifiedDashboard() {
                           </div>
                           <div className="text-right flex flex-col items-end">
                             <span className={clsx("font-mono text-sm font-extrabold", isWin ? "text-emerald-600" : "text-rose-600")}>
-                              {isWin ? '+' : ''}${Number(trade.profit_amt).toFixed(2)}
+                              {isWin ? '+' : '-'}${Math.abs(Number(trade.profit_amt)).toFixed(2)}
                             </span>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-[9px] font-medium text-slate-400 font-mono">

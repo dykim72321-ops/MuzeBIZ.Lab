@@ -141,8 +141,8 @@ export const MetricsGrid = React.memo(function MetricsGrid({
           {totalPnl >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-700 shrink-0 ml-2" /> : <TrendingDown className="w-4 h-4 text-rose-700 shrink-0 ml-2" />}
         </div>
         <div className="overflow-hidden">
-          <span className={clsx("text-2xl font-black tabular-nums block truncate", totalPnl >= 0 ? "text-emerald-800" : "text-rose-800")} title={`${totalPnl >= 0 ? '+' : ''}$${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}>
-            {totalPnl >= 0 ? '+' : ''}${totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <span className={clsx("text-2xl font-black tabular-nums block truncate", totalPnl >= 0 ? "text-emerald-800" : "text-rose-800")} title={`${totalPnl >= 0 ? '+' : '-'}$${Math.abs(totalPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}>
+            {totalPnl >= 0 ? '+' : '-'}${Math.abs(totalPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
           <span className={clsx("text-[11px] font-black block mt-0.5 whitespace-nowrap", totalPnl >= 0 ? "text-emerald-700" : "text-rose-700")}>
             {displayedPositions.length}개 보유
