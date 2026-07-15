@@ -21,14 +21,17 @@ from alpaca.trading.enums import OrderSide, OrderStatus, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.stream import TradingStream
 
-from engine.paper_engine import PaperTradingManager
+from engine.paper_engine import PENNY_MAX_PRICE, PaperTradingManager
 
 if TYPE_CHECKING:
     from alpaca.trading.client import TradingClient
     from supabase import Client
 
-# 체결 확인 폴링 — 시장가 주문은 보통 초 단위로 체결되므로 짧게 대기
+# 체결 확인 폴링 — 시장가 주문은 보통 초 단위로 체결되므로 짧게 대기.
+# 페니/저유동성 종목은 스프레드가 넓어 5초 안에 체결 확인이 안 되는 경우가 잦아
+# (2026-07-15: UCOP STRONG BUY 5회가 전부 미체결 취소로 유실됨) 더 길게 대기한다.
 FILL_POLL_TIMEOUT_SEC = 5.0
+PENNY_FILL_POLL_TIMEOUT_SEC = 12.0
 FILL_POLL_INTERVAL_SEC = 0.5
 
 _FILLED_STATUSES = {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}
@@ -103,11 +106,16 @@ class LiveTradingManager(PaperTradingManager):
             )
             order = await asyncio.to_thread(self.alpaca.submit_order, req)
 
+            poll_timeout = (
+                PENNY_FILL_POLL_TIMEOUT_SEC
+                if fallback_price <= PENNY_MAX_PRICE
+                else FILL_POLL_TIMEOUT_SEC
+            )
             elapsed = 0.0
             while (
                 order.status not in _FILLED_STATUSES
                 and order.status not in _DEAD_STATUSES
-                and elapsed < FILL_POLL_TIMEOUT_SEC
+                and elapsed < poll_timeout
             ):
                 await asyncio.sleep(FILL_POLL_INTERVAL_SEC)
                 elapsed += FILL_POLL_INTERVAL_SEC
@@ -141,14 +149,14 @@ class LiveTradingManager(PaperTradingManager):
                 await self.webhook.send_alert(
                     title=f"⚠️ [LIVE ORDER 체결 미확인] {ticker}",
                     description=(
-                        f"{FILL_POLL_TIMEOUT_SEC:.0f}초 내 체결 확인 실패해 주문 취소를 시도했습니다 "
+                        f"{poll_timeout:.0f}초 내 체결 확인 실패해 주문 취소를 시도했습니다 "
                         f"(order_id: `{order.id}`) — Alpaca에서 실제 상태를 반드시 확인하세요."
                     ),
                     color=0xE67E22,
                 )
                 return None
 
-            filled_qty = float(order.filled_qty or int_qty)
+            filled_qty = float(order.filled_qty or order_qty)
             raw_fill_price = getattr(order, "filled_avg_price", None)
             filled_price = float(raw_fill_price) if raw_fill_price else fallback_price
             print(

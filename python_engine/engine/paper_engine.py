@@ -885,6 +885,16 @@ class PaperTradingManager:
                         .eq("ticker", ticker)
                         .execute
                     )
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="ORDER_REJECTED",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note="실주문 제출/체결확인 실패 — Alpaca가 거절했거나 제한시간 내 미체결 (Discord 알림 참고)",
+                    )
                     return
                 units, fill_price = executed
                 ts_threshold = fill_price * ts_init
