@@ -16,6 +16,7 @@ import type {
   PaperPosition,
   PaperHistory,
   TerminalData,
+  PortfolioHistoryPoint,
 } from '../types/dashboard';
 
 import type { BrokerPositionRaw, ClosedTradeRaw, BrokerAccountResponse, PennyScanStatusResponse } from '../types/api';
@@ -25,6 +26,7 @@ import {
   fetchBrokerPositions,
   fetchClosedTrades,
   fetchPennyScanStatus,
+  fetchPortfolioHistory,
 } from '../services/pythonApiService';
 
 import { supabase as supabaseClient } from '../lib/supabase';
@@ -54,6 +56,7 @@ interface TradingState {
   discoveryStocks: DiscoveryStock[];
   livePositions: PaperPosition[];
   liveHistory: PaperHistory[];
+  portfolioHistory: PortfolioHistoryPoint[];
   paperAccount: BrokerAccountResponse | null;
   pennyScanStatus: PennyScanStatusResponse | null;
   edgeAlert: EdgeAlert;
@@ -138,6 +141,7 @@ export const useTradingStore = create<TradingState>((set) => ({
   discoveryStocks: [],
   livePositions: [],
   liveHistory: [],
+  portfolioHistory: [],
   paperAccount: null,
   pennyScanStatus: null,
   edgeAlert: { active: false, message: null },
@@ -181,6 +185,7 @@ export const useTradingStore = create<TradingState>((set) => ({
         scanStatus,
         paperPositions,
         paperHistory,
+        portfolioHistory,
       ] = await Promise.all([
         fetchBrokerAccount(),
         supabaseClient
@@ -194,6 +199,7 @@ export const useTradingStore = create<TradingState>((set) => ({
         fetchPennyScanStatus(),
         fetchBrokerPositions(),
         fetchClosedTrades(),
+        fetchPortfolioHistory('all', '1D'),
       ]);
 
       const mappedPositions = mapPaperPositions(paperPositions);
@@ -205,6 +211,7 @@ export const useTradingStore = create<TradingState>((set) => ({
         ),
         livePositions: mappedPositions,
         liveHistory: mappedHistory,
+        portfolioHistory: portfolioHistory as PortfolioHistoryPoint[],
         lastFetchedTime: new Date().toISOString().substring(11, 19),
         loading: false,
         connectionError: false,

@@ -105,3 +105,10 @@ export interface TerminalData {
   buyPrice?: number;
   ohlcData?: { date: string; open: number; high: number; low: number; close: number }[];
 }
+
+export interface PortfolioHistoryPoint {
+  timestamp: number;
+  equity: number;
+  profit_loss: number;
+  profit_loss_pct: number;
+}

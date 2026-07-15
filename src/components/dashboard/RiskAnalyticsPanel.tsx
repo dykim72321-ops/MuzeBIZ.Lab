@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
 import clsx from 'clsx';
 import { ShieldCheck, AlertTriangle } from 'lucide-react';
-import type { PaperHistory } from '../../types/dashboard';
+import type { PaperHistory, PortfolioHistoryPoint } from '../../types/dashboard';
 
 interface RiskAnalyticsPanelProps {
   history: PaperHistory[];
+  portfolioHistory?: PortfolioHistoryPoint[];
   strategyStats: unknown;
 }
 
@@ -36,50 +37,85 @@ function getCardStyles(status: 'good' | 'bad' | 'neutral') {
   };
 }
 
-export const RiskAnalyticsPanel = ({ history }: RiskAnalyticsPanelProps) => {
+export const RiskAnalyticsPanel = ({ history, portfolioHistory }: RiskAnalyticsPanelProps) => {
   const metrics = useMemo(() => {
-    if (!history || history.length === 0) return null;
+    // We still want to show something if there's portfolio history but no trades
+    if ((!history || history.length === 0) && (!portfolioHistory || portfolioHistory.length === 0)) return null;
 
-    const returns = history.map(h => Number(h.pnl_pct || 0) / 100);
-    const mean = returns.reduce((s, v) => s + v, 0) / returns.length;
+    let dailyReturns: number[] = [];
+    if (portfolioHistory && portfolioHistory.length > 1) {
+      for (let i = 1; i < portfolioHistory.length; i++) {
+        const prev = portfolioHistory[i - 1].equity;
+        const curr = portfolioHistory[i].equity;
+        if (prev > 0) {
+          dailyReturns.push((curr - prev) / prev);
+        }
+      }
+    } else {
+      dailyReturns = history.map(h => Number(h.pnl_pct || 0) / 100);
+    }
+
+    const returns = dailyReturns;
+    const mean = returns.length > 0 ? returns.reduce((s, v) => s + v, 0) / returns.length : 0;
     const std = stddev(returns);
     const sharpe = std > 0 ? (mean / std) * Math.sqrt(252) : 0;
 
     const sortedReturns = [...returns].sort((a, b) => a - b);
     const var95 = percentile(sortedReturns, 5) * 100;
 
-    const posReturns = returns.filter(r => r > 0);
-    const negReturns = returns.filter(r => r < 0);
+    // Win/Loss ratio remains based on individual trades
+    const tradeReturns = history.map(h => Number(h.pnl_pct || 0) / 100);
+    const posReturns = tradeReturns.filter(r => r > 0);
+    const negReturns = tradeReturns.filter(r => r < 0);
     const avgWin = posReturns.length > 0 ? posReturns.reduce((s, v) => s + v, 0) / posReturns.length : 0;
     const avgLoss = negReturns.length > 0 ? negReturns.reduce((s, v) => s + v, 0) / negReturns.length : 0;
     const winLossRatio = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : (avgWin > 0 ? 99 : 0);
 
-    const sorted = [...history].sort(
-      (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
-    );
-    let equity = 10000;
-    let peak = equity;
-    let maxDD = 0;
-    for (const item of sorted) {
-      equity += Number(item.profit_amt ?? 0);
-      if (equity > peak) peak = equity;
-      const dd = (equity - peak) / peak;
-      if (dd < maxDD) maxDD = dd;
+    let mdd = 0;
+    if (portfolioHistory && portfolioHistory.length > 0) {
+      let peak = portfolioHistory[0].equity;
+      let maxDD = 0;
+      for (const item of portfolioHistory) {
+        if (item.equity > peak) peak = item.equity;
+        const dd = peak > 0 ? (item.equity - peak) / peak : 0;
+        if (dd < maxDD) maxDD = dd;
+      }
+      mdd = Math.abs(maxDD) * 100;
+    } else {
+      const sorted = [...history].sort(
+        (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
+      );
+      let equity = 10000;
+      let peak = equity;
+      let maxDD = 0;
+      for (const item of sorted) {
+        equity += Number(item.profit_amt ?? 0);
+        if (equity > peak) peak = equity;
+        const dd = (equity - peak) / peak;
+        if (dd < maxDD) maxDD = dd;
+      }
+      mdd = Math.abs(maxDD) * 100;
     }
-    const mdd = Math.abs(maxDD) * 100;
 
-    const totalReturn = (returns.reduce((s, v) => s + v, 0)) * 100;
+    let totalReturn = 0;
+    if (portfolioHistory && portfolioHistory.length > 0) {
+      const first = portfolioHistory[0].equity;
+      const last = portfolioHistory[portfolioHistory.length - 1].equity;
+      totalReturn = first > 0 ? ((last - first) / first) * 100 : 0;
+    } else {
+      totalReturn = (tradeReturns.reduce((s, v) => s + v, 0)) * 100;
+    }
     const calmar = mdd > 0 ? totalReturn / mdd : 0;
 
     return { sharpe, var95, winLossRatio, mdd, calmar, avgWin: avgWin * 100, avgLoss: avgLoss * 100 };
-  }, [history]);
+  }, [history, portfolioHistory]);
 
-  if (!history || history.length === 0) {
+  if (!metrics) {
     return (
       <div className="sfdc-card p-6 flex flex-col items-center justify-center min-h-[200px] gap-3">
         <AlertTriangle className="w-8 h-8 text-amber-500" />
-        <p className="text-sm font-black text-blue-900">청산 이력 필요</p>
-        <p className="text-xs text-blue-800 text-center">리스크 지표는 청산 이력이 있을 때 표시됩니다.</p>
+        <p className="text-sm font-black text-blue-900">데이터 부족</p>
+        <p className="text-xs text-blue-800 text-center">리스크 지표를 계산하기 위한 포트폴리오/청산 이력이 부족합니다.</p>
       </div>
     );
   }

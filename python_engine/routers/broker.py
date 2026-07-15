@@ -184,6 +184,52 @@ async def get_broker_status(api_key: str = Security(get_api_key)):
         return {"status": "ERROR", "is_armed": app_state.SYSTEM_ARMED, "error": str(e)}
 
 
+@router.get("/portfolio-history")
+async def get_portfolio_history(
+    period: str = "all", timeframe: str = "1D", api_key: str = Security(get_api_key)
+):
+    """Returns the actual portfolio history from Alpaca"""
+    trading_client = app_state.trading_client
+    if not trading_client:
+        raise HTTPException(status_code=503, detail="Trading client not initialized")
+
+    try:
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+        hist_req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
+        history = await asyncio.to_thread(
+            trading_client.get_portfolio_history, hist_req
+        )
+
+        data = []
+        for i in range(len(history.timestamp or [])):
+            if history.equity[i] is not None:
+                data.append(
+                    {
+                        "timestamp": (
+                            history.timestamp[i] * 1000
+                            if history.timestamp[i] < 1e11
+                            else history.timestamp[i]
+                        ),
+                        "equity": float(history.equity[i]),
+                        "profit_loss": (
+                            float(history.profit_loss[i])
+                            if history.profit_loss and history.profit_loss[i]
+                            else 0.0
+                        ),
+                        "profit_loss_pct": (
+                            float(history.profit_loss_pct[i])
+                            if history.profit_loss_pct and history.profit_loss_pct[i]
+                            else 0.0
+                        ),
+                    }
+                )
+        return data
+    except Exception as e:
+        print(f"⚠️ Portfolio history fetch failed: {e}")
+        return []
+
+
 @router.post("/arm")
 async def toggle_arm_system(req: ArmRequest, api_key: str = Security(get_api_key)):
     """Toggles the global SYSTEM_ARMED state and persists to DB."""

@@ -41,6 +41,7 @@ export function useDashboardData() {
   const discoveryStocks = useTradingStore((s) => s.discoveryStocks);
   const livePositions = useTradingStore((s) => s.livePositions);
   const liveHistory = useTradingStore((s) => s.liveHistory);
+  const portfolioHistory = useTradingStore((s) => s.portfolioHistory);
   const paperAccount = useTradingStore((s) => s.paperAccount);
   const pennyScanStatus = useTradingStore((s) => s.pennyScanStatus);
   const edgeAlert = useTradingStore((s) => s.edgeAlert);
@@ -102,14 +103,31 @@ export function useDashboardData() {
     [paperAccount],
   );
 
+  // ── Derived: Sliced Histories ──
+  const { slicedPortfolioHistory, slicedHistory } = useMemo(() => {
+    if (chartRange === 'all') {
+      return { slicedPortfolioHistory: portfolioHistory, slicedHistory: liveHistory };
+    }
+    const now = Date.now();
+    const cutoffMs = chartRange === '7d' ? 7 * 86_400_000 : 30 * 86_400_000;
+
+    const slicedPortfolio = portfolioHistory?.filter(p => now - p.timestamp <= cutoffMs) || [];
+    const slicedHist = liveHistory?.filter(h => {
+      const ts = new Date(h.closed_at || h.created_at || 0).getTime();
+      return now - ts <= cutoffMs;
+    }) || [];
+
+    return { slicedPortfolioHistory: slicedPortfolio, slicedHistory: slicedHist };
+  }, [portfolioHistory, liveHistory, chartRange]);
+
   // ── Derived: Win Rate & Total Trades ──
   const displayedWinRate = useMemo(() => {
-    if (!liveHistory || liveHistory.length === 0) return 0;
-    const wins = liveHistory.filter((t) => (t.pnl_pct ?? 0) > 0).length;
-    return (wins / liveHistory.length) * 100;
-  }, [liveHistory]);
+    if (!slicedHistory || slicedHistory.length === 0) return 0;
+    const wins = slicedHistory.filter((t) => (t.pnl_pct ?? 0) > 0).length;
+    return (wins / slicedHistory.length) * 100;
+  }, [slicedHistory]);
 
-  const displayedTotalTrades = useMemo(() => liveHistory.length, [liveHistory]);
+  const displayedTotalTrades = useMemo(() => slicedHistory.length, [slicedHistory]);
 
   // ── Derived: Total PnL ──
   const totalPnl = useMemo(
@@ -137,9 +155,10 @@ export function useDashboardData() {
     return (investedCapital / equity) * 100;
   }, [investedCapital, displayedAccount]);
 
+
+
   // ── Derived: Chart Data ──
   const chartData = useMemo(() => {
-    const BASE = 100000;
     const now = Date.now();
     const cutoffMs =
       chartRange === '7d'
@@ -167,29 +186,20 @@ export function useDashboardData() {
     const currentActualValue =
       displayedAccount.total_assets != null ? Math.round(displayedAccount.total_assets) : null;
 
-    if (!liveHistory || liveHistory.length === 0) {
+    if (!portfolioHistory || portfolioHistory.length === 0) {
       if (currentActualValue != null) {
         return [
-          { name: startLabel, value: BASE, ts: startTs, ma: BASE, id: '0', displayName: startLabel },
+          { name: startLabel, value: currentActualValue, ts: startTs, ma: currentActualValue, id: '0', displayName: startLabel },
           { name: '현재', value: currentActualValue, ts: now, ma: currentActualValue, id: '1', displayName: '현재' },
         ];
       }
       return [];
     }
 
-    const sorted = [...liveHistory].sort(
-      (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime(),
-    );
-
-    let running = BASE;
-    const allPoints = sorted.map((item) => {
-      running += Number(item.profit_amt ?? 0);
-      let name = '?';
-      if (item.created_at) {
-        const d = new Date(item.created_at);
-        name = `${d.getMonth() + 1}/${d.getDate()}`;
-      }
-      return { name, value: Math.round(running), ts: new Date(item.created_at ?? 0).getTime() };
+    const allPoints = portfolioHistory.map((item) => {
+      const d = new Date(item.timestamp);
+      const name = `${d.getMonth() + 1}/${d.getDate()}`;
+      return { name, value: Math.round(item.equity), ts: item.timestamp };
     });
 
     if (chartRange === '7d') {
@@ -206,12 +216,12 @@ export function useDashboardData() {
     const inRange =
       cutoffMs === Infinity ? allPoints : allPoints.filter((p) => now - p.ts <= cutoffMs);
 
-    let startValue = BASE;
+    let startValue = 100000;
     if (inRange.length > 0) {
       const firstIdx = allPoints.indexOf(inRange[0]);
-      startValue = firstIdx > 0 ? allPoints[firstIdx - 1].value : BASE;
+      startValue = firstIdx > 0 ? allPoints[firstIdx - 1].value : (allPoints[0].value || 100000);
     } else {
-      startValue = allPoints.length > 0 ? allPoints[allPoints.length - 1].value : BASE;
+      startValue = allPoints.length > 0 ? allPoints[allPoints.length - 1].value : 100000;
     }
 
     const maPoints = inRange.map((p, i, arr) => {
@@ -233,10 +243,7 @@ export function useDashboardData() {
           : startValue;
     series.push({ name: '현재', value: currentVal, ts: now, ma: currentVal });
 
-    // Duplicate string labels removal logic: 
-    // Recharts uses 'name' for XAxis ticks if dataKey='name'.
-    // If consecutive points have the same date, clear out the name to avoid overlapping text,
-    // but keep it in tooltip if possible? Actually, if we just empty the name, XAxis won't show it.
+    // Duplicate string labels removal logic
     let lastSeenName = '';
     const cleanSeries = series.map((s, idx) => {
       const base = { ...s, id: idx.toString() };
@@ -251,7 +258,7 @@ export function useDashboardData() {
       return { ...base, displayName: s.name };
     });
     return cleanSeries;
-  }, [liveHistory, chartRange, displayedAccount]);
+  }, [portfolioHistory, chartRange, displayedAccount]);
 
   // ── Handlers ──
 
@@ -406,6 +413,9 @@ export function useDashboardData() {
     discoveryStocks,
     livePositions,
     liveHistory,
+    portfolioHistory,
+    slicedHistory,
+    slicedPortfolioHistory,
     pennyScanStatus,
     edgeAlert,
     terminalData,

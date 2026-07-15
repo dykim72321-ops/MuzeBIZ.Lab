@@ -358,6 +358,19 @@ export async function fetchClosedTrades(limit: number = 30): Promise<ClosedTrade
 }
 
 /**
+ * Alpaca 실제 포트폴리오 히스토리 조회
+ */
+export async function fetchPortfolioHistory(period: string = "all", timeframe: string = "1D"): Promise<any[]> {
+  try {
+    const data = await apiClient.broker.get<any[]>(`/api/broker/portfolio-history?period=${period}&timeframe=${timeframe}`);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('[PythonAPI] Portfolio history fetch error:', error);
+    return [];
+  }
+}
+
+/**
  * Discord Webhook URL 저장 및 백엔드 메모리 즉시 반영
  */
 export async function updateWebhookUrl(webhookUrl: string): Promise<WebhookUpdateResponse> {

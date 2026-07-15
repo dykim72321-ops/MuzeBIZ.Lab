@@ -33,7 +33,7 @@ const PENNY_ENGINE_THRESHOLD = 1.0;
 export default function UnifiedDashboard() {
   const {
     loading, connectionError, isArmed, isSettingsOpen, lastFetchedTime, discoveryStocks,
-    livePositions, liveHistory, pennyScanStatus, edgeAlert, terminalData, chartRange,
+    livePositions, liveHistory, portfolioHistory, slicedHistory, slicedPortfolioHistory, pennyScanStatus, edgeAlert, terminalData, chartRange,
     displayedAccount, displayedWinRate, displayedTotalTrades, totalPnl, investedCapital,
     concentrationPct, chartData, setIsSettingsOpen, setChartRange, setTerminalData,
     setEdgeAlert, handleDeepDive, handleLiveHuntingTrigger, handleToggleArm, handleClosePosition,
@@ -478,7 +478,7 @@ export default function UnifiedDashboard() {
 
           {/* ── RIGHT COLUMN: Risk & Analytics & Logs (Span 3) ── */}
           <div className="xl:col-span-3 flex flex-col gap-5">
-            <RiskAnalyticsPanel history={liveHistory} strategyStats={null} />
+            <RiskAnalyticsPanel history={slicedHistory} portfolioHistory={slicedPortfolioHistory} strategyStats={null} />
             <PositionAnalyticsPanel positions={livePositions} totalEquity={displayedAccount.total_assets} />
 
             <div className="sfdc-card flex-1 flex flex-col min-h-[250px] max-h-[420px]">

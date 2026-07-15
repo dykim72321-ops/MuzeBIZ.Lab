@@ -10,7 +10,8 @@ import {
   CartesianGrid,
   Tooltip as RechartsTooltip,
 } from 'recharts';
-import { fetchStrategyReports, type StrategyReportBucket } from '../services/pythonApiService';
+import { fetchStrategyReports, fetchPortfolioHistory, type StrategyReportBucket } from '../services/pythonApiService';
+import type { PortfolioHistoryPoint } from '../types/dashboard';
 import { LiveTransitionChecklist } from '../components/dashboard/LiveTransitionChecklist';
 
 type TimeRange = 'day' | 'week' | 'month';
@@ -31,6 +32,7 @@ export default function ReportsPage() {
     setTimeRangeState(range);
   };
   const [reportData, setReportData] = useState<StrategyReportBucket[] | null>(null);
+  const [portfolioHistory, setPortfolioHistory] = useState<PortfolioHistoryPoint[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,13 +41,17 @@ export default function ReportsPage() {
       setLoading(true);
       setError(null);
       try {
-        const data = await fetchStrategyReports(timeRange);
+        const [data, phData] = await Promise.all([
+          fetchStrategyReports(timeRange),
+          fetchPortfolioHistory('all', '1D')
+        ]);
         if (!data) {
           setError('리포트 데이터를 불러오는데 실패했습니다.');
           setReportData(null);
         } else {
           setReportData(data.buckets);
         }
+        setPortfolioHistory(phData || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : '리포트 데이터를 불러오는데 실패했습니다.');
       } finally {
@@ -202,8 +208,42 @@ export default function ReportsPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {reportData.map((row, idx) => {
-                        // 자바스크립트 부동소수점 오류 방지 (예: -0.00 표시 방지)
-                        const netProfit = Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
+                        let actualNetProfit = Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
+                        let actualMdd = row.mdd;
+
+                        if (portfolioHistory && portfolioHistory.length > 0) {
+                          // Find points that fall into this period
+                          const pts = portfolioHistory.filter(p => {
+                            const d = new Date(p.timestamp);
+                            if (timeRange === 'day') {
+                              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === row.period_label;
+                            } else if (timeRange === 'week') {
+                              // ISO Week calculation
+                              const d2 = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+                              const dayNum = d2.getUTCDay() || 7;
+                              d2.setUTCDate(d2.getUTCDate() + 4 - dayNum);
+                              const yearStart = new Date(Date.UTC(d2.getUTCFullYear(), 0, 1));
+                              const weekNo = Math.ceil((((d2.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+                              return `${d2.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}` === row.period_label;
+                            } else {
+                              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === row.period_label;
+                            }
+                          });
+
+                          if (pts.length > 0) {
+                            // Calculate actual MDD for the points in this period
+                            const startEquity = pts[0].equity; // or fetch previous point if available, but pts[0] is fine for peak initialization
+                            let peak = startEquity;
+                            let maxDD = 0;
+                            for (const pt of pts) {
+                              if (pt.equity > peak) peak = pt.equity;
+                              const dd = peak > 0 ? (pt.equity - peak) / peak : 0;
+                              if (dd < maxDD) maxDD = dd;
+                            }
+                            actualMdd = Math.abs(maxDD) * 100;
+                          }
+                        }
+
                         return (
                           <tr key={idx} className="group hover:bg-slate-50/50 transition-all duration-300 whitespace-nowrap">
                             <td className="py-3 px-2 lg:px-3">
@@ -214,9 +254,9 @@ export default function ReportsPage() {
                             <td className="py-3 px-2 lg:px-3 text-right">
                               <span className={clsx(
                                 "text-base font-bold tracking-tight",
-                                netProfit >= 0 ? "text-emerald-600" : "text-rose-600"
+                                actualNetProfit >= 0 ? "text-emerald-600" : "text-rose-600"
                               )}>
-                                {netProfit >= 0 ? '+' : '-'}${Math.abs(netProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {actualNetProfit >= 0 ? '+' : '-'}${Math.abs(actualNetProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                             </td>
                             <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-400 group-hover:text-emerald-500 transition-colors">
@@ -237,7 +277,7 @@ export default function ReportsPage() {
                               </span>
                             </td>
                             <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-800">{row.profit_factor.toFixed(2)}</td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-rose-600">{row.mdd.toFixed(1)}%</td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-rose-600">{actualMdd.toFixed(1)}%</td>
                           </tr>
                         );
                       })}
