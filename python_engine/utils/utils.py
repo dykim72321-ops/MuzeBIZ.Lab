@@ -1,5 +1,45 @@
 # Utility functions for the Python engine
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pandas_market_calendars as mcal
+
+_nyse_calendar = mcal.get_calendar("NYSE")
+_holiday_cache: dict = {}
+
+
+def is_market_hours(ref_dt=None) -> bool:
+    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00 및 휴장일 체크). DST 자동 처리.
+
+    ref_dt: 바 타임스탬프(tz-aware). None이면 현재 벽시계로 판단.
+            warm_up 재생 등 과거 바를 처리할 때 반드시 바 시간을 전달해야
+            장외 시간 기준이 바 시간이 아닌 현재 시각으로 판단되는 버그를 방지한다.
+    """
+    if ref_dt is not None:
+        now_et = ref_dt.astimezone(ZoneInfo("America/New_York"))
+    else:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+
+    if now_et.weekday() >= 5:
+        return False
+
+    date_str = now_et.strftime("%Y-%m-%d")
+    if date_str not in _holiday_cache:
+        try:
+            schedule = _nyse_calendar.schedule(start_date=date_str, end_date=date_str)
+            _holiday_cache[date_str] = not schedule.empty
+        except Exception as e:
+            print(f"⚠️ [Calendar] Failed to fetch schedule for {date_str}: {e}")
+            _holiday_cache[date_str] = True
+
+    if not _holiday_cache[date_str]:
+        return False
+
+    open_min = 9 * 60 + 30
+    close_min = 16 * 60
+    cur_min = now_et.hour * 60 + now_et.minute
+    return open_min <= cur_min < close_min
 
 
 class PartNormalizer:

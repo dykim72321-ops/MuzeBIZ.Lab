@@ -8,7 +8,7 @@ from cachetools import TTLCache
 from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel
 
-from deps import get_api_key
+from api.deps import get_api_key
 
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
 
@@ -54,7 +54,7 @@ async def run_backtest_endpoint(
     if cache_key in backtest_cache:
         return backtest_cache[cache_key]
     try:
-        from portfolio_backtester import DNAValidator
+        from engine.portfolio_backtester import DNAValidator
 
         validator = DNAValidator(
             tickers=tickers,

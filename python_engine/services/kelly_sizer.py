@@ -80,37 +80,25 @@ class KellySizer:
 
     # ── 핵심 계산 ─────────────────────────────────────────────────────────────
 
-    def compute(
-        self,
-        trade_records: list[dict],
-        current_atr: float = 0.0,
-        current_price: float = 1.0,
-    ) -> tuple[float | None, float, float]:
+    def compute_stats(self, trade_records: list[dict]) -> dict | None:
         """
-        통합 Kelly 비중을 계산한다.
+        거래 이력만으로 결정되는 통계(승률/손익비/원시 Kelly)를 계산한다.
 
-        반환: (kelly_weight, win_rate_p, payoff_ratio_b)
-        - kelly_weight: 최종 포지션 비중 (0.02~max_weight), 또는 거래 수 부족 시 None
-        - win_rate_p: 승률 (0~1)
-        - payoff_ratio_b: 평균 수익 / 평균 손실
+        ATR·현재가 등 "지금 이 순간"의 변동성에 의존하지 않으므로, 이 결과는
+        같은 티커의 거래 이력이 바뀌지 않는 한 캐싱해도 안전하다 — 변동성
+        페널티는 apply_volatility_penalty()에서 매 호출마다 새로 적용해야 한다.
 
-        Parameters
-        ----------
-        trade_records : list[dict]
-            paper_history 행 리스트. 각 dict에 ticker/entry_price/pnl_pct/profit_amt 키.
-        current_atr : float
-            현재 ATR 값 (변동성 페널티 오버레이용). 0이면 페널티 미적용.
-        current_price : float
-            현재 가격 (ATR→변동성비율 환산용).
+        반환: {"p": 승률, "b": 손익비, "raw_kelly": 원시 Kelly 비중} 또는
+        표본 수 부족 시 None.
         """
         if not trade_records:
-            return None, 0.0, 0.0
+            return None
 
         # 1. 포지션 단위 그룹핑 (Scale-Out 중복 집계 방지)
         position_pcts = self._group_trades(trade_records)
 
         if len(position_pcts) < self.min_trades:
-            return None, 0.0, 0.0
+            return None
 
         pnl_array = np.array(position_pcts)
         win_pcts = pnl_array[pnl_array > 0]
@@ -118,7 +106,7 @@ class KellySizer:
 
         total_trades = len(win_pcts) + len(loss_pcts)
         if total_trades == 0:
-            return None, 0.0, 0.0
+            return None
 
         # 승률
         p = len(win_pcts) / total_trades
@@ -137,12 +125,36 @@ class KellySizer:
         # 이전에는 min_weight(0.02)를 반환하여 손실 전략에도 포지션이 열리는 회귀 버그 발생
         ev = (p * avg_win_smoothed) - ((1 - p) * avg_loss_smoothed)
         if ev <= 0:
-            return 0.0, p, b
+            return {"p": p, "b": b, "raw_kelly": 0.0}
 
         # Kelly 공식: f* = (p × b - (1-p)) / b
         raw_kelly = (p * b - (1 - p)) / b if b > 0 else 0.0
+        return {"p": p, "b": b, "raw_kelly": raw_kelly}
 
-        # 4. ATR 변동성 페널티 오버레이
+    def apply_volatility_penalty(
+        self,
+        stats: dict | None,
+        current_atr: float = 0.0,
+        current_price: float = 1.0,
+    ) -> tuple[float | None, float, float]:
+        """
+        compute_stats() 결과에 "지금 이 순간"의 ATR 변동성 페널티를 적용한다.
+
+        stats는 캐시된 값이어도 되지만, current_atr/current_price는 반드시
+        호출 시점의 최신 값을 넘겨야 한다 — 그래야 캐시된 승률/손익비를 써도
+        포지션 사이징이 현재 변동성에 맞게 조정된다.
+        """
+        if stats is None:
+            return None, 0.0, 0.0
+
+        p = stats["p"]
+        b = stats["b"]
+        raw_kelly = stats["raw_kelly"]
+
+        if raw_kelly <= 0:
+            return 0.0, p, b
+
+        # 4. ATR 변동성 페널티 오버레이 (호출 시점 값 — 캐싱 금지)
         if current_atr > 0 and current_price > 0:
             volatility_ratio = current_atr / current_price
             penalty_factor = 1.0 / (1.0 + 10.0 * volatility_ratio)
@@ -155,3 +167,29 @@ class KellySizer:
 
         final_weight = max(self.min_weight, min(self.max_weight, dynamic_fraction))
         return final_weight, p, b
+
+    def compute(
+        self,
+        trade_records: list[dict],
+        current_atr: float = 0.0,
+        current_price: float = 1.0,
+    ) -> tuple[float | None, float, float]:
+        """
+        통합 Kelly 비중을 계산한다 (compute_stats + apply_volatility_penalty 조합).
+
+        반환: (kelly_weight, win_rate_p, payoff_ratio_b)
+        - kelly_weight: 최종 포지션 비중 (0.02~max_weight), 또는 거래 수 부족 시 None
+        - win_rate_p: 승률 (0~1)
+        - payoff_ratio_b: 평균 수익 / 평균 손실
+
+        Parameters
+        ----------
+        trade_records : list[dict]
+            paper_history 행 리스트. 각 dict에 ticker/entry_price/pnl_pct/profit_amt 키.
+        current_atr : float
+            현재 ATR 값 (변동성 페널티 오버레이용). 0이면 페널티 미적용.
+        current_price : float
+            현재 가격 (ATR→변동성비율 환산용).
+        """
+        stats = self.compute_stats(trade_records)
+        return self.apply_volatility_penalty(stats, current_atr, current_price)

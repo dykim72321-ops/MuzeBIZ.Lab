@@ -394,7 +394,11 @@ def calculate_position_sizing(
 
     atr_pct = atr / current_price if current_price > 0 else 1e-9
     ann_vol = atr_pct * np.sqrt(252 * bars_per_day)
-    vol_weight = target_vol / (ann_vol + 1e-9)
+
+    # 스케일 보정: 1분봉 ATR을 연환산하면 페널티가 과도해져 비중이 0에 수렴하는 현상 방지
+    # 변동성이 극심하더라도 최소 5% 비중은 보장 (파편화 소액 거래 방지)
+    raw_vol_weight = target_vol / (ann_vol + 1e-9)
+    vol_weight = max(0.05, raw_vol_weight)
 
     if dynamic_kelly_weight is not None:
         optimal_kelly = dynamic_kelly_weight

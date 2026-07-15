@@ -14,7 +14,7 @@ import yfinance as yf
 from fastapi import APIRouter, HTTPException, Security, status
 from pydantic import BaseModel
 
-from deps import get_api_key
+from api.deps import get_api_key
 from state import app_state
 
 router = APIRouter(prefix="/api/broker", tags=["broker"])
@@ -53,7 +53,7 @@ class PaperSellRequest(BaseModel):
 @router.get("/account")
 async def get_broker_account(api_key: str = Security(get_api_key)):
     """Alpaca 계좌 현황 조회 (Buying Power, PnL 등) — 대시보드 진실 소스."""
-    from paper_engine import INITIAL_CAPITAL
+    from engine.paper_engine import INITIAL_CAPITAL
 
     trading_client = app_state.trading_client
     if not trading_client:
@@ -535,7 +535,7 @@ async def get_broker_orders(limit: int = 50, api_key: str = Security(get_api_key
 @router.get("/paper/account")
 async def get_paper_account(api_key: str = Security(get_api_key)):
     """Supabase 기반 페이퍼 트레이딩 계좌 정보 조회"""
-    from paper_engine import INITIAL_CAPITAL
+    from engine.paper_engine import INITIAL_CAPITAL
 
     paper_engine = app_state.paper_engine
     supabase = app_state.supabase

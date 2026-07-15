@@ -21,7 +21,7 @@ from alpaca.trading.enums import OrderSide, OrderStatus, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.stream import TradingStream
 
-from paper_engine import PaperTradingManager
+from engine.paper_engine import PaperTradingManager
 
 if TYPE_CHECKING:
     from alpaca.trading.client import TradingClient

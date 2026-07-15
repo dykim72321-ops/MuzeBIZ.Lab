@@ -5,7 +5,7 @@ import ta
 import warnings
 from datetime import datetime
 
-from paper_engine import (
+from engine.paper_engine import (
     INITIAL_CAPITAL,
     PENNY_MAX_PRICE,
     _apply_slippage,
@@ -281,7 +281,9 @@ class DNAValidator:
                 formatted_trades = [
                     {
                         "ticker": t["ticker"],
-                        "entry_price": idx,
+                        # [Senior Fix 3] Schema Hack 방지:
+                        # KellySizer 내에서 수익금/진입가 연산이 추가될 경우 ZeroDivisionError 방지를 위해 0이 될 수 없는 가상의 Float 가격 부여
+                        "entry_price": 100000.0 + idx,
                         "profit_amt": t["pnl"] * 100,
                         "pnl_pct": t["pnl"] * 100,
                     }

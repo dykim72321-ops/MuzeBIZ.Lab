@@ -1,0 +1,14 @@
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from state import app_state
+
+router = APIRouter()
+
+
+@router.websocket("/ws/pulse")
+async def websocket_endpoint(websocket: WebSocket):
+    await app_state.manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        app_state.manager.disconnect(websocket)

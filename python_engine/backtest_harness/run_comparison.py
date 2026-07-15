@@ -23,7 +23,7 @@ import yfinance as yf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from paper_engine import (
+from engine.paper_engine import (
     INITIAL_CAPITAL,
     MIN_BUY_BUDGET,
     MAX_BUY_BUDGET,
@@ -192,10 +192,14 @@ class Portfolio:
             # 켈리 공식을 타지 않은 채 항상 0.05 폴백만 쓰던 문제가 있었다.
             # entry_price는 그룹핑 키로만 쓰이므로 인덱스로 대체해 서로 다른 청산
             # 건이 같은 진입가에서 잘못 병합되지 않도록 한다.
+            # [Senior Fix 4] 가상의 달러 볼륨(profit_amt) 주의:
+            # 여기서 pnl_pct * 100을 profit_amt로 넘기는 것은, 모든 백테스트 거래가
+            # 정확히 $10,000 투입되었다고 가정하는 것과 같습니다. 만약 미래에 KellySizer가
+            # 순수 달러 기준의 변동성(Vol)을 분모로 사용하도록 고도화되면 사이즈 불균형 오류가 발생할 수 있습니다.
             formatted_trades = [
                 {
                     "ticker": "X",
-                    "entry_price": idx,
+                    "entry_price": 100000.0 + idx,  # ZeroDivision 방지
                     "profit_amt": t["pnl_pct"] * 100,
                     "pnl_pct": t["pnl_pct"] * 100,
                 }

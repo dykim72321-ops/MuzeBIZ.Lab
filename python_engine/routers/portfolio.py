@@ -15,7 +15,7 @@ router = APIRouter(tags=["portfolio"])
 @router.get("/api/portfolio")
 async def get_portfolio():
     """가상 계좌 잔고 및 보유 포지션 데이터 반환"""
-    from paper_engine import INITIAL_CAPITAL
+    from engine.paper_engine import INITIAL_CAPITAL
 
     supabase = app_state.supabase
     paper_engine = app_state.paper_engine

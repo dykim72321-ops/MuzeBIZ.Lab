@@ -1,6 +1,7 @@
 from supabase import Client
-from webhook_manager import WebhookManager
+from infra.webhook_manager import WebhookManager
 import asyncio
+import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -11,7 +12,9 @@ _NY_TZ = ZoneInfo(
 INITIAL_CAPITAL = 100000.0
 
 # ── 포지션 사이징 / 리스크 상수 ──────────────────────────────────────────────
-MIN_BUY_BUDGET = 10.0  # 최소 주문 금액 (달러)
+MIN_BUY_BUDGET = (
+    100.0  # 최소 주문 금액 (달러) - 초소형 파편화 거래 방지 (기존 10.0에서 상향)
+)
 MAX_BUY_BUDGET = 5000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_BUDGET × MAX_CONCURRENT = 총 배포 상한
 # Kelly 15% × $100k = $15k → MAX_BUY_BUDGET $5k 캡으로 실질 포지션당 $5k 고정
 # $5k × 15 = $75k = MAX_CONCENTRATION 75% → 내부 수학 완결
@@ -32,6 +35,19 @@ PENNY_SCALE_OUT_RSI = 60  # 1차 매도 RSI 기준 (일반 52 → 페니 60)
 PENNY_SCALE_OUT_PROFIT = 0.10  # 1차 매도 수익률 기준 (+10% OR RSI>65)
 PENNY_TIGHT_TS_PCT = 0.95  # Scale-Out 후 잔여 물량 TS: highest × 95% (-5%)
 SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 유예
+
+# ── 오버트레이딩(Whipsaw) 방지 파라미터 ──────────────────────────────────────
+MAX_DAILY_TRADES_PER_TICKER = (
+    2  # 종목당 하루 신규 진입(라운드트립) 최대 횟수 — Scale-Out 부분청산은 제외
+)
+VOLATILITY_MAX_RATIO = (
+    0.05  # 일반 종목: ATR/가격 비율이 이보다 크면 단기 과열/휩쏘로 판단해 진입 차단
+)
+PENNY_VOLATILITY_MAX_RATIO = 0.08  # 페니 종목: 원래 변동성이 커서 상한을 완화
+
+KELLY_CACHE_TTL_SEC = (
+    3600  # Kelly 통계(p/b/raw_kelly) 캐시 유효 시간 — ATR 페널티는 캐시 대상이 아님
+)
 
 # ── Chandelier Exit 파라미터 ──────────────────────────────────────────────────
 # 고정 % TS 대신 ATR 기반으로 스탑 라인을 설정 → 변동성 높은 1분봉 스탑헌팅 내성 강화
@@ -135,6 +151,12 @@ class PaperTradingManager:
         self.webhook = WebhookManager()
         self.webhook.set_supabase_client(supabase_client)
         self._ticker_locks: dict[str, asyncio.Lock] = {}
+        # Kelly Sizer 1시간 캐시 (DB I/O Latency 제거)
+        # 캐시에 저장하는 것은 최종 비중이 아니라 거래 이력 기반 통계(p/b/raw_kelly)뿐이다.
+        # ATR 변동성 페널티는 캐시 히트 시에도 매번 호출 시점 값으로 새로 적용해야
+        # 포지션 사이징이 현재 변동성을 반영한다 (apply_volatility_penalty 참고).
+        self._kelly_cache: dict[str, dict | None] = {}
+        self._kelly_cache_updated_at: dict[str, float] = {}
 
     def _get_lock(self, ticker: str) -> asyncio.Lock:
         """티커별 락 — 동일 종목에 대한 청산/재진입/수동매도가 겹쳐 실행되며
@@ -400,6 +422,10 @@ class PaperTradingManager:
         )
         await self._sync_watchlist_exit(ticker)
 
+        # KellySizer 캐시 무효화 (청산 후 과거 데이터가 변경되었으므로)
+        if ticker in self._kelly_cache:
+            del self._kelly_cache[ticker]
+
         return {
             "fill_price": fill_price,
             "units": units,
@@ -411,35 +437,30 @@ class PaperTradingManager:
     # PDT Rule은 마진 계좌 $25k 미만에만 적용 — $100k 가상 계좌에서는 불필요
     ENFORCE_PDT_SAFEGUARD = False
 
-    async def _is_in_cooldown(self, ticker: str) -> bool:
-        """최근 청산 이후 쿨다운 여부 반환 (REENTRY_COOLDOWN_MINUTES 기준)."""
-        try:
-            res = await asyncio.to_thread(
-                self.supabase.table("paper_history")
-                .select("closed_at")
-                .eq("ticker", ticker)
-                .order("closed_at", desc=True)
-                .limit(1)
-                .execute
-            )
-            if not res.data:
-                return False
-            closed_at_str = res.data[0].get("closed_at")
-            if not closed_at_str:
-                return False
-            closed_at = datetime.fromisoformat(closed_at_str.replace("Z", "+00:00"))
+    def _is_in_cooldown_from_rows(self, rows: list[dict]) -> bool:
+        """최근 청산 이후 쿨다운 여부 반환 (REENTRY_COOLDOWN_MINUTES 기준).
 
-            if self.ENFORCE_PDT_SAFEGUARD:
-                closed_at_est = closed_at.astimezone(_NY_TZ)
-                now_est = datetime.now(_NY_TZ)
-                if closed_at_est.date() == now_est.date():
-                    return True
-
-            elapsed = (datetime.now(timezone.utc) - closed_at).total_seconds()
-            return elapsed < self.REENTRY_COOLDOWN_MINUTES * 60
-        except Exception as e:
-            print(f"⚠️ [Cooldown Check] {ticker}: {e}")
+        rows는 같은 티커의 paper_history를 closed_at 내림차순으로 정렬해 이미
+        가져온 결과(휩쏘 방지 체크와 공유)여야 한다 — 별도 DB 왕복을 만들지 않는다.
+        """
+        if not rows:
             return False
+        closed_at_str = rows[0].get("closed_at")
+        if not closed_at_str:
+            return False
+        try:
+            closed_at = datetime.fromisoformat(closed_at_str.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+
+        if self.ENFORCE_PDT_SAFEGUARD:
+            closed_at_est = closed_at.astimezone(_NY_TZ)
+            now_est = datetime.now(_NY_TZ)
+            if closed_at_est.date() == now_est.date():
+                return True
+
+        elapsed = (datetime.now(timezone.utc) - closed_at).total_seconds()
+        return elapsed < self.REENTRY_COOLDOWN_MINUTES * 60
 
     async def process_signal(
         self,
@@ -531,6 +552,105 @@ class PaperTradingManager:
                 )
                 return
 
+            # 당일 재진입 금지(Cool-down) + 종목당 일일 최대 거래 횟수 제한
+            # 오버트레이딩(Whipsaw) 방지: 오늘 손실/트레일링스탑 청산 이력이 있으면 당일 재진입
+            # 금지하고, 그 외에도 종목당 하루 신규 진입 횟수를 제한해 같은 종목에서
+            # 반복적인 스탑헌팅으로 자본이 갈리는 것을 막는다.
+            # paper_history 실제 청산 사유 컬럼은 exit_reason이다 (reason 컬럼은 존재하지
+            # 않아 select 시 42703 에러로 항상 실패했던 이력이 있음 — 컬럼명 고정).
+            # 아래에서 가져온 recent_history_rows는 재진입 쿨다운 체크(_is_in_cooldown_from_rows)와
+            # 공유된다 — 같은 티커의 paper_history를 두 번 따로 조회하지 않기 위함.
+            recent_history_rows: list[dict] = []
+            try:
+                today_ny = datetime.now(_NY_TZ).date()
+
+                recent_history = await asyncio.to_thread(
+                    self.supabase.table("paper_history")
+                    .select("closed_at,exit_reason,pnl_pct")
+                    .eq("ticker", ticker)
+                    .order("closed_at", desc=True)
+                    .limit(10)
+                    .execute
+                )
+                recent_history_rows = recent_history.data or []
+                today_rows = []
+                for r in recent_history_rows:
+                    closed_at_str = r.get("closed_at")
+                    if not closed_at_str:
+                        continue
+                    closed_at = datetime.fromisoformat(
+                        closed_at_str.replace("Z", "+00:00")
+                    )
+                    if closed_at.astimezone(_NY_TZ).date() == today_ny:
+                        today_rows.append(r)
+
+                loss_today = any(
+                    r.get("exit_reason") == "Trailing Stop"
+                    or float(r.get("pnl_pct") or 0) < 0
+                    for r in today_rows
+                )
+                if loss_today:
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="COOLDOWN_ACTIVE",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note="당일 손실/손절 청산 이력 존재 (Whipsaw 방지)",
+                    )
+                    print(
+                        f"🛑 [Cooldown] {ticker} 당일 손절 이력 발견. 오버트레이딩 방지를 위해 재진입 차단."
+                    )
+                    return
+
+                # Scale-Out은 동일 라운드트립의 부분 청산이라 별도 거래로 세지 않는다.
+                daily_trade_count = sum(
+                    1 for r in today_rows if r.get("exit_reason") != "Scale-Out 50%"
+                )
+                if daily_trade_count >= MAX_DAILY_TRADES_PER_TICKER:
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="DAILY_TRADE_LIMIT",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note=f"당일 거래 {daily_trade_count}건 ≥ 한도 {MAX_DAILY_TRADES_PER_TICKER}건",
+                    )
+                    print(
+                        f"🛑 [Daily Limit] {ticker} 당일 거래 {daily_trade_count}건 — 신규 진입 차단."
+                    )
+                    return
+            except Exception as cd_err:
+                print(f"⚠️ [Cooldown/Daily-Limit Check] 실패: {cd_err}")
+
+            # 단기 변동성 필터: ATR/가격 비율이 과도하면(휩쏘성 급변동) 신규 진입 차단
+            if atr > 0 and price > 0:
+                volatility_ratio = atr / price
+                vol_cap = (
+                    PENNY_VOLATILITY_MAX_RATIO
+                    if is_penny_signal
+                    else VOLATILITY_MAX_RATIO
+                )
+                if volatility_ratio > vol_cap:
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="VOLATILITY_FILTER",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note=f"ATR/가격비 {volatility_ratio*100:.1f}% > 상한 {vol_cap*100:.1f}%",
+                    )
+                    print(
+                        f"🛑 [Volatility Filter] {ticker} 변동성비 {volatility_ratio*100:.1f}% — 신규 진입 차단."
+                    )
+                    return
+
         if (
             signal_type == "BUY"
             and strength == "STRONG"
@@ -560,7 +680,8 @@ class PaperTradingManager:
                 )
                 return
             # 재진입 쿨다운 체크 (청산 후 60분 이내 재진입 차단)
-            if await self._is_in_cooldown(ticker):
+            # 별도 DB 조회 없이 위 휩쏘 방지 체크에서 이미 가져온 이력을 재사용한다.
+            if self._is_in_cooldown_from_rows(recent_history_rows):
                 print(
                     f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
                 )
@@ -597,26 +718,36 @@ class PaperTradingManager:
             # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
             # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
             if recommended_weight <= 0:
-                # paper_history 실제 컬럼: ticker/entry_price/pnl_pct/profit_amt
-                # (buy_price/qty/pnl/entry_value 컬럼은 존재하지 않음 — 존재하지 않는
-                # 컬럼을 select하면 42703 에러로 매 폴백마다 크래시했던 이력이 있음).
-                # ticker 필터 필수: 필터 없이 조회하면 계좌 전체 최근 거래(다른 종목 포함)의
-                # EV가 0 이하로 나오는 순간 이 종목과 무관하게 모든 신규 매수가 함께
-                # 차단되는 계좌 전체 락아웃이 발생한다. 이 종목 자체의 이력만으로
-                # 회로차단기를 적용해야 다른 종목의 손실이 전이되지 않는다.
-                res = await asyncio.to_thread(
-                    self.supabase.table("paper_history")
-                    .select("ticker,entry_price,pnl_pct,profit_amt")
-                    .eq("ticker", ticker)
-                    .order("closed_at", desc=True)
-                    .limit(50)
-                    .execute
-                )
-                paper_history_records = res.data or []
+                current_time = time.time()
+                last_updated = self._kelly_cache_updated_at.get(ticker, 0.0)
+
+                # 1시간(3600초) 이내의 캐시가 있으면 DB 조회(latency)만 생략한다.
+                # 캐시된 것은 거래 이력 기반 통계(p/b/raw_kelly)뿐이므로, ATR 변동성
+                # 페널티는 캐시 히트/미스와 무관하게 항상 현재 atr/price로 새로 적용된다.
+                if (
+                    ticker in self._kelly_cache
+                    and (current_time - last_updated) < KELLY_CACHE_TTL_SEC
+                ):
+                    stats = self._kelly_cache[ticker]
+                else:
+                    res = await asyncio.to_thread(
+                        self.supabase.table("paper_history")
+                        .select("ticker,entry_price,pnl_pct,profit_amt")
+                        .eq("ticker", ticker)
+                        .order("closed_at", desc=True)
+                        .limit(50)
+                        .execute
+                    )
+                    paper_history_records = res.data or []
+                    stats = _kelly_sizer.compute_stats(paper_history_records)
+                    self._kelly_cache[ticker] = stats
+                    self._kelly_cache_updated_at[ticker] = current_time
+
                 safe_atr = atr if atr > 0 else (price * 0.02)
-                weight, _, _ = _kelly_sizer.compute(
-                    paper_history_records, current_atr=safe_atr, current_price=price
+                weight, _, _ = _kelly_sizer.apply_volatility_penalty(
+                    stats, current_atr=safe_atr, current_price=price
                 )
+
                 effective_fraction = weight if weight is not None else 0.05
                 print(
                     f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
@@ -997,6 +1128,11 @@ class PaperTradingManager:
                     )
                     .execute
                 )
+
+                # KellySizer 캐시 무효화 (Scale-Out도 paper_history를 바꾸므로 전량 청산과 동일하게 처리)
+                if ticker in self._kelly_cache:
+                    del self._kelly_cache[ticker]
+
                 return
 
             # C. TRAILING STOP 체크 (ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)

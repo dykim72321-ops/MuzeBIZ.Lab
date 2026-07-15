@@ -47,6 +47,14 @@ class AppState:
     # ── MTF 캐시 (15분봉 20 EMA) ───────────────────────────────────────
     mtf_cache = None  # MTFCache (main.py에서 주입)
 
+    # ── STRONG BUY 직전 RVOL·상위 추세 검증기 ───────────────────────────
+    momentum_validator = None  # MomentumValidator (main.py에서 주입)
+
+    # ── 세션 내 데이터 없음(상장폐지/OTC) 종목 캐시 ──────────────────────
+    # core/quant_scanner.py(일봉 스캔)와 market/alpaca_stream.py(콜드스타트 조회)가
+    # 공유한다 — 한쪽에서 학습한 no-data 티커를 다른 쪽도 재조회하지 않도록.
+    yf_no_data_cache: set = set()
+
     # ── Alpaca 스트림 태스크 참조 ────────────────────────────────────────
     _current_stream_task = None  # asyncio.Task | None
     _current_ws_stream = None  # StockDataStream | None

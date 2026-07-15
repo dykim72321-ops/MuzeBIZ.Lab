@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import aiohttp
 from bs4 import BeautifulSoup
 
-from utils import PartNormalizer
+from utils.utils import PartNormalizer
 
 
 class SearchAggregator:

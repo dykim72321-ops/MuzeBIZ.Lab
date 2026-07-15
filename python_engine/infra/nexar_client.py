@@ -18,7 +18,7 @@ from typing import Dict, List, Optional
 
 import aiohttp
 
-from utils import PartNormalizer
+from utils.utils import PartNormalizer
 
 TOKEN_URL = "https://identity.nexar.com/connect/token"
 GRAPHQL_URL = "https://api.nexar.com/graphql"

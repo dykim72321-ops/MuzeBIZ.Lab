@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Security, status
 
-from deps import get_api_key
+from api.deps import get_api_key
 from state import app_state
 from routers.strategy import _compute_bucket_stats
 

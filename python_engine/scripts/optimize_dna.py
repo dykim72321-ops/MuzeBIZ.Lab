@@ -1,6 +1,6 @@
 import pandas as pd
 import yfinance as yf
-from portfolio_backtester import DNAValidator
+from engine.portfolio_backtester import DNAValidator
 
 
 def run_optimization():

@@ -13,7 +13,7 @@ with patch("webhook_manager.WebhookManager") as mock_webhook_mgr:
     mock_webhook.send_alert = AsyncMock()
     mock_webhook_mgr.return_value = mock_webhook
 
-    from paper_engine import PaperTradingManager
+    from engine.paper_engine import PaperTradingManager
 
 
 class TestPennyTradingEngine(unittest.IsolatedAsyncioTestCase):

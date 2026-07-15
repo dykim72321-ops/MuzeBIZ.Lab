@@ -108,8 +108,7 @@ async def get_indicator_snapshot():
     """
     import pandas as pd
 
-    # 지연 임포트: main.py에 정의된 함수들을 런타임에 가져옴
-    from main import calculate_advanced_signals, calculate_dna_score
+    from services.quant_engine import calculate_advanced_signals, calculate_dna_score
 
     candle_state = app_state.candle_state
 

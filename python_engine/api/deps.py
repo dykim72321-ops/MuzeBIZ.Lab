@@ -1,7 +1,7 @@
 """
 deps.py — FastAPI 공통 의존성
 
-각 라우터에서 `from deps import get_api_key` 로 임포트한다.
+각 라우터에서 `from api.deps import get_api_key` 로 임포트한다.
 """
 
 import os

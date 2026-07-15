@@ -1,7 +1,7 @@
 """
 routers/penny.py — /api/penny/* 엔드포인트
 
-퀀트 스캔 내부 로직(run_quant_scan_internal)은 main.py에 정의되어 있으며
+퀀트 스캔 내부 로직(run_quant_scan_internal)은 core/quant_scanner.py에 정의되어 있으며
 이 라우터는 HTTP 엔드포인트만 담당한다. ($100 이하 일반주식 스캔)
 """
 
@@ -11,8 +11,9 @@ from typing import Optional
 from fastapi import APIRouter, Body, Security
 from pydantic import BaseModel
 
-from deps import get_api_key
+from api.deps import get_api_key
 from state import app_state
+from core.quant_scanner import run_quant_scan_internal
 
 router = APIRouter(prefix="/api/quant", tags=["quant-scan"])
 
@@ -32,8 +33,6 @@ async def quant_scan(
     _api_key: str = Security(get_api_key),
 ):
     """수동 퀀트 스캔 트리거 ($100 이하 일반주식 — 내부 로직은 run_quant_scan_internal 사용)"""
-    from main import run_quant_scan_internal
-
     return await run_quant_scan_internal(max_price=req.max_price, top_n=req.top_n)
 
 

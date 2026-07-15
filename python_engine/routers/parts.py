@@ -15,14 +15,14 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 try:
-    from scraper import SearchAggregator
+    from scripts.scraper import SearchAggregator
 except ImportError:
     SearchAggregator = None
 
-from cache_manager import get_cache_manager
-from inventory_service import inventory_service
-from nexar_client import nexar_client
-from utils import PartNormalizer
+from utils.cache_manager import get_cache_manager
+from infra.inventory_service import inventory_service
+from infra.nexar_client import nexar_client
+from utils.utils import PartNormalizer
 
 router = APIRouter(tags=["parts"])
 
@@ -415,7 +415,7 @@ async def search_parts(
 async def get_part_details(url: str = Query(...)):
     """[LAZY LOADING] Fetches extended specs from a specific product URL."""
     try:
-        from scraper import SearchAggregator
+        from scripts.scraper import SearchAggregator
 
         aggregator = SearchAggregator()
         details = await aggregator.get_part_details(url)

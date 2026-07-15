@@ -9,7 +9,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel
 
-from deps import get_api_key
+from api.deps import get_api_key
 from state import app_state
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
