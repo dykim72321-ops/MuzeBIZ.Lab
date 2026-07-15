@@ -28,7 +28,6 @@ import pytz
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-import numpy as np
 import pandas as pd
 import pandas_market_calendars as mcal
 import ta
@@ -1001,17 +1000,36 @@ def _atr14_last(df: pd.DataFrame) -> float:
 
 
 def _er14_last(df: pd.DataFrame) -> float:
-    """Kaufman's Efficiency Ratio (ER) 14주기 경량 계산"""
+    """Kaufman's Efficiency Ratio (ER) 경량 계산.
+
+    services/quant_engine.py의 calculate_advanced_signals()가 쓰는 공식
+    (lookback=10, +1e-8 epsilon, EWM span=15 스무딩)과 반드시 동일해야 한다.
+    다른 lookback/epsilon을 쓰면 횡보(sum_vol≈0)에서 분모가 0에 가까워져
+    ER이 1.0(강한 추세로 오인)으로 튀는 반면 정식 공식은 ~0.0(횡보)이 되는
+    정반대 결과가 나와, HOLD 경량 경로와 전체 DNA 경로의 트레일링 스탑
+    k_t 레짐 판단이 같은 가격 데이터에서도 서로 어긋나게 된다.
+    """
     try:
-        if len(df) < 15:
+        er_lookback = 10
+        if len(df) < er_lookback + 1:
             return 0.5
-        prices = df["Close"].iloc[-15:].values
-        net_change = abs(prices[-1] - prices[0])
-        price_diffs = np.diff(prices)
-        sum_vol = np.sum(np.abs(price_diffs))
-        return float(net_change / sum_vol) if sum_vol > 0 else 1.0
+        change = df["Close"].diff(er_lookback).abs()
+        volatility = df["Close"].diff(1).abs().rolling(window=er_lookback).sum()
+        er = change / (volatility + 1e-8)
+        smoothed_val = er.ewm(span=15, adjust=False).mean().iloc[-1]
+        return float(smoothed_val) if not pd.isna(smoothed_val) else 0.5
     except Exception:
         return 0.5
+
+
+def _rsi_atr_er_last(df: pd.DataFrame) -> tuple[float, float, float]:
+    """HOLD 경량 경로용 RSI/ATR/ER 일괄 계산.
+
+    세 지표를 별도 asyncio.to_thread 호출 3개로 나누면 매 1분봉·종목마다
+    스레드풀 왕복이 3배로 늘어난다(각 지표는 이미 빠른 numpy/ta 연산이라
+    병렬화 이득이 없음). 하나의 스레드 호출로 묶어 왕복을 1회로 줄인다.
+    """
+    return _rsi14_last(df), _atr14_last(df), _er14_last(df)
 
 
 # ── 1분봉 콜백 ──────────────────────────────────────────────────────────────
@@ -1156,10 +1174,8 @@ async def on_minute_bar_closed(bar):
 
         # ── 경량 모니터 경로 (HOLD 포지션 전용) ────────────────────────────
         if ticker_symbol in app_state._held_tickers and app_state.paper_engine:
-            rsi_val, atr_val, er_val = await asyncio.gather(
-                asyncio.to_thread(_rsi14_last, df_hist),
-                asyncio.to_thread(_atr14_last, df_hist),
-                asyncio.to_thread(_er14_last, df_hist),
+            rsi_val, atr_val, er_val = await asyncio.to_thread(
+                _rsi_atr_er_last, df_hist
             )
 
             now_et = datetime.now(ZoneInfo("America/New_York"))

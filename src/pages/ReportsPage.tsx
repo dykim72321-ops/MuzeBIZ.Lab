@@ -56,7 +56,7 @@ export default function ReportsPage() {
   }, [timeRange]);
 
   // Aggregate Data for Chart
-  const chartData = reportData
+  let chartData = reportData
     ? [...reportData]
         .sort((a, b) => a.period_label.localeCompare(b.period_label))
         .map(item => ({
@@ -65,6 +65,14 @@ export default function ReportsPage() {
           tradeCount: item.total_trades,
         }))
     : [];
+
+  // Recharts AreaChart는 데이터가 1개일 때 선을 그리지 못하므로, 시각적 인지를 위해 점을 하나 더 찍어줍니다.
+  if (chartData.length === 1) {
+    chartData = [
+      { ...chartData[0], period: `${chartData[0].period} (Start)` },
+      chartData[0],
+    ];
+  }
 
   return (
     <div className="space-y-6 bg-slate-50 p-4 md:p-8 lg:p-10 min-h-screen text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900">
@@ -194,7 +202,8 @@ export default function ReportsPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {reportData.map((row, idx) => {
-                        const netProfit = row.gross_profit - row.gross_loss;
+                        // 자바스크립트 부동소수점 오류 방지 (예: -0.00 표시 방지)
+                        const netProfit = Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
                         return (
                           <tr key={idx} className="group hover:bg-slate-50/50 transition-all duration-300 whitespace-nowrap">
                             <td className="py-3 px-2 lg:px-3">

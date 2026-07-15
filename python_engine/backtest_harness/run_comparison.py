@@ -184,8 +184,25 @@ class Portfolio:
         else:
             safe_atr = atr if atr > 0 else price * 0.02
             sizer = KellySizer()
+            # self.closed_trades는 {"pnl_pct": <fraction>} 형태(compute_metrics가
+            # 소수 비율로 소비)만 담고 있어 KellySizer가 기대하는
+            # ticker/entry_price/profit_amt 및 퍼센트 스케일 pnl_pct와 형식이 다르다.
+            # 그대로 넘기면 profit_amt가 항상 0으로 채워져 entry_val=0 → 모든 표본이
+            # 걸러져 compute()가 늘 None을 반환하고 NEW 사이징이 실질적으로 한 번도
+            # 켈리 공식을 타지 않은 채 항상 0.05 폴백만 쓰던 문제가 있었다.
+            # entry_price는 그룹핑 키로만 쓰이므로 인덱스로 대체해 서로 다른 청산
+            # 건이 같은 진입가에서 잘못 병합되지 않도록 한다.
+            formatted_trades = [
+                {
+                    "ticker": "X",
+                    "entry_price": idx,
+                    "profit_amt": t["pnl_pct"] * 100,
+                    "pnl_pct": t["pnl_pct"] * 100,
+                }
+                for idx, t in enumerate(self.closed_trades)
+            ]
             frac, _, _ = sizer.compute(
-                self.closed_trades, current_atr=safe_atr, current_price=price
+                formatted_trades, current_atr=safe_atr, current_price=price
             )
             if frac is None:
                 frac = 0.05

@@ -268,14 +268,24 @@ class DNAValidator:
 
                 _sizer = KellySizer()
 
+                # entry_price는 KellySizer._group_trades()의 그룹핑 키(ticker+entry_price)로만
+                # 쓰인다. 라이브의 paper_history는 Scale-Out으로 한 포지션이 여러 행으로
+                # 쪼개지므로 entry_price로 재그룹핑해야 하지만, 백테스터의 trades는 이미
+                # 한 행 = 독립된 라운드트립 청산 1건이다. 실제 entry_price를 그대로 넘기면
+                # 서로 다른 날짜의 무관한 거래가 우연히 같은 진입가를 가질 때 하나의
+                # 그룹으로 잘못 합산돼 표본 수·승률이 축소/왜곡된다. 인덱스를 키로 써서
+                # 매 거래를 독립 표본으로 취급한다. (profit_amt==pnl_pct이므로
+                # entry_val=profit_amt/(pnl_pct/100)은 항상 100으로 상쇄되어 원래의
+                # pct 수익률만 그대로 복원된다 — 백테스터는 실제 투입 금액을 추적하지
+                # 않으므로 이 이상 가중치를 반영할 정보 자체가 없다.)
                 formatted_trades = [
                     {
                         "ticker": t["ticker"],
-                        "entry_price": t["entry_price"],
+                        "entry_price": idx,
                         "profit_amt": t["pnl"] * 100,
                         "pnl_pct": t["pnl"] * 100,
                     }
-                    for t in trades
+                    for idx, t in enumerate(trades)
                 ]
                 k_frac, _, _ = _sizer.compute(
                     formatted_trades,

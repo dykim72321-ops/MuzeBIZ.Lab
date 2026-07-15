@@ -600,9 +600,14 @@ class PaperTradingManager:
                 # paper_history 실제 컬럼: ticker/entry_price/pnl_pct/profit_amt
                 # (buy_price/qty/pnl/entry_value 컬럼은 존재하지 않음 — 존재하지 않는
                 # 컬럼을 select하면 42703 에러로 매 폴백마다 크래시했던 이력이 있음).
+                # ticker 필터 필수: 필터 없이 조회하면 계좌 전체 최근 거래(다른 종목 포함)의
+                # EV가 0 이하로 나오는 순간 이 종목과 무관하게 모든 신규 매수가 함께
+                # 차단되는 계좌 전체 락아웃이 발생한다. 이 종목 자체의 이력만으로
+                # 회로차단기를 적용해야 다른 종목의 손실이 전이되지 않는다.
                 res = await asyncio.to_thread(
                     self.supabase.table("paper_history")
                     .select("ticker,entry_price,pnl_pct,profit_amt")
+                    .eq("ticker", ticker)
                     .order("closed_at", desc=True)
                     .limit(50)
                     .execute
