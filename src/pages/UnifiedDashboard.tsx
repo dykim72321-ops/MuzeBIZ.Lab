@@ -33,7 +33,7 @@ const PENNY_ENGINE_THRESHOLD = 1.0;
 export default function UnifiedDashboard() {
   const {
     loading, connectionError, isArmed, isSettingsOpen, lastFetchedTime, discoveryStocks,
-    livePositions, liveHistory, portfolioHistory, slicedHistory, slicedPortfolioHistory, pennyScanStatus, edgeAlert, terminalData, chartRange,
+    livePositions, liveHistory, slicedHistory, slicedPortfolioHistory, pennyScanStatus, edgeAlert, terminalData, chartRange,
     displayedAccount, displayedWinRate, displayedTotalTrades, totalPnl, investedCapital,
     concentrationPct, chartData, setIsSettingsOpen, setChartRange, setTerminalData,
     setEdgeAlert, handleDeepDive, handleLiveHuntingTrigger, handleToggleArm, handleClosePosition,
