@@ -20,6 +20,117 @@ from utils.utils import is_market_hours
 # 세션 내 데이터 없음(상장폐지/OTC) 종목 캐시(app_state.yf_no_data_cache) —
 # core/quant_scanner.py와 공유해 매 스트림 콜백마다 재조회하지 않는다.
 
+# fire-and-forget로 던진 백그라운드 태스크(broadcast/DB 기록/Discord 알림)의
+# 강한 참조를 들고 있기 위한 집합. asyncio.create_task()가 반환한 Task는 어딘가
+# 참조가 남아있지 않으면 완료 전에 GC될 수 있으므로, 완료 시 discard되는 콜백과
+# 함께 여기 보관한다.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _emit_signal_side_effects(
+    ticker_symbol: str, payload: dict, df_hist, dna_val: float
+) -> None:
+    """WebSocket 브로드캐스트·realtime_signals 기록·Discord 알림·daily_discovery
+    갱신 — 매매 판단(process_signal)과 무관한 알림/기록용 부가 작업이므로
+    on_minute_bar_closed()의 매매 핫패스를 지연시키지 않도록 백그라운드로 분리됐다."""
+    try:
+        await app_state.manager.broadcast(payload)
+
+        if not app_state.supabase:
+            return
+
+        try:
+            allowed_keys = {
+                "ticker",
+                "indicator",
+                "value",
+                "rsi",
+                "macd_line",
+                "macd_signal",
+                "macd_diff",
+                "adx",
+                "rvol",
+                "volatility_ann",
+                "vol_weight",
+                "kelly_f",
+                "recommended_weight",
+                "price",
+                "signal",
+                "strength",
+                "ai_report",
+                "timestamp",
+                "dna_score",
+                "smoothed_er",
+            }
+            db_payload = {k: v for k, v in payload.items() if k in allowed_keys}
+            await asyncio.to_thread(
+                app_state.supabase.table("realtime_signals").insert(db_payload).execute
+            )
+        except Exception as db_err:
+            print(f"❌ [realtime_signals] insert failed: {db_err}")
+
+        if payload.get("strength") == "STRONG":
+            color = 0x2ECC71 if payload.get("signal") == "BUY" else 0xE74C3C
+            action = (
+                "🟢 STRONG BUY"
+                if payload.get("signal") == "BUY"
+                else "🔴 STRONG SELL / SCALE_OUT"
+            )
+            title = f"[MuzeBIZ Pulse] {ticker_symbol} {action}"
+            desc = (
+                f"현재가: ${payload.get('price'):.2f} | RSI: {payload.get('rsi')}\n\n"
+                f"💡 {payload.get('ai_report', '')}"
+            )
+            await app_state.webhook.send_alert(
+                use_dev=True, title=title, description=desc, color=color
+            )
+
+        price_val = float(payload.get("price", 0.0))
+        prev_price = df_hist["Close"].iloc[-2] if len(df_hist) >= 2 else price_val
+        change_pct = ((price_val / prev_price - 1) * 100) if prev_price > 0 else 0.0
+        volume_val = int(df_hist["Volume"].iloc[-1]) if len(df_hist) >= 1 else 0
+        try:
+            import math as _math
+
+            _vol_ann = float(payload.get("volatility_ann") or 0.0)
+            _atr_pct = (
+                round(_vol_ann / _math.sqrt(252 * 390), 4) if _vol_ann > 0 else 0.0
+            )
+            await asyncio.to_thread(
+                app_state.supabase.table("daily_discovery")
+                .upsert(
+                    {
+                        "ticker": ticker_symbol,
+                        "dna_score": int(round(dna_val)),
+                        "price": price_val,
+                        "change": str(round(change_pct, 2)),
+                        "change_percent": round(change_pct, 2),
+                        "volume": str(volume_val),
+                        "updated_at": datetime.now().isoformat(),
+                        "rsi": payload.get("rsi"),
+                        "rvol": payload.get("rvol"),
+                        "adx": payload.get("adx"),
+                        "macd_diff": payload.get("macd_diff"),
+                        "macd_diff_prev": payload.get("macd_diff_prev"),
+                        "di_positive": payload.get("di_positive"),
+                        "is_extended": payload.get("is_extended"),
+                        "atr_pct": _atr_pct,
+                    },
+                    on_conflict="ticker",
+                )
+                .execute
+            )
+        except Exception as dd_err:
+            print(f"⚠️ [daily_discovery] upsert skipped for {ticker_symbol}: {dd_err}")
+    except Exception as service_err:
+        print(f"⚠️ Service Integration Error for {ticker_symbol}: {service_err}")
+
 
 async def on_minute_bar_closed(bar):
     """
@@ -317,130 +428,39 @@ async def on_minute_bar_closed(bar):
                 )
         # ─────────────────────────────────────────────────────────────────
 
-        await app_state.manager.broadcast(payload)
+        # 실제 매매 판단(process_signal)을 최우선으로 실행한다. broadcast·
+        # realtime_signals 기록·Discord 알림·daily_discovery 갱신은 전부 매매
+        # 결정과 무관한 부가 작업이므로 백그라운드로 분리한다 — 이전에는 이
+        # 부가 작업들을 전부 await한 뒤에야 process_signal을 호출해, 느린
+        # Discord/Supabase 왕복(수백 ms~수 초)이 그대로 매수/매도 지연으로
+        # 이어졌다 (원본 신호가는 이 부가 작업들이 시작되기 전에 이미 캡처된
+        # bar-close 값이었음에도 실제 체결은 그 이후에야 일어났다).
+        dna_val = float(payload.get("dna_score", 0.0))
 
-        if app_state.supabase:
-            try:
-                try:
-                    allowed_keys = {
-                        "ticker",
-                        "indicator",
-                        "value",
-                        "rsi",
-                        "macd_line",
-                        "macd_signal",
-                        "macd_diff",
-                        "adx",
-                        "rvol",
-                        "volatility_ann",
-                        "vol_weight",
-                        "kelly_f",
-                        "recommended_weight",
-                        "price",
-                        "signal",
-                        "strength",
-                        "ai_report",
-                        "timestamp",
-                        "dna_score",
-                        "smoothed_er",
-                    }
-                    db_payload = {k: v for k, v in payload.items() if k in allowed_keys}
-                    await asyncio.to_thread(
-                        app_state.supabase.table("realtime_signals")
-                        .insert(db_payload)
-                        .execute
-                    )
-                except Exception as db_err:
-                    print(f"❌ [realtime_signals] insert failed: {db_err}")
+        if app_state.supabase and app_state.active_engine:
+            buy_executed = await app_state.active_engine.process_signal(
+                ticker=ticker_symbol,
+                price=payload.get("price"),
+                signal_type=payload.get("signal"),
+                strength=payload.get("strength"),
+                rsi=payload.get("rsi"),
+                ai_report=payload.get("ai_report", ""),
+                is_armed=app_state.SYSTEM_ARMED,
+                dna_score=dna_val,
+                recommended_weight=float(payload.get("recommended_weight", 0.0)),
+                atr=float(payload.get("atr", 0.0)),
+                smoothed_er=float(payload.get("smoothed_er", 0.5)),
+            )
+            if buy_executed:
+                app_state._held_tickers.add(ticker_symbol)
 
-                if payload.get("strength") == "STRONG":
-                    color = 0x2ECC71 if payload.get("signal") == "BUY" else 0xE74C3C
-                    action = (
-                        "🟢 STRONG BUY"
-                        if payload.get("signal") == "BUY"
-                        else "🔴 STRONG SELL / SCALE_OUT"
-                    )
-                    title = f"[MuzeBIZ Pulse] {ticker_symbol} {action}"
-                    desc = (
-                        f"현재가: ${payload.get('price'):.2f} | RSI: {payload.get('rsi')}\n\n"
-                        f"💡 {payload.get('ai_report', '')}"
-                    )
-                    await app_state.webhook.send_alert(
-                        use_dev=True, title=title, description=desc, color=color
-                    )
+        _spawn_background(
+            _emit_signal_side_effects(ticker_symbol, payload, df_hist, dna_val)
+        )
 
-                dna_val = float(payload.get("dna_score", 0.0))
-                price_val = float(payload.get("price", 0.0))
-                prev_price = (
-                    df_hist["Close"].iloc[-2] if len(df_hist) >= 2 else price_val
-                )
-                change_pct = (
-                    ((price_val / prev_price - 1) * 100) if prev_price > 0 else 0.0
-                )
-                volume_val = int(df_hist["Volume"].iloc[-1]) if len(df_hist) >= 1 else 0
-                try:
-                    import math as _math
-
-                    _vol_ann = float(payload.get("volatility_ann") or 0.0)
-                    _atr_pct = (
-                        round(_vol_ann / _math.sqrt(252 * 390), 4)
-                        if _vol_ann > 0
-                        else 0.0
-                    )
-                    await asyncio.to_thread(
-                        app_state.supabase.table("daily_discovery")
-                        .upsert(
-                            {
-                                "ticker": ticker_symbol,
-                                "dna_score": int(round(dna_val)),
-                                "price": price_val,
-                                "change": str(round(change_pct, 2)),
-                                "change_percent": round(change_pct, 2),
-                                "volume": str(volume_val),
-                                "updated_at": datetime.now().isoformat(),
-                                "rsi": payload.get("rsi"),
-                                "rvol": payload.get("rvol"),
-                                "adx": payload.get("adx"),
-                                "macd_diff": payload.get("macd_diff"),
-                                "macd_diff_prev": payload.get("macd_diff_prev"),
-                                "di_positive": payload.get("di_positive"),
-                                "is_extended": payload.get("is_extended"),
-                                "atr_pct": _atr_pct,
-                            },
-                            on_conflict="ticker",
-                        )
-                        .execute
-                    )
-                except Exception as dd_err:
-                    print(
-                        f"⚠️ [daily_discovery] upsert skipped for {ticker_symbol}: {dd_err}"
-                    )
-
-                if app_state.active_engine:
-                    buy_executed = await app_state.active_engine.process_signal(
-                        ticker=ticker_symbol,
-                        price=payload.get("price"),
-                        signal_type=payload.get("signal"),
-                        strength=payload.get("strength"),
-                        rsi=payload.get("rsi"),
-                        ai_report=payload.get("ai_report", ""),
-                        is_armed=app_state.SYSTEM_ARMED,
-                        dna_score=dna_val,
-                        recommended_weight=float(
-                            payload.get("recommended_weight", 0.0)
-                        ),
-                        atr=float(payload.get("atr", 0.0)),
-                        smoothed_er=float(payload.get("smoothed_er", 0.5)),
-                    )
-                    if buy_executed:
-                        app_state._held_tickers.add(ticker_symbol)
-
-                print(
-                    f"⚡ [Alpaca Stream] {ticker_symbol} processed: {payload.get('signal')} ({payload.get('strength')}) | vol_mul={payload.get('volume_multiplier', 1.0):.1f}x"
-                )
-
-            except Exception as service_err:
-                print(f"⚠️ Service Integration Error for {ticker_symbol}: {service_err}")
+        print(
+            f"⚡ [Alpaca Stream] {ticker_symbol} processed: {payload.get('signal')} ({payload.get('strength')}) | vol_mul={payload.get('volume_multiplier', 1.0):.1f}x"
+        )
 
     except Exception as e:
         print(f"❌ Pulse Stream Error for {ticker_symbol}: {e}")

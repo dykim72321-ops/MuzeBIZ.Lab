@@ -722,7 +722,7 @@ async def manual_paper_sell(
 
     ticker = req.ticker.upper()
 
-    async with engine._get_lock(ticker):
+    async with engine._get_exit_lock(ticker):
         pos = await engine.get_position(ticker)
         if not pos:
             raise HTTPException(
@@ -739,13 +739,10 @@ async def manual_paper_sell(
         except Exception:
             pass
 
-        acc = await engine.get_account()
-        if not acc:
-            raise HTTPException(status_code=503, detail="Paper account not initialized")
-
         # paper_engine.py의 공통 청산 경로 재사용: 슬리피지 적용 → 실주문 제출/체결 확인 →
-        # 현금 갱신 → paper_history 기록 → paper_positions 삭제 → watchlist EXITED 동기화.
-        result = await engine._close_position(pos, acc, signal_price, "Manual Sell")
+        # 현금 갱신(원자적 _apply_cash_delta) → paper_history 기록 → paper_positions 삭제 →
+        # watchlist EXITED 동기화.
+        result = await engine._close_position(pos, signal_price, "Manual Sell")
         if result is None:
             raise HTTPException(
                 status_code=502,
@@ -800,7 +797,6 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
     if not positions:
         return {"status": "success", "closed": 0, "message": "포지션 없음"}
 
-    acc = await engine.get_account()
     closed_tickers = []
     failed_tickers = []
 
@@ -808,14 +804,15 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
         ticker = pos["ticker"]
         exit_price = float(pos.get("current_price") or pos["entry_price"])
 
-        async with engine._get_lock(ticker):
+        async with engine._get_exit_lock(ticker):
             try:
                 # paper_engine.py의 공통 청산 경로 재사용 — 실주문 제출/체결 확인은
                 # _close_position 내부에서 처리하며, 실패 시 None을 반환해 포지션을 유지한다.
-                # _close_position이 acc["cash_available"]를 매 종목마다 갱신하므로
-                # 다음 반복에서 최신 잔고를 쓰도록 acc를 다시 조회한다.
+                # 현금 갱신은 _close_position → _apply_cash_delta가 매 호출마다 최신
+                # 잔고를 다시 조회해 원자적으로 반영하므로, 여기서 acc를 들고 있다가
+                # 반복마다 재조회할 필요가 없다.
                 result = await engine._close_position(
-                    pos, acc, exit_price, "Watchdog Emergency Liquidation"
+                    pos, exit_price, "Watchdog Emergency Liquidation"
                 )
                 if result is None:
                     failed_tickers.append(ticker)
@@ -826,7 +823,6 @@ async def emergency_liquidate(api_key: str = Security(get_api_key)):
                             color=0xFF0000,
                         )
                     continue
-                acc = await engine.get_account()
                 closed_tickers.append(ticker)
             except Exception as e:
                 print(f"⚠️ [Emergency] Failed to close {ticker}: {e}")

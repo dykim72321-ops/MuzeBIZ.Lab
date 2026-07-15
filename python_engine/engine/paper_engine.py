@@ -150,7 +150,20 @@ class PaperTradingManager:
         self.supabase = supabase_client
         self.webhook = WebhookManager()
         self.webhook.set_supabase_client(supabase_client)
-        self._ticker_locks: dict[str, asyncio.Lock] = {}
+        # 매수/청산을 별도 락으로 분리한다. LIVE 모드에서는 실주문 체결 확인을
+        # 최대 FILL_POLL_TIMEOUT_SEC(5초)까지 폴링하는데(live_engine.py), 이 대기를
+        # 매수·청산이 같은 락을 공유한 채로 하면 "매수 체결 확인 중"이라는 이유만으로
+        # 같은 티커의 트레일링 스탑/수동매도가 최대 5초까지 지연될 수 있었다(과거 버그).
+        # 매수 완료 여부와 무관하게 하락 시 즉시 청산이 가능해야 하므로 완전히 분리한다.
+        self._buy_locks: dict[str, asyncio.Lock] = {}
+        self._exit_locks: dict[str, asyncio.Lock] = {}
+        # 신규 진입 개수(20개 상한)와 계좌 현금(cash_available)은 모든 티커가 공유하는
+        # 전역 자원이므로, 서로 다른 티커의 매수 신호가 동시에 들어오면 티커별 락만으로는
+        # 보호되지 않는다 — 두 전역 락으로 이 경합을 막는다.
+        self._entry_lock = (
+            asyncio.Lock()
+        )  # 신규 진입 admission control(포지션 수·집중도·예산) 직렬화
+        self._cash_lock = asyncio.Lock()  # cash_available 읽기-수정-쓰기(RMW) 직렬화
         # Kelly Sizer 1시간 캐시 (DB I/O Latency 제거)
         # 캐시에 저장하는 것은 최종 비중이 아니라 거래 이력 기반 통계(p/b/raw_kelly)뿐이다.
         # ATR 변동성 페널티는 캐시 히트 시에도 매번 호출 시점 값으로 새로 적용해야
@@ -158,13 +171,24 @@ class PaperTradingManager:
         self._kelly_cache: dict[str, dict | None] = {}
         self._kelly_cache_updated_at: dict[str, float] = {}
 
-    def _get_lock(self, ticker: str) -> asyncio.Lock:
-        """티커별 락 — 동일 종목에 대한 청산/재진입/수동매도가 겹쳐 실행되며
-        watchlist 상태를 서로 덮어쓰는 경합을 방지한다."""
-        lock = self._ticker_locks.get(ticker)
+    def _get_buy_lock(self, ticker: str) -> asyncio.Lock:
+        """티커별 매수 락 — 동일 종목의 신규 진입 처리(실주문 제출·체결 확인 포함)가
+        겹쳐 실행되지 않도록 직렬화한다. 청산 락(_get_exit_lock)과는 분리되어 있어,
+        매수 체결 확인 대기 중에도 같은 티커의 트레일링 스탑/수동매도가 지연되지 않는다."""
+        lock = self._buy_locks.get(ticker)
         if lock is None:
             lock = asyncio.Lock()
-            self._ticker_locks[ticker] = lock
+            self._buy_locks[ticker] = lock
+        return lock
+
+    def _get_exit_lock(self, ticker: str) -> asyncio.Lock:
+        """티커별 청산 락 — 동일 종목에 대한 청산/재진입/수동매도가 겹쳐 실행되며
+        watchlist 상태를 서로 덮어쓰는 경합을 방지한다. 매수 락과 분리되어 있어
+        진행 중인 매수의 체결 확인 대기가 청산을 지연시키지 않는다."""
+        lock = self._exit_locks.get(ticker)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._exit_locks[ticker] = lock
         return lock
 
     async def _log_decision(
@@ -202,6 +226,27 @@ class PaperTradingManager:
         query = self.supabase.table("paper_account").select("*").limit(1)
         res = await asyncio.to_thread(query.execute)
         return res.data[0] if res.data else None
+
+    async def _apply_cash_delta(self, delta: float):
+        """cash_available을 원자적으로 갱신한다.
+
+        매수 체결(-)·매도/스케일아웃 체결(+) 모두 이 메서드를 거쳐야 한다.
+        _cash_lock 안에서 잔액을 다시 조회한 뒤 delta를 반영해 write하므로,
+        호출 시점에 다른 코루틴이 들고 있던 stale acc 값을 사용하는 lost update를
+        방지한다 (서로 다른 티커의 매수/매도가 같은 1분봉 사이클에 동시 발생해도 안전).
+        """
+        async with self._cash_lock:
+            fresh_acc = await self.get_account()
+            if not fresh_acc:
+                return None, 0.0
+            new_cash = float(fresh_acc["cash_available"]) + delta
+            res = await asyncio.to_thread(
+                self.supabase.table("paper_account")
+                .update({"cash_available": new_cash})
+                .eq("id", fresh_acc["id"])
+                .execute
+            )
+            return res, new_cash
 
     async def calculate_invested_capital(self, positions: list = None) -> float:
         """보유 포지션의 현재 평가액 합산 (positions 미전달 시 DB에서 조회)"""
@@ -346,7 +391,6 @@ class PaperTradingManager:
     async def _close_position(
         self,
         pos: dict,
-        acc: dict,
         signal_price: float,
         exit_reason: str,
     ) -> dict | None:
@@ -397,13 +441,7 @@ class PaperTradingManager:
         profit_amt = (fill_price - entry_price) * units
         proceeds = units * fill_price
 
-        new_cash = float(acc["cash_available"]) + proceeds
-        await asyncio.to_thread(
-            self.supabase.table("paper_account")
-            .update({"cash_available": new_cash})
-            .eq("id", acc["id"])
-            .execute
-        )
+        await self._apply_cash_delta(proceeds)
         history_data = {
             "ticker": ticker,
             "entry_price": entry_price,
@@ -476,21 +514,23 @@ class PaperTradingManager:
         atr: float = 0.0,
         smoothed_er: float = 0.5,
     ) -> bool:
-        """동일 티커에 대한 진입/청산이 겹쳐 실행되지 않도록 락으로 직렬화."""
-        async with self._get_lock(ticker):
-            return await self._process_signal_locked(
-                ticker,
-                price,
-                signal_type,
-                strength,
-                rsi,
-                ai_report=ai_report,
-                is_armed=is_armed,
-                dna_score=dna_score,
-                recommended_weight=recommended_weight,
-                atr=atr,
-                smoothed_er=smoothed_er,
-            )
+        """진입/청산 처리 — 매수는 _get_buy_lock, 청산은 _get_exit_lock으로 각각
+        직렬화한다 (_process_signal_locked 내부에서 분기별로 락을 잡는다). 두 락을
+        분리한 이유는 매수 체결 확인 대기(최대 5초, LIVE 모드)가 같은 티커의
+        트레일링 스탑/수동매도를 지연시키지 않도록 하기 위함이다."""
+        return await self._process_signal_locked(
+            ticker,
+            price,
+            signal_type,
+            strength,
+            rsi,
+            ai_report=ai_report,
+            is_armed=is_armed,
+            dna_score=dna_score,
+            recommended_weight=recommended_weight,
+            atr=atr,
+            smoothed_er=smoothed_er,
+        )
 
     async def _process_signal_locked(
         self,
@@ -508,7 +548,8 @@ class PaperTradingManager:
     ) -> bool:
         """
         v4 State Machine:
-        1. STRONG BUY (DNA≥80) → 매수 (recommended_weight 비중 or 기본 KELLY_FRACTION) + 관심종목 자동 등록 (HOLDING)
+        1. STRONG BUY (페니 DNA≥65 / 일반 DNA≥75) → 매수 (recommended_weight 비중 or 기본 KELLY_FRACTION)
+           + 관심종목 자동 등록 (HOLDING)
         2. HOLD 중 RSI > 60 → 50% 분할 익절 (SCALE_OUT) & TS 상향 + watchlist stop_loss 동기화
         3. 가격 < TS_Threshold → 전량 청산 (TRAILING_STOP) + 관심종목 EXITED
         """
@@ -523,7 +564,12 @@ class PaperTradingManager:
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
         is_penny_signal = price <= PENNY_MAX_PRICE
-        dna_gate = 55 if is_penny_signal else 70
+        # quant_engine.calculate_advanced_signals()의 tier_penny(DNA≥65)/tier2(DNA≥75) 기준과
+        # 정합. Strong_Buy는 DNA 기준(tier1/2/penny) 외에 numba_strong_buy(RSI·RVOL 백분위
+        # 랭크 기반) 경로로도 True가 될 수 있어 DNA_Score가 tier 기준 미만인 신호가 섞여
+        # 들어올 수 있으므로, 이 게이트가 tier 최저선 아래로는 항상 차단해야 한다
+        # (과거 55/70으로 완화됐던 회귀 수정 — 2026-07-15).
+        dna_gate = 65 if is_penny_signal else 75
 
         # ── Gate: signal 조건 사전 체크 (ARMED 여부 포함) ────────────────────
         if signal_type == "BUY" and strength == "STRONG" and not pos:
@@ -658,536 +704,557 @@ class PaperTradingManager:
             and is_armed
             and dna_score >= dna_gate
         ):
-            # 동시 포지션 상한 체크
-            pos_count_res = await asyncio.to_thread(
-                self.supabase.table("paper_positions")
-                .select("ticker", count="exact")
-                .execute
-            )
-            if (pos_count_res.count or 0) >= MAX_CONCURRENT_POSITIONS:
-                print(
-                    f"⛔ [{ticker}] 동시 포지션 한도 초과 ({MAX_CONCURRENT_POSITIONS}개) — 진입 차단"
-                )
-                await self._log_decision(
-                    ticker=ticker,
-                    gate="MAX_POSITIONS",
-                    outcome="BLOCKED",
-                    signal=signal_type,
-                    dna_score=dna_score,
-                    rsi=rsi,
-                    price=price,
-                    note=f"동시 포지션 {pos_count_res.count}개 ≥ 한도 {MAX_CONCURRENT_POSITIONS}개",
-                )
-                return
-            # 재진입 쿨다운 체크 (청산 후 60분 이내 재진입 차단)
-            # 별도 DB 조회 없이 위 휩쏘 방지 체크에서 이미 가져온 이력을 재사용한다.
-            if self._is_in_cooldown_from_rows(recent_history_rows):
-                print(
-                    f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
-                )
-                await self._log_decision(
-                    ticker=ticker,
-                    gate="COOLDOWN",
-                    outcome="BLOCKED",
-                    signal=signal_type,
-                    dna_score=dna_score,
-                    rsi=rsi,
-                    price=price,
-                    note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
-                )
-                return
-            # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 80% 초과 시 신규 진입 차단
-            invested = await self.calculate_invested_capital()
-            total_equity = acc["cash_available"] + invested
-            if total_equity > 0 and (invested / total_equity) >= MAX_CONCENTRATION_PCT:
-                conc_pct = invested / total_equity * 100
-                print(
-                    f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
-                )
-                await self._log_decision(
-                    ticker=ticker,
-                    gate="CONCENTRATION",
-                    outcome="BLOCKED",
-                    signal=signal_type,
-                    dna_score=dna_score,
-                    rsi=rsi,
-                    price=price,
-                    note=f"투입 비중 {conc_pct:.1f}% ≥ 한도 {MAX_CONCENTRATION_PCT*100:.0f}%",
-                )
-                return
-            # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
-            # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
-            if recommended_weight <= 0:
-                current_time = time.time()
-                last_updated = self._kelly_cache_updated_at.get(ticker, 0.0)
-
-                # 1시간(3600초) 이내의 캐시가 있으면 DB 조회(latency)만 생략한다.
-                # 캐시된 것은 거래 이력 기반 통계(p/b/raw_kelly)뿐이므로, ATR 변동성
-                # 페널티는 캐시 히트/미스와 무관하게 항상 현재 atr/price로 새로 적용된다.
-                if (
-                    ticker in self._kelly_cache
-                    and (current_time - last_updated) < KELLY_CACHE_TTL_SEC
-                ):
-                    stats = self._kelly_cache[ticker]
-                else:
-                    res = await asyncio.to_thread(
-                        self.supabase.table("paper_history")
-                        .select("ticker,entry_price,pnl_pct,profit_amt")
-                        .eq("ticker", ticker)
-                        .order("closed_at", desc=True)
-                        .limit(50)
+            # 매수 락: 이 티커의 신규 진입(admission control ~ 실주문 제출·체결
+            # 확인)을 직렬화한다. 청산 락(_get_exit_lock)과 분리되어 있으므로,
+            # 아래 실주문 체결 확인 대기(_on_order_buy, LIVE 모드는 최대 5초 폴링)
+            # 중에도 같은 티커의 트레일링 스탑/수동매도(exit 락)는 지연되지 않는다.
+            async with self._get_buy_lock(ticker):
+                # 전역 admission control 락: 포지션 수 상한·재진입 쿨다운·집중도·예산
+                # 산정과 진입 클레임 INSERT까지를 직렬화한다. 서로 다른 티커의 매수
+                # 신호가 동시에 들어와도 이 구간만큼은 한 번에 하나씩 처리되므로,
+                # MAX_CONCURRENT_POSITIONS·MAX_CONCENTRATION_PCT 상한을 여러 코루틴이
+                # 동시에 통과해 초과 진입하는 경합을 막는다. 실주문 제출(_on_order_buy,
+                # 네트워크 I/O)은 락 해제 후 실행해 서로 다른 티커 간 병렬성을 유지한다.
+                async with self._entry_lock:
+                    # 동시 포지션 상한 체크
+                    pos_count_res = await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .select("ticker", count="exact")
                         .execute
                     )
-                    paper_history_records = res.data or []
-                    stats = _kelly_sizer.compute_stats(paper_history_records)
-                    self._kelly_cache[ticker] = stats
-                    self._kelly_cache_updated_at[ticker] = current_time
+                    if (pos_count_res.count or 0) >= MAX_CONCURRENT_POSITIONS:
+                        print(
+                            f"⛔ [{ticker}] 동시 포지션 한도 초과 ({MAX_CONCURRENT_POSITIONS}개) — 진입 차단"
+                        )
+                        await self._log_decision(
+                            ticker=ticker,
+                            gate="MAX_POSITIONS",
+                            outcome="BLOCKED",
+                            signal=signal_type,
+                            dna_score=dna_score,
+                            rsi=rsi,
+                            price=price,
+                            note=f"동시 포지션 {pos_count_res.count}개 ≥ 한도 {MAX_CONCURRENT_POSITIONS}개",
+                        )
+                        return
+                    # 재진입 쿨다운 체크 (청산 후 60분 이내 재진입 차단)
+                    # 별도 DB 조회 없이 위 휩쏘 방지 체크에서 이미 가져온 이력을 재사용한다.
+                    if self._is_in_cooldown_from_rows(recent_history_rows):
+                        print(
+                            f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
+                        )
+                        await self._log_decision(
+                            ticker=ticker,
+                            gate="COOLDOWN",
+                            outcome="BLOCKED",
+                            signal=signal_type,
+                            dna_score=dna_score,
+                            rsi=rsi,
+                            price=price,
+                            note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
+                        )
+                        return
+                    # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 80% 초과 시 신규 진입 차단
+                    invested = await self.calculate_invested_capital()
+                    total_equity = acc["cash_available"] + invested
+                    if (
+                        total_equity > 0
+                        and (invested / total_equity) >= MAX_CONCENTRATION_PCT
+                    ):
+                        conc_pct = invested / total_equity * 100
+                        print(
+                            f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
+                        )
+                        await self._log_decision(
+                            ticker=ticker,
+                            gate="CONCENTRATION",
+                            outcome="BLOCKED",
+                            signal=signal_type,
+                            dna_score=dna_score,
+                            rsi=rsi,
+                            price=price,
+                            note=f"투입 비중 {conc_pct:.1f}% ≥ 한도 {MAX_CONCENTRATION_PCT*100:.0f}%",
+                        )
+                        return
+                    # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
+                    # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
+                    if recommended_weight <= 0:
+                        current_time = time.time()
+                        last_updated = self._kelly_cache_updated_at.get(ticker, 0.0)
 
-                safe_atr = atr if atr > 0 else (price * 0.02)
-                weight, _, _ = _kelly_sizer.apply_volatility_penalty(
-                    stats, current_atr=safe_atr, current_price=price
-                )
+                        # 1시간(3600초) 이내의 캐시가 있으면 DB 조회(latency)만 생략한다.
+                        # 캐시된 것은 거래 이력 기반 통계(p/b/raw_kelly)뿐이므로, ATR 변동성
+                        # 페널티는 캐시 히트/미스와 무관하게 항상 현재 atr/price로 새로 적용된다.
+                        if (
+                            ticker in self._kelly_cache
+                            and (current_time - last_updated) < KELLY_CACHE_TTL_SEC
+                        ):
+                            stats = self._kelly_cache[ticker]
+                        else:
+                            res = await asyncio.to_thread(
+                                self.supabase.table("paper_history")
+                                .select("ticker,entry_price,pnl_pct,profit_amt")
+                                .eq("ticker", ticker)
+                                .order("closed_at", desc=True)
+                                .limit(50)
+                                .execute
+                            )
+                            paper_history_records = res.data or []
+                            stats = _kelly_sizer.compute_stats(paper_history_records)
+                            self._kelly_cache[ticker] = stats
+                            self._kelly_cache_updated_at[ticker] = current_time
 
-                effective_fraction = weight if weight is not None else 0.05
-                print(
-                    f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
-                )
-            else:
-                effective_fraction = min(recommended_weight / 100.0, 0.25)
-            buy_budget = min(
-                acc["cash_available"] * effective_fraction,
-                MAX_BUY_BUDGET,
-            )
-            if buy_budget < MIN_BUY_BUDGET:
-                await self._log_decision(
-                    ticker=ticker,
-                    gate="MIN_BUDGET",
-                    outcome="BLOCKED",
-                    signal=signal_type,
-                    dna_score=dna_score,
-                    rsi=rsi,
-                    price=price,
-                    note=f"매수 예산 ${buy_budget:.2f} < 최소 ${MIN_BUY_BUDGET}",
-                )
-                return
+                        safe_atr = atr if atr > 0 else (price * 0.02)
+                        weight, _, _ = _kelly_sizer.apply_volatility_penalty(
+                            stats, current_atr=safe_atr, current_price=price
+                        )
 
-            # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결 (실주문 전 추정치)
-            est_fill_price = _apply_slippage(
-                price, is_buy=True, is_penny=is_penny_signal
-            )
-            est_units = buy_budget / est_fill_price
-            ts_init = PENNY_TS_INIT_PCT if is_penny_signal else TS_INIT_PCT
-
-            # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문
-            # 제출 전에 추정치로 먼저 INSERT해 unique violation으로 동시 프로세스의
-            # 중복 매수(예: 배포 중 신·구 컨테이너 오버랩)를 DB 레벨에서 차단한다.
-            # asyncio.Lock은 단일 프로세스만 보호하므로 이 클레임이 실질적 방어선이다.
-            claim_pos = {
-                "ticker": ticker.upper(),
-                "status": "ENTERING",
-                "weight": round(effective_fraction, 4),
-                "entry_price": est_fill_price,
-                "signal_price": price,
-                "entry_slippage": (est_fill_price / price - 1) * 100,
-                "current_price": est_fill_price,
-                "highest_price": est_fill_price,
-                "ts_threshold": est_fill_price * ts_init,
-                "units": est_units,
-                "is_scaled_out": False,
-                "scale_out_bar_count": 0,
-            }
-            try:
-                claim_res = await asyncio.to_thread(
-                    self.supabase.table("paper_positions").insert(claim_pos).execute
-                )
-            except Exception as e:
-                if "duplicate key" in str(e).lower() or "23505" in str(e):
-                    print(
-                        f"⏳ [{ticker}] 동시 진입 감지 — 다른 프로세스가 이미 클레임함, 스킵"
+                        effective_fraction = weight if weight is not None else 0.05
+                        print(
+                            f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
+                        )
+                    else:
+                        effective_fraction = min(recommended_weight / 100.0, 0.25)
+                    buy_budget = min(
+                        acc["cash_available"] * effective_fraction,
+                        MAX_BUY_BUDGET,
                     )
-                    return
-                raise
-            if not claim_res.data:
-                print(f"⚠️ [{ticker}] 진입 클레임 INSERT가 빈 결과 반환 — 스킵")
-                return
+                    if buy_budget < MIN_BUY_BUDGET:
+                        await self._log_decision(
+                            ticker=ticker,
+                            gate="MIN_BUDGET",
+                            outcome="BLOCKED",
+                            signal=signal_type,
+                            dna_score=dna_score,
+                            rsi=rsi,
+                            price=price,
+                            note=f"매수 예산 ${buy_budget:.2f} < 최소 ${MIN_BUY_BUDGET}",
+                        )
+                        return
 
-            # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 (체결 수량, 체결 단가) 반환.
-            # 실패 시 클레임 롤백 + DB 기록 차단.
-            executed = await self._on_order_buy(ticker, est_units, est_fill_price)
-            if executed is None:
-                print(f"⚠️ [{ticker}] Live buy order rejected — 클레임 롤백")
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .delete()
-                    .eq("ticker", ticker)
-                    .execute
-                )
-                return
-            units, fill_price = executed
-            ts_threshold = fill_price * ts_init
-
-            try:
-                # 클레임 행을 실체결 결과로 확정 (실거래 체결가·체결 수량 반영)
-                pos_res = await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .update(
-                        {
-                            "status": "HOLD",
-                            "entry_price": fill_price,
-                            "entry_slippage": (fill_price / price - 1) * 100,
-                            "current_price": fill_price,
-                            "highest_price": fill_price,
-                            "ts_threshold": ts_threshold,
-                            "units": units,
-                        }
+                    # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결 (실주문 전 추정치)
+                    est_fill_price = _apply_slippage(
+                        price, is_buy=True, is_penny=is_penny_signal
                     )
-                    .eq("ticker", ticker)
-                    .execute
-                )
-                if not pos_res.data:
-                    raise RuntimeError(
-                        f"Position 확정 UPDATE returned no data for {ticker}"
-                    )
+                    est_units = buy_budget / est_fill_price
+                    ts_init = PENNY_TS_INIT_PCT if is_penny_signal else TS_INIT_PCT
 
-                # 확정 성공 후에만 현금 차감 (원자성 보장)
-                # 실거래 체결 수량·체결가 기준으로 차감 — LIVE 모드는 정수 주 체결이며
-                # 실체결가가 추정 슬리피지가와 다를 수 있음 (버그 수정: 이전엔 추정 예산
-                # 전액을 차감해 장부 현금이 실체결액과 어긋났음)
-                executed_cost = units * fill_price
-                new_cash = acc["cash_available"] - executed_cost
-                cash_res = await asyncio.to_thread(
-                    self.supabase.table("paper_account")
-                    .update({"cash_available": new_cash})
-                    .eq("id", acc["id"])
-                    .execute
-                )
-                if not cash_res.data:
-                    # 현금 차감 실패 시 방금 확정한 포지션을 롤백
+                    # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문
+                    # 제출 전에 추정치로 먼저 INSERT해 unique violation으로 동시 프로세스의
+                    # 중복 매수(예: 배포 중 신·구 컨테이너 오버랩)를 DB 레벨에서 차단한다.
+                    # asyncio.Lock은 단일 프로세스만 보호하므로 이 클레임이 실질적 방어선이다.
+                    claim_pos = {
+                        "ticker": ticker.upper(),
+                        "status": "ENTERING",
+                        "weight": round(effective_fraction, 4),
+                        "entry_price": est_fill_price,
+                        "signal_price": price,
+                        "entry_slippage": (est_fill_price / price - 1) * 100,
+                        "current_price": est_fill_price,
+                        "highest_price": est_fill_price,
+                        "ts_threshold": est_fill_price * ts_init,
+                        "units": est_units,
+                        "is_scaled_out": False,
+                        "scale_out_bar_count": 0,
+                    }
+                    try:
+                        claim_res = await asyncio.to_thread(
+                            self.supabase.table("paper_positions")
+                            .insert(claim_pos)
+                            .execute
+                        )
+                    except Exception as e:
+                        if "duplicate key" in str(e).lower() or "23505" in str(e):
+                            print(
+                                f"⏳ [{ticker}] 동시 진입 감지 — 다른 프로세스가 이미 클레임함, 스킵"
+                            )
+                            return
+                        raise
+                    if not claim_res.data:
+                        print(f"⚠️ [{ticker}] 진입 클레임 INSERT가 빈 결과 반환 — 스킵")
+                        return
+
+                # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 (체결 수량, 체결 단가) 반환.
+                # 실패 시 클레임 롤백 + DB 기록 차단.
+                executed = await self._on_order_buy(ticker, est_units, est_fill_price)
+                if executed is None:
+                    print(f"⚠️ [{ticker}] Live buy order rejected — 클레임 롤백")
                     await asyncio.to_thread(
                         self.supabase.table("paper_positions")
                         .delete()
                         .eq("ticker", ticker)
                         .execute
                     )
-                    raise RuntimeError(
-                        f"Cash UPDATE failed for {ticker}, position rolled back"
-                    )
+                    return
+                units, fill_price = executed
+                ts_threshold = fill_price * ts_init
 
-                slip_pct = (fill_price / price - 1) * 100
-                report_line = f"\n💡 {ai_report}" if ai_report else ""
-                await self.webhook.send_alert(
-                    title=f"🚀 [PAPER BUY] {ticker}",
-                    description=(
-                        f"시장가: ${price:.4f} → 체결가: ${fill_price:.4f} (슬리피지 {slip_pct:+.2f}%)\n"
-                        f"수량: {units:.2f}주 | DNA: {dna_score:.0f} | 매수금액: ${buy_budget:.2f}\n"
-                        f"손절선: ${ts_threshold:.4f} ({'-15%' if is_penny_signal else '-10%'}) | 비중: {effective_fraction*100:.1f}%{report_line}"
-                    ),
-                    color=0x2ECC71,
-                )
-                await self._log_decision(
-                    ticker=ticker,
-                    gate="EXECUTED",
-                    outcome="EXECUTED",
-                    signal="BUY",
-                    dna_score=dna_score,
-                    rsi=rsi,
-                    price=fill_price,
-                    note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}",
-                )
-                # 관심종목 자동 등록 (DNA≥80 매수 → HOLDING)
-                await self._sync_watchlist_buy(
-                    ticker, fill_price, ts_threshold, dna_score
-                )
-                return True
-            except Exception as e:
-                print(f"❌ Buy Error: {e}")
-                raise
+                try:
+                    # 클레임 행을 실체결 결과로 확정 (실거래 체결가·체결 수량 반영)
+                    pos_res = await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .update(
+                            {
+                                "status": "HOLD",
+                                "entry_price": fill_price,
+                                "entry_slippage": (fill_price / price - 1) * 100,
+                                "current_price": fill_price,
+                                "highest_price": fill_price,
+                                "ts_threshold": ts_threshold,
+                                "units": units,
+                            }
+                        )
+                        .eq("ticker", ticker)
+                        .execute
+                    )
+                    if not pos_res.data:
+                        raise RuntimeError(
+                            f"Position 확정 UPDATE returned no data for {ticker}"
+                        )
+
+                    # 확정 성공 후에만 현금 차감 (원자성 보장)
+                    # 실거래 체결 수량·체결가 기준으로 차감 — LIVE 모드는 정수 주 체결이며
+                    # 실체결가가 추정 슬리피지가와 다를 수 있음 (버그 수정: 이전엔 추정 예산
+                    # 전액을 차감해 장부 현금이 실체결액과 어긋났음)
+                    # _apply_cash_delta가 _cash_lock 안에서 최신 잔액을 다시 읽고 반영하므로,
+                    # 함수 진입 시점에 fetch해 둔 stale acc["cash_available"]는 쓰지 않는다.
+                    executed_cost = units * fill_price
+                    cash_res, _new_cash = await self._apply_cash_delta(-executed_cost)
+                    if not cash_res or not cash_res.data:
+                        # 현금 차감 실패 시 방금 확정한 포지션을 롤백
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_positions")
+                            .delete()
+                            .eq("ticker", ticker)
+                            .execute
+                        )
+                        raise RuntimeError(
+                            f"Cash UPDATE failed for {ticker}, position rolled back"
+                        )
+
+                    slip_pct = (fill_price / price - 1) * 100
+                    report_line = f"\n💡 {ai_report}" if ai_report else ""
+                    await self.webhook.send_alert(
+                        title=f"🚀 [PAPER BUY] {ticker}",
+                        description=(
+                            f"시장가: ${price:.4f} → 체결가: ${fill_price:.4f} (슬리피지 {slip_pct:+.2f}%)\n"
+                            f"수량: {units:.2f}주 | DNA: {dna_score:.0f} | 매수금액: ${buy_budget:.2f}\n"
+                            f"손절선: ${ts_threshold:.4f} ({'-15%' if is_penny_signal else '-10%'}) | 비중: {effective_fraction*100:.1f}%{report_line}"
+                        ),
+                        color=0x2ECC71,
+                    )
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="EXECUTED",
+                        outcome="EXECUTED",
+                        signal="BUY",
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=fill_price,
+                        note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}",
+                    )
+                    # 관심종목 자동 등록 (STRONG BUY 매수 → HOLDING)
+                    await self._sync_watchlist_buy(
+                        ticker, fill_price, ts_threshold, dna_score
+                    )
+                    return True
+                except Exception as e:
+                    print(f"❌ Buy Error: {e}")
+                    raise
 
         # --- 2. 기존 포지션 관리 (Trailing Stop & Scale Out) ---
         if pos:
-            units = pos["units"]
-            entry_price = pos["entry_price"]
-            highest_price = max(pos["highest_price"], price)
-            is_scaled_out = pos["is_scaled_out"]
-            ts_threshold = pos["ts_threshold"]
-            is_penny = entry_price <= PENNY_MAX_PRICE
+            # 청산 락: 이 티커의 청산 관련 처리(EOD/Time-Decay/Scale-Out/Trailing
+            # Stop 및 그로 인한 실주문 제출·체결 확인)를 직렬화한다. 매수 락과
+            # 분리되어 있어, 진행 중인 매수의 체결 확인 대기가 이 구간을 막지 않는다.
+            async with self._get_exit_lock(ticker):
+                units = pos["units"]
+                entry_price = pos["entry_price"]
+                highest_price = max(pos["highest_price"], price)
+                is_scaled_out = pos["is_scaled_out"]
+                ts_threshold = pos["ts_threshold"]
+                is_penny = entry_price <= PENNY_MAX_PRICE
 
-            # A-0. EOD 강제 청산 최우선 처리 (Scale-Out보다 앞에 위치 — 동시 발동 시 EOD 우선)
-            # 수익 포지션(현재가 > 진입가)은 익일 홀딩 — 승자를 일찍 자르지 않음
-            if signal_type == "SELL" and strength == "EOD_FORCE":
-                unrealized_pnl_pct = (price / entry_price - 1) * 100
-                if (
-                    unrealized_pnl_pct > 5.0
-                ):  # +5% 이상 수익일 때만 홀딩 (빈번한 매매용)
-                    # 수익 중인 포지션: EOD 청산 건너뛰고 익일까지 홀딩
-                    await self.webhook.send_alert(
-                        title=f"🌙 [PAPER EOD HOLD] {ticker}",
-                        description=(
-                            f"현재가: ${price:.4f} | 수익률: +{unrealized_pnl_pct:.2f}%\n"
-                            f"수익 포지션 — 익일 홀딩 (EOD 강제청산 면제)"
-                        ),
-                        color=0x3498DB,
-                    )
-                    return
-
-                result = await self._close_position(pos, acc, price, "EOD Force Exit")
-                if result is None:
-                    print(
-                        f"⚠️ [{ticker}] Live EOD sell order rejected — retaining position"
-                    )
-                    return
-                await self.webhook.send_alert(
-                    title=f"🛑 [PAPER EOD EXIT] {ticker}",
-                    description=(
-                        f"청산가: ${result['fill_price']:.4f} | 수익률: {result['pnl_pct']:.2f}%\n"
-                        f"사유: 장 마감 손실 포지션 강제 청산 (15:30 ET)"
-                    ),
-                    color=0x95A5A6,
-                )
-                return
-
-            # A-1. Time-Decay Exit
-            # 조건: Scale-Out 미완료 & 진입 후 일정 시간 경과 & ±2% 횡보 구간
-            # Scale-Out 완료 포지션은 이미 수익 확보 단계이므로 TS가 단독 관리 — Time-Decay 스킵
-            if not is_scaled_out and pos.get("created_at"):
-                try:
-                    now_utc = datetime.now(timezone.utc)
-                    created_at_dt = datetime.fromisoformat(
-                        pos["created_at"].replace("Z", "+00:00")
-                    )
-
-                    # 오버나이트 홀딩: 진입 시각 기준이 아닌 오늘 장 시작(09:30 ET) 기준으로 리셋
-                    # → 전날 +5% 수익으로 홀딩한 포지션이 장 시작 즉시 Time-Decay 발동하는 것 방지
-                    created_at_et = created_at_dt.astimezone(_NY_TZ)
-                    now_et = now_utc.astimezone(_NY_TZ)
-                    if created_at_et.date() < now_et.date():
-                        market_open_et = now_et.replace(
-                            hour=9, minute=30, second=0, microsecond=0
-                        )
-                        effective_start_utc = market_open_et.astimezone(timezone.utc)
-                    else:
-                        effective_start_utc = created_at_dt
-
-                    elapsed_minutes = (
-                        now_utc - effective_start_utc
-                    ).total_seconds() / 60
+                # A-0. EOD 강제 청산 최우선 처리 (Scale-Out보다 앞에 위치 — 동시 발동 시 EOD 우선)
+                # 수익 포지션(현재가 > 진입가)은 익일 홀딩 — 승자를 일찍 자르지 않음
+                if signal_type == "SELL" and strength == "EOD_FORCE":
                     unrealized_pnl_pct = (price / entry_price - 1) * 100
-
-                    # 페니 종목: 90분 (변동성 높아 방향 형성에 더 오래 걸림)
-                    # 일반 종목: 60분
-                    decay_threshold = 90 if is_penny else 60
-
                     if (
-                        elapsed_minutes > decay_threshold
-                        and -2.0 <= unrealized_pnl_pct <= 2.0
-                    ):
-                        result = await self._close_position(
-                            pos, acc, price, "Time-Decay Exit"
-                        )
-                        if result is None:
-                            print(
-                                f"⚠️ [{ticker}] Live time-decay sell order rejected — retaining position"
-                            )
-                            return
+                        unrealized_pnl_pct > 5.0
+                    ):  # +5% 이상 수익일 때만 홀딩 (빈번한 매매용)
+                        # 수익 중인 포지션: EOD 청산 건너뛰고 익일까지 홀딩
                         await self.webhook.send_alert(
-                            title=f"⏳ [PAPER TIME-DECAY] {ticker}",
+                            title=f"🌙 [PAPER EOD HOLD] {ticker}",
                             description=(
-                                f"청산가: ${result['fill_price']:.4f} | 수익률: {result['pnl_pct']:.2f}%\n"
-                                f"보유 시간: {int(elapsed_minutes)}분 (기준: {decay_threshold}분)\n"
-                                f"사유: 방향성 상실 (횡보 ±2%) — 슬롯 반납"
+                                f"현재가: ${price:.4f} | 수익률: +{unrealized_pnl_pct:.2f}%\n"
+                                f"수익 포지션 — 익일 홀딩 (EOD 강제청산 면제)"
                             ),
-                            color=0x7F8C8D,
+                            color=0x3498DB,
                         )
                         return
-                except Exception as e:
-                    print(f"⚠️ [Time-Decay] {ticker}: {e}")
 
-            # A. TS 업데이트 (가역적 스위칭 스탑 적용)
-            # atr<=0(데이터 부족 초기 구간)에도 동일 경로를 타도록 합성 ATR로 폴백한다.
-            # 이전에는 atr<=0 분기에서만 페니 본전 락인(PENNY_BREAKEVEN_TRIGGER)을 체크했는데,
-            # 실전에서는 atr>0이 상시 공급되므로 그 분기가 사실상 죽은 코드였다 — 통합으로 해결.
-            if not is_scaled_out:
-                effective_atr = atr if atr > 0 else (entry_price * 0.02)
-                ts_threshold = update_reversible_trailing_stop(
-                    entry_price, highest_price, effective_atr, smoothed_er, is_penny
-                )
-            else:
-                # Scale-Out 후 물량: 이익 보전을 위해 TS_TRAIL_PCT로 타이트하게 조이거나 본절 유지
-                if atr > 0:
-                    new_ts = max(
-                        entry_price * SCALE_OUT_TS_PCT,
-                        highest_price - (1.2 * atr),  # k=1.2 (Tight)
+                    result = await self._close_position(pos, price, "EOD Force Exit")
+                    if result is None:
+                        print(
+                            f"⚠️ [{ticker}] Live EOD sell order rejected — retaining position"
+                        )
+                        return
+                    await self.webhook.send_alert(
+                        title=f"🛑 [PAPER EOD EXIT] {ticker}",
+                        description=(
+                            f"청산가: ${result['fill_price']:.4f} | 수익률: {result['pnl_pct']:.2f}%\n"
+                            f"사유: 장 마감 손실 포지션 강제 청산 (15:30 ET)"
+                        ),
+                        color=0x95A5A6,
+                    )
+                    return
+
+                # A-1. Time-Decay Exit
+                # 조건: Scale-Out 미완료 & 진입 후 일정 시간 경과 & ±2% 횡보 구간
+                # Scale-Out 완료 포지션은 이미 수익 확보 단계이므로 TS가 단독 관리 — Time-Decay 스킵
+                if not is_scaled_out and pos.get("created_at"):
+                    try:
+                        now_utc = datetime.now(timezone.utc)
+                        created_at_dt = datetime.fromisoformat(
+                            pos["created_at"].replace("Z", "+00:00")
+                        )
+
+                        # 오버나이트 홀딩: 진입 시각 기준이 아닌 오늘 장 시작(09:30 ET) 기준으로 리셋
+                        # → 전날 +5% 수익으로 홀딩한 포지션이 장 시작 즉시 Time-Decay 발동하는 것 방지
+                        created_at_et = created_at_dt.astimezone(_NY_TZ)
+                        now_et = now_utc.astimezone(_NY_TZ)
+                        if created_at_et.date() < now_et.date():
+                            market_open_et = now_et.replace(
+                                hour=9, minute=30, second=0, microsecond=0
+                            )
+                            effective_start_utc = market_open_et.astimezone(
+                                timezone.utc
+                            )
+                        else:
+                            effective_start_utc = created_at_dt
+
+                        elapsed_minutes = (
+                            now_utc - effective_start_utc
+                        ).total_seconds() / 60
+                        unrealized_pnl_pct = (price / entry_price - 1) * 100
+
+                        # 페니 종목: 90분 (변동성 높아 방향 형성에 더 오래 걸림)
+                        # 일반 종목: 60분
+                        decay_threshold = 90 if is_penny else 60
+
+                        if (
+                            elapsed_minutes > decay_threshold
+                            and -2.0 <= unrealized_pnl_pct <= 2.0
+                        ):
+                            result = await self._close_position(
+                                pos, price, "Time-Decay Exit"
+                            )
+                            if result is None:
+                                print(
+                                    f"⚠️ [{ticker}] Live time-decay sell order rejected — retaining position"
+                                )
+                                return
+                            await self.webhook.send_alert(
+                                title=f"⏳ [PAPER TIME-DECAY] {ticker}",
+                                description=(
+                                    f"청산가: ${result['fill_price']:.4f} | 수익률: {result['pnl_pct']:.2f}%\n"
+                                    f"보유 시간: {int(elapsed_minutes)}분 (기준: {decay_threshold}분)\n"
+                                    f"사유: 방향성 상실 (횡보 ±2%) — 슬롯 반납"
+                                ),
+                                color=0x7F8C8D,
+                            )
+                            return
+                    except Exception as e:
+                        print(f"⚠️ [Time-Decay] {ticker}: {e}")
+
+                # A. TS 업데이트 (가역적 스위칭 스탑 적용)
+                # atr<=0(데이터 부족 초기 구간)에도 동일 경로를 타도록 합성 ATR로 폴백한다.
+                # 이전에는 atr<=0 분기에서만 페니 본전 락인(PENNY_BREAKEVEN_TRIGGER)을 체크했는데,
+                # 실전에서는 atr>0이 상시 공급되므로 그 분기가 사실상 죽은 코드였다 — 통합으로 해결.
+                if not is_scaled_out:
+                    effective_atr = atr if atr > 0 else (entry_price * 0.02)
+                    ts_threshold = update_reversible_trailing_stop(
+                        entry_price, highest_price, effective_atr, smoothed_er, is_penny
                     )
                 else:
-                    new_ts = max(
-                        entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
-                    )
-                ts_threshold = max(ts_threshold, new_ts)
+                    # Scale-Out 후 물량: 이익 보전을 위해 TS_TRAIL_PCT로 타이트하게 조이거나 본절 유지
+                    if atr > 0:
+                        new_ts = max(
+                            entry_price * SCALE_OUT_TS_PCT,
+                            highest_price - (1.2 * atr),  # k=1.2 (Tight)
+                        )
+                    else:
+                        new_ts = max(
+                            entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
+                        )
+                    ts_threshold = max(ts_threshold, new_ts)
 
-            # B. SCALE_OUT 체크
-            profit_pct = price / entry_price - 1
-            if is_penny:
-                # RSI arm은 최소 +5% 수익 확인 후 허용 (단순 변동성으로 인한 조기 청산 방지)
-                scale_trigger = (
-                    rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
-                ) or profit_pct >= PENNY_SCALE_OUT_PROFIT
-            else:
-                scale_trigger = rsi > 52 or profit_pct >= 0.07
-            sell_slip = SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL
-            if (
-                scale_trigger
-                and not is_scaled_out
-                and is_armed
-                and (price * (1.0 - sell_slip) > entry_price)
-            ):
-                sell_units = units * SCALE_OUT_RATIO
-                # [Guide-3] 매도 슬리피지 적용
-                fill_sell_price = _apply_slippage(
-                    price, is_buy=False, is_penny=is_penny
-                )
-                executed = await self._on_order_sell(
-                    ticker, sell_units, fill_sell_price, "Scale-Out"
-                )
-                if executed is None:
-                    print(
-                        f"⚠️ [{ticker}] Live scale-out order rejected — retaining position"
+                # B. SCALE_OUT 체크
+                profit_pct = price / entry_price - 1
+                if is_penny:
+                    # RSI arm은 최소 +5% 수익 확인 후 허용 (단순 변동성으로 인한 조기 청산 방지)
+                    scale_trigger = (
+                        rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
+                    ) or profit_pct >= PENNY_SCALE_OUT_PROFIT
+                else:
+                    # RSI arm은 최소 +5% 수익 확인 후 허용 (페니 분기와 동일 가드 —
+                    # 그렇지 않으면 근접 손익분기점에서도 RSI만으로 조기 익절돼
+                    # winner를 지나치게 일찍 자르게 된다)
+                    scale_trigger = (
+                        rsi > 52 and profit_pct >= 0.05
+                    ) or profit_pct >= 0.07
+                sell_slip = SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL
+                if (
+                    scale_trigger
+                    and not is_scaled_out
+                    and is_armed
+                    and (price * (1.0 - sell_slip) > entry_price)
+                ):
+                    sell_units = units * SCALE_OUT_RATIO
+                    # [Guide-3] 매도 슬리피지 적용
+                    fill_sell_price = _apply_slippage(
+                        price, is_buy=False, is_penny=is_penny
                     )
+                    executed = await self._on_order_sell(
+                        ticker, sell_units, fill_sell_price, "Scale-Out"
+                    )
+                    if executed is None:
+                        print(
+                            f"⚠️ [{ticker}] Live scale-out order rejected — retaining position"
+                        )
+                        return
+                    sell_units, fill_sell_price = executed
+                    profit_cash = sell_units * fill_sell_price
+
+                    # 가상 계좌 업데이트 (cash_available만 갱신 — total_assets는 /api/broker/paper/account에서
+                    # cash + invested_capital로 동적 계산하므로 DB 컬럼을 직접 쓰지 않음)
+                    # _apply_cash_delta가 최신 잔액을 다시 읽고 원자적으로 반영한다 (stale acc 미사용).
+                    await self._apply_cash_delta(profit_cash)
+
+                    # 포지션 업데이트: 수량 반토막, TS 본절+1% 상향
+                    new_ts_val = (
+                        max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
+                        if is_penny
+                        else max(
+                            entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
+                        )
+                    )
+                    # Scale-Out 봉 진입가가 낮을 때 SCALE_OUT_TS_PCT(+1%)가 현재가를 초과할 수 있음
+                    # → TS가 현재가 위에 세팅되면 다음 틱 즉시 강제 청산되므로 클램프
+                    new_ts_val = min(new_ts_val, price)
+                    update_data = {
+                        "status": "SCALE_OUT",
+                        "units": units - sell_units,
+                        "is_scaled_out": True,
+                        "ts_threshold": new_ts_val,
+                        "highest_price": highest_price,
+                        "current_price": price,
+                        "scale_out_bar_count": 0,  # 쿨다운 카운터 초기화
+                    }
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .update(update_data)
+                        .eq("ticker", ticker)
+                        .execute
+                    )
+                    # 관심종목 stop_loss 동기화 (TS 상향)
+                    await self._sync_watchlist_stop_loss(ticker, new_ts_val)
+
+                    slip_sell_pct = (fill_sell_price / price - 1) * 100
+                    price_str = (
+                        f"${fill_sell_price:.4f}"
+                        if is_penny
+                        else f"${fill_sell_price:.2f}"
+                    )
+                    ts_desc = (
+                        f"-7% TS ${new_ts_val:.4f}"
+                        if is_penny
+                        else f"본절+1% ${new_ts_val:.2f}"
+                    )
+                    await self.webhook.send_alert(
+                        title=f"🟠 [PAPER SCALE-OUT] {ticker}",
+                        description=f"50% 분할 익절 완료: {price_str} (슬리피지 {slip_sell_pct:+.2f}%)\n방어선 상향: {ts_desc}",
+                        color=0xE67E22,
+                    )
+                    # Scale-Out 부분 매도 이력 기록 (성과 분석용 — exit_reason으로 구분)
+                    scale_pnl_pct = (fill_sell_price / entry_price - 1) * 100
+                    scale_profit_amt = sell_units * (fill_sell_price - entry_price)
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_history")
+                        .insert(
+                            {
+                                "ticker": ticker,
+                                "entry_price": entry_price,
+                                "exit_price": fill_sell_price,
+                                "signal_price": price,
+                                "slippage_pct": slip_sell_pct,
+                                "pnl_pct": scale_pnl_pct,
+                                "profit_amt": scale_profit_amt,
+                                "exit_reason": "Scale-Out 50%",
+                            }
+                        )
+                        .execute
+                    )
+
+                    # KellySizer 캐시 무효화 (Scale-Out도 paper_history를 바꾸므로 전량 청산과 동일하게 처리)
+                    if ticker in self._kelly_cache:
+                        del self._kelly_cache[ticker]
+
                     return
-                sell_units, fill_sell_price = executed
-                profit_cash = sell_units * fill_sell_price
 
-                # 가상 계좌 업데이트 (cash_available만 갱신 — total_assets는 /api/broker/paper/account에서
-                # cash + invested_capital로 동적 계산하므로 DB 컬럼을 직접 쓰지 않음)
-                new_cash = acc["cash_available"] + profit_cash
-                await asyncio.to_thread(
-                    self.supabase.table("paper_account")
-                    .update({"cash_available": new_cash})
-                    .eq("id", acc["id"])
-                    .execute
-                )
-
-                # 포지션 업데이트: 수량 반토막, TS 본절+1% 상향
-                new_ts_val = (
-                    max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
-                    if is_penny
-                    else max(
-                        entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
+                # C. TRAILING STOP 체크 (ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)
+                # Scale-Out 직후 쿨다운: 잔여 물량이 흔들림에 즉시 손절되는 것을 방지
+                bar_count = pos.get("scale_out_bar_count", SCALE_OUT_COOLDOWN_BARS)
+                if is_scaled_out and bar_count < SCALE_OUT_COOLDOWN_BARS:
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .update(
+                            {
+                                "scale_out_bar_count": bar_count + 1,
+                                "current_price": price,
+                                "highest_price": highest_price,
+                                "ts_threshold": ts_threshold,
+                            }
+                        )
+                        .eq("ticker", ticker)
+                        .execute
                     )
-                )
-                # Scale-Out 봉 진입가가 낮을 때 SCALE_OUT_TS_PCT(+1%)가 현재가를 초과할 수 있음
-                # → TS가 현재가 위에 세팅되면 다음 틱 즉시 강제 청산되므로 클램프
-                new_ts_val = min(new_ts_val, price)
-                update_data = {
-                    "status": "SCALE_OUT",
-                    "units": units - sell_units,
-                    "is_scaled_out": True,
-                    "ts_threshold": new_ts_val,
-                    "highest_price": highest_price,
-                    "current_price": price,
-                    "scale_out_bar_count": 0,  # 쿨다운 카운터 초기화
-                }
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .update(update_data)
-                    .eq("ticker", ticker)
-                    .execute
-                )
-                # 관심종목 stop_loss 동기화 (TS 상향)
-                await self._sync_watchlist_stop_loss(ticker, new_ts_val)
+                    return  # 쿨다운 중: TS 체크 유예
 
-                slip_sell_pct = (fill_sell_price / price - 1) * 100
-                price_str = (
-                    f"${fill_sell_price:.4f}" if is_penny else f"${fill_sell_price:.2f}"
-                )
-                ts_desc = (
-                    f"-7% TS ${new_ts_val:.4f}"
-                    if is_penny
-                    else f"본절+1% ${new_ts_val:.2f}"
-                )
-                await self.webhook.send_alert(
-                    title=f"🟠 [PAPER SCALE-OUT] {ticker}",
-                    description=f"50% 분할 익절 완료: {price_str} (슬리피지 {slip_sell_pct:+.2f}%)\n방어선 상향: {ts_desc}",
-                    color=0xE67E22,
-                )
-                # Scale-Out 부분 매도 이력 기록 (성과 분석용 — exit_reason으로 구분)
-                scale_pnl_pct = (fill_sell_price / entry_price - 1) * 100
-                scale_profit_amt = sell_units * (fill_sell_price - entry_price)
-                await asyncio.to_thread(
-                    self.supabase.table("paper_history")
-                    .insert(
-                        {
-                            "ticker": ticker,
-                            "entry_price": entry_price,
-                            "exit_price": fill_sell_price,
-                            "signal_price": price,
-                            "slippage_pct": slip_sell_pct,
-                            "pnl_pct": scale_pnl_pct,
-                            "profit_amt": scale_profit_amt,
-                            "exit_reason": "Scale-Out 50%",
-                        }
+                if price < ts_threshold:
+                    # [Guide-3] 손절 매도 슬리피지 적용 (패닉 셀 상황 → 불리한 체결)
+                    result = await self._close_position(pos, price, "Trailing Stop")
+                    if result is None:
+                        print(
+                            f"⚠️ [{ticker}] Live trailing stop order rejected — retaining position"
+                        )
+                        return
+                    status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
+                    slip_exit_pct = (result["fill_price"] / price - 1) * 100
+                    await self.webhook.send_alert(
+                        title=f"{status_emoji} [PAPER EXIT] {ticker}",
+                        description=(
+                            f"청산가: ${result['fill_price']:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n"
+                            f"사유: 트레일링 스탑 발동"
+                        ),
+                        color=0x34495E,
                     )
-                    .execute
-                )
-
-                # KellySizer 캐시 무효화 (Scale-Out도 paper_history를 바꾸므로 전량 청산과 동일하게 처리)
-                if ticker in self._kelly_cache:
-                    del self._kelly_cache[ticker]
-
-                return
-
-            # C. TRAILING STOP 체크 (ARMED 해제 상태에서도 실행 — 손실 확대 방지 우선)
-            # Scale-Out 직후 쿨다운: 잔여 물량이 흔들림에 즉시 손절되는 것을 방지
-            bar_count = pos.get("scale_out_bar_count", SCALE_OUT_COOLDOWN_BARS)
-            if is_scaled_out and bar_count < SCALE_OUT_COOLDOWN_BARS:
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .update(
-                        {
-                            "scale_out_bar_count": bar_count + 1,
-                            "current_price": price,
-                            "highest_price": highest_price,
-                            "ts_threshold": ts_threshold,
-                        }
+                else:
+                    # 일반 업데이트
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .update(
+                            {
+                                "current_price": price,
+                                "highest_price": highest_price,
+                                "ts_threshold": ts_threshold,
+                            }
+                        )
+                        .eq("ticker", ticker)
+                        .execute
                     )
-                    .eq("ticker", ticker)
-                    .execute
-                )
-                return  # 쿨다운 중: TS 체크 유예
-
-            if price < ts_threshold:
-                # [Guide-3] 손절 매도 슬리피지 적용 (패닉 셀 상황 → 불리한 체결)
-                result = await self._close_position(pos, acc, price, "Trailing Stop")
-                if result is None:
-                    print(
-                        f"⚠️ [{ticker}] Live trailing stop order rejected — retaining position"
-                    )
-                    return
-                status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
-                slip_exit_pct = (result["fill_price"] / price - 1) * 100
-                await self.webhook.send_alert(
-                    title=f"{status_emoji} [PAPER EXIT] {ticker}",
-                    description=(
-                        f"청산가: ${result['fill_price']:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n"
-                        f"사유: 트레일링 스탑 발동"
-                    ),
-                    color=0x34495E,
-                )
-            else:
-                # 일반 업데이트
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .update(
-                        {
-                            "current_price": price,
-                            "highest_price": highest_price,
-                            "ts_threshold": ts_threshold,
-                        }
-                    )
-                    .eq("ticker", ticker)
-                    .execute
-                )
-                # TS가 상향된 경우에만 watchlist stop_loss 동기화 (매 봉 불필요한 쓰기 방지)
-                if ts_threshold > pos["ts_threshold"]:
-                    await self._sync_watchlist_stop_loss(ticker, ts_threshold)
+                    # TS가 상향된 경우에만 watchlist stop_loss 동기화 (매 봉 불필요한 쓰기 방지)
+                    if ts_threshold > pos["ts_threshold"]:
+                        await self._sync_watchlist_stop_loss(ticker, ts_threshold)
 
         return False
