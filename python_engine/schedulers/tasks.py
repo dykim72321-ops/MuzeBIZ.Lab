@@ -23,10 +23,13 @@ async def mtf_cache_scheduler():
         try:
             if is_market_hours():
                 held = list(app_state._held_tickers)
-                watching = await asyncio.to_thread(
+                discovery = await asyncio.to_thread(
                     app_state.db.get_active_tickers, limit=30
                 )
-                active_tickers = list(set(held) | set(watching))
+                watching = await asyncio.to_thread(
+                    app_state.db.get_watchlist_tickers, limit=30
+                )
+                active_tickers = list(set(held) | set(discovery) | set(watching))
 
                 await app_state.mtf_cache.update_cache(active_tickers)
         except Exception as e:
@@ -281,7 +284,14 @@ async def stream_liveness_watchdog():
             discovery_tickers = await asyncio.to_thread(
                 app_state.db.get_active_tickers, limit=15
             )
-            active_tickers = list(set(discovery_tickers) | app_state._held_tickers)
+            watchlist_tickers = await asyncio.to_thread(
+                app_state.db.get_watchlist_tickers, limit=15
+            )
+            active_tickers = list(
+                set(discovery_tickers)
+                | set(watchlist_tickers)
+                | app_state._held_tickers
+            )
             if active_tickers:
                 asyncio.create_task(start_alpaca_stream(active_tickers))
 

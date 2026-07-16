@@ -292,6 +292,8 @@ async def run_startup_sequence():
             print(f"⚠️ [Guide-2] Could not restore held tickers: {e}")
 
     active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=15)
+    watching_tickers = await asyncio.to_thread(_db.get_watchlist_tickers, limit=15)
+    active_tickers = list(set(active_tickers) | set(watching_tickers))
 
     # 1. 히스토리 워밍업
     if active_tickers:
