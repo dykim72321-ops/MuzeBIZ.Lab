@@ -388,7 +388,7 @@ export function useDashboardData() {
             const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
             try {
               const result = await sellPaperPosition(ticker);
-              if (result?.status === 'success' || result?.symbol || result?.id) {
+              if (result?.status === 'success') {
                 toast.success(`${ticker} 청산 성공`, { id: toastId });
                 loadDashboardData();
               } else {
