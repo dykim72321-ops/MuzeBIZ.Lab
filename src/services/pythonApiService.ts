@@ -349,7 +349,7 @@ export async function deletePaperHistory(historyId: string): Promise<{ status: s
  */
 export async function fetchClosedTrades(limit: number = 30): Promise<ClosedTradeRaw[]> {
   try {
-    const data = await apiClient.broker.get<ClosedTradeRaw[]>(`/api/broker/closed-trades?limit=${limit}`);
+    const data = await apiClient.broker.get<ClosedTradeRaw[]>(`/api/broker/paper/history?limit=${limit}`);
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('[PythonAPI] Closed trades fetch error:', error);

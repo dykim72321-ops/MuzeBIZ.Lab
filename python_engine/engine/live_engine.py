@@ -17,8 +17,8 @@ import os
 from typing import TYPE_CHECKING
 
 from alpaca.common.exceptions import APIError
-from alpaca.trading.enums import OrderSide, OrderStatus, TimeInForce
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, OrderStatus, TimeInForce, QueryOrderStatus
+from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
 from alpaca.trading.stream import TradingStream
 
 from engine.paper_engine import PENNY_MAX_PRICE, PaperTradingManager
@@ -97,6 +97,61 @@ class LiveTradingManager(PaperTradingManager):
                     f"1주 미만 (강제 1주 매수 시 예산 상한 초과 위험)"
                 )
                 return None
+
+            if side == OrderSide.SELL:
+                try:
+                    open_req = GetOrdersRequest(
+                        status=QueryOrderStatus.OPEN, symbols=[ticker]
+                    )
+                    open_orders = await asyncio.to_thread(
+                        self.alpaca.get_orders, filter=open_req
+                    )
+                    pending_cancel_ids = []
+                    for oo in open_orders:
+                        print(
+                            f"⚠️ [{ticker}] 기존 미체결 주문이 주식을 락(Lock)하고 있어 취소 시도 (order_id={oo.id})"
+                        )
+                        try:
+                            await asyncio.to_thread(
+                                self.alpaca.cancel_order_by_id, oo.id
+                            )
+                            pending_cancel_ids.append(oo.id)
+                        except Exception as cancel_err:
+                            print(
+                                f"⚠️ [{ticker}] 미체결 주문 취소 실패 (order_id={oo.id}): {cancel_err}"
+                            )
+
+                    # sleep으로 취소 완료를 가정하는 대신, 실제로 주문이 CANCELED/EXPIRED 등
+                    # 종결 상태로 넘어갈 때까지 짧게 폴링해 확인한다 — 그렇지 않으면 여전히
+                    # available=0인 채로 새 SELL을 제출해 동일한 오류가 재발할 수 있다.
+                    clear_timeout = 3.0
+                    clear_elapsed = 0.0
+                    while pending_cancel_ids and clear_elapsed < clear_timeout:
+                        await asyncio.sleep(FILL_POLL_INTERVAL_SEC)
+                        clear_elapsed += FILL_POLL_INTERVAL_SEC
+                        still_pending = []
+                        for oid in pending_cancel_ids:
+                            try:
+                                oo_status = await asyncio.to_thread(
+                                    self.alpaca.get_order_by_id, oid
+                                )
+                                if (
+                                    oo_status.status not in _DEAD_STATUSES
+                                    and oo_status.status not in _FILLED_STATUSES
+                                ):
+                                    still_pending.append(oid)
+                            except Exception:
+                                # 조회 실패 시 안전하게 아직 안 풀렸다고 가정하고 계속 대기
+                                still_pending.append(oid)
+                        pending_cancel_ids = still_pending
+
+                    if pending_cancel_ids:
+                        print(
+                            f"⚠️ [{ticker}] {clear_timeout:.0f}초 내 기존 주문 취소 확인 실패 "
+                            f"(order_ids={pending_cancel_ids}) — 그래도 매도 시도"
+                        )
+                except Exception as clear_err:
+                    print(f"⚠️ [{ticker}] 기존 미체결 주문 정리 중 에러: {clear_err}")
 
             req = MarketOrderRequest(
                 symbol=ticker,

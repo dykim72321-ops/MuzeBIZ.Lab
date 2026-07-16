@@ -14,7 +14,7 @@ import { DNA_BUY } from '../constants/dnaThresholds';
 
 import type { DiscoveryStock, TerminalData } from '../types/dashboard';
 import {
-  closePosition,
+  sellPaperPosition,
   toggleSystemArm,
 } from '../services/pythonApiService';
 import { useNavigate } from 'react-router-dom';
@@ -386,7 +386,7 @@ export function useDashboardData() {
           onClick: async () => {
             const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
             try {
-              const result = await closePosition(ticker);
+              const result = await sellPaperPosition(ticker);
               if (result?.status === 'success' || result?.symbol || result?.id) {
                 toast.success(`${ticker} 청산 성공`, { id: toastId });
                 loadDashboardData();

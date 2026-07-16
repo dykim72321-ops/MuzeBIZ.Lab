@@ -700,7 +700,7 @@ async def get_paper_positions(api_key: str = Security(get_api_key)):
 
 
 @router.get("/paper/history")
-async def get_paper_history(api_key: str = Security(get_api_key)):
+async def get_paper_history(limit: int = 30, api_key: str = Security(get_api_key)):
     """Supabase 기반 페이퍼 트레이딩 매매 이력 조회"""
     paper_engine = app_state.paper_engine
     supabase = app_state.supabase
@@ -712,7 +712,7 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
             supabase.table("paper_history")
             .select("*")
             .order("closed_at", desc=True)
-            .limit(30)
+            .limit(limit)
             .execute
         )
         history = []
@@ -732,6 +732,7 @@ async def get_paper_history(api_key: str = Security(get_api_key)):
                     "exit_reason": item.get("exit_reason") or "trailing_stop",
                     "pnl_pct": round(float(pnl_pct or 0), 2),
                     "profit_amt": round(float(item.get("profit_amt") or 0), 2),
+                    "is_penny": item.get("is_penny", False),
                     "status": "filled",
                     "created_at": item.get("closed_at") or item.get("created_at"),
                 }
