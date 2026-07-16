@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, timedelta
+import os
+from datetime import datetime
 from typing import List
 
 import pandas as pd
@@ -17,6 +18,21 @@ from market.alpaca_stream import start_alpaca_stream, _stop_current_stream
 SCAN_MAX_PRICE = 100.0
 SCAN_DATA_LOOKBACK = "2mo"
 SCAN_TOP_N = 10
+
+# 자동 스캔 주기(초) — schedulers/tasks.py의 auto_quant_scan_scheduler와
+# routers/penny.py의 next_scan_in_seconds 계산이 공유하는 단일 소스.
+# 2026-07-16: 4시간 → 2시간으로 단축. 원래 2시간이었던 것을 RAM 누적 문제로
+# 2026-07-11에 4시간으로 늦췄으나(당시 원인은 yfinance 세션/스레드풀·대형
+# DataFrame 미해제), 그 근본 원인은 이후 커밋에서 별도로 수정됨
+# (MTFCache/paper_portfolio_updater를 Alpaca 우선 조회로 전환 + run_quant_scan_internal
+# 종료부 gc.collect() 추가). 회귀 테스트(tests/memory_test.py)에서 연속 스캔 2회
+# 호출 시 RSS 증가가 247MB→247.69MB로 사실상 없음을 확인했으므로, 스캔 자체의
+# RAM 비용은 더 이상 주기를 늦춰야 할 이유가 아니다. 4시간 주기의 실질적 비용은
+# "신규 후보 발굴 지연"이었다 — 정규장 6.5시간 동안 스캔이 1~2회만 돌아, 장중
+# 갑자기 DNA가 상승한 종목 상당수가 그날 안에 watchlist에 진입하지 못했다.
+# 2시간은 과거 장기간 무중단 운영 이력이 있는(=RAM 문제의 원인이 아니었던) 값이므로,
+# 근본 원인이 수정된 지금 여기로 되돌리는 것이 30분/1시간 같은 미검증 값보다 안전하다.
+SCAN_INTERVAL_SECONDS = 2 * 3600
 
 # 하위 호환 — Paper Engine 내부 페니 상태머신 파라미터 (변경 금지)
 PENNY_DATA_LOOKBACK = "2mo"
@@ -36,7 +52,6 @@ async def run_quant_scan_internal(
     퀀트 스캔 핵심 로직 ($100 이하 일반 주식) — HTTP 엔드포인트와 자동 스케줄러 양쪽에서 호출.
     완료 시 app_state.last_penny_scan_at, app_state.penny_scan_results_cache 갱신.
     """
-    import random
     import re as _re
 
     supabase = app_state.supabase
@@ -48,6 +63,13 @@ async def run_quant_scan_internal(
         if trading_client:
             from alpaca.trading.enums import AssetClass, AssetStatus
             from alpaca.trading.requests import GetAssetsRequest
+            from alpaca.data.historical import StockHistoricalDataClient
+            from alpaca.data.historical.screener import ScreenerClient
+            from alpaca.data.requests import (
+                MarketMoversRequest,
+                MostActivesRequest,
+                StockSnapshotRequest,
+            )
 
             assets_req = GetAssetsRequest(
                 asset_class=AssetClass.US_EQUITY,
@@ -58,6 +80,15 @@ async def run_quant_scan_internal(
             )
 
             _SKIP_PATTERN = _re.compile(r"\.|[0-9]$")
+            # Alpaca Asset 모델엔 ETF 여부를 나타내는 필드가 없어 종목명 패턴으로
+            # 걸러낸다 — 안 걸러내면 XLP/TLT/SPY 같은 대형 ETF가 달러볼륨 상위를
+            # 독점해, 이 스캐너가 원래 노리는 소형주 모멘텀 후보가 밀려남
+            # (2026-07-17 실측: 상위 80 중 다수가 ETF/초대형주였음).
+            _ETF_NAME_PATTERN = _re.compile(
+                r"\bETF\b|\bTrust\b|\bFund\b|iShares|SPDR|ProShares|Direxion"
+                r"|VanEck|WisdomTree|Global X|First Trust|Invesco QQQ|ARK ",
+                _re.IGNORECASE,
+            )
             tradable = [
                 a.symbol
                 for a in all_assets
@@ -69,98 +100,90 @@ async def run_quant_scan_internal(
                     len(a.symbol) == 5
                     and a.symbol[-1] in ("W", "R", "Q", "U", "P", "Y")
                 )
+                and not _ETF_NAME_PATTERN.search(a.name or "")
             ]
             print(f"📡 [Scan] Alpaca universe: {len(tradable)} tradable US equities")
 
-            pool_tickers: List[str] = []
-            if supabase:
-                try:
-                    cutoff = (datetime.now() - timedelta(days=30)).isoformat()
-                    pool_res = await asyncio.to_thread(
-                        supabase.table("penny_universe_pool")
-                        .select("ticker")
-                        .gte("last_seen_at", cutoff)
-                        .order("scan_count", desc=True)
-                        .limit(100)
-                        .execute
-                    )
-                    if pool_res.data:
-                        pool_tickers = [
-                            r["ticker"]
-                            for r in pool_res.data
-                            if not _SKIP_PATTERN.search(r["ticker"])
-                            and len(r["ticker"]) <= 5
-                            and not (
-                                len(r["ticker"]) == 5
-                                and r["ticker"][-1] in ("W", "R", "Q", "U", "P", "Y")
-                            )
-                        ]
-                        print(
-                            f"📦 [Scan Pool] Loaded {len(pool_tickers)} tickers from accumulated pool"
-                        )
-                except Exception as pool_err:
-                    print(f"⚠️ [Scan Pool] Pool fetch skipped: {pool_err}")
+            api_key = os.getenv("APCA_API_KEY_ID")
+            api_secret = os.getenv("APCA_API_SECRET_KEY")
 
-            pool_set = set(pool_tickers)
-            fresh_sample = random.sample(
-                [t for t in tradable if t not in pool_set],
-                min(500, len(tradable)),
-            )
-            sampled = pool_tickers + fresh_sample
-            print(
-                f"🔀 [Scan] Universe mix: {len(fresh_sample)} fresh + {len(pool_tickers)} pool = {len(sampled)} total"
-            )
+            # 스크리너: 당일 실제 모멘텀/거래량이 터진 종목을 직접 조회 (로깅·교차검증용 —
+            # 무작위 500 표본은 신호와 무관하게 뽑혀 "그날 움직이는 종목"을 놓치기 쉬웠음)
+            screener_symbols: set[str] = set()
+            try:
+                screener = ScreenerClient(api_key, api_secret)
+                most_active, movers = await asyncio.gather(
+                    asyncio.to_thread(
+                        screener.get_most_actives,
+                        MostActivesRequest(by="volume", top=100),
+                    ),
+                    asyncio.to_thread(
+                        screener.get_market_movers, MarketMoversRequest(top=50)
+                    ),
+                )
+                screener_symbols = (
+                    {a.symbol for a in most_active.most_actives}
+                    | {g.symbol for g in movers.gainers}
+                    | {l.symbol for l in movers.losers}
+                )
+                print(
+                    f"📈 [Scan] Screener 후보: most_active {len(most_active.most_actives)} + "
+                    f"movers {len(movers.gainers) + len(movers.losers)}"
+                )
+            except Exception as screener_err:
+                print(
+                    f"⚠️ [Scan] Screener 조회 실패 (스냅샷 필터로 계속 진행): {screener_err}"
+                )
 
-            batch_size = 50
-            for i in range(0, len(sampled), batch_size):
-                batch = sampled[i : i + batch_size]
-                batch_str = " ".join(batch)
+            # 전체 유니버스 배치 스냅샷으로 가격·달러볼륨 필터 — 무작위 500개 표본을
+            # 대체. 스냅샷은 1요청당 최대 1,000심볼까지 지원해 ~10,150개 전체를
+            # 11요청·약 16초에 커버 가능(실측) — yfinance 배치 다운로드보다 빠르고
+            # 매 스캔마다 유니버스 전체를 보므로 그날 급등한 종목을 놓치지 않는다.
+            data_client = StockHistoricalDataClient(api_key, api_secret)
+            candidates: List[tuple] = []  # (ticker, dollar_volume)
+            SNAPSHOT_BATCH = 1000
+            for i in range(0, len(tradable), SNAPSHOT_BATCH):
+                batch = tradable[i : i + SNAPSHOT_BATCH]
                 try:
-                    tickers_data = await asyncio.to_thread(
-                        yf.download,
-                        batch_str,
-                        period="1d",
-                        interval="1d",
-                        progress=False,
-                        threads=True,
+                    snaps = await asyncio.to_thread(
+                        data_client.get_stock_snapshot,
+                        StockSnapshotRequest(symbol_or_symbols=batch),
                     )
-                    if tickers_data is not None and not tickers_data.empty:
-                        close_col = tickers_data.get("Close")
-                        volume_col = tickers_data.get("Volume")
-                        if (
-                            close_col is not None
-                            and not close_col.empty
-                            and volume_col is not None
-                        ):
-                            if isinstance(close_col, pd.Series):
-                                if len(batch) == 1:
-                                    last_price = float(close_col.iloc[-1])
-                                    last_vol = float(volume_col.iloc[-1])
-                                    if (
-                                        0.01 < last_price <= max_price
-                                        and (last_price * last_vol) > 200000
-                                    ):
-                                        scan_tickers.append(batch[0])
-                            else:
-                                last_row = close_col.iloc[-1]
-                                last_vol_row = volume_col.iloc[-1]
-                                for sym in batch:
-                                    if (
-                                        sym in last_row.index
-                                        and sym in last_vol_row.index
-                                    ):
-                                        p = last_row[sym]
-                                        v = last_vol_row[sym]
-                                        if pd.notna(p) and pd.notna(v):
-                                            p_val, v_val = float(p), float(v)
-                                            if (
-                                                0.01 < p_val <= max_price
-                                                and (p_val * v_val) > 200000
-                                            ):
-                                                scan_tickers.append(sym)
-                except Exception as e:
-                    print(f"⚠️ [Scan] Batch price fetch error: {e}")
+                except Exception as snap_err:
+                    print(f"⚠️ [Scan] 스냅샷 배치 오류: {snap_err}")
                     continue
+                for sym, snap in (snaps or {}).items():
+                    bar = getattr(snap, "daily_bar", None)
+                    if not bar or bar.close is None or bar.volume is None:
+                        continue
+                    price = float(bar.close)
+                    volume = float(bar.volume)
+                    if 0.01 < price <= max_price and (price * volume) > 200000:
+                        candidates.append((sym, price * volume))
+
+            candidates_by_ticker = {t: v for t, v in candidates}
+
+            # 스크리너(당일 실제 거래량 급증/등락률 상위) 통과 종목에 우선권을 준다.
+            # 순수 달러볼륨 정렬만 쓰면 자본 규모가 큰 대형주가 절대값에서 항상
+            # 이겨 상위 80석을 차지해버려, 이 스캐너가 노리는 "그날 움직이는
+            # 소형주 모멘텀"이 뒤로 밀린다 (2026-07-17 실측: MDLZ/ABT/T 같은
+            # 초대형주가 1~4위 독점).
+            priority = sorted(
+                (t for t in screener_symbols if t in candidates_by_ticker),
+                key=lambda t: candidates_by_ticker[t],
+                reverse=True,
+            )
+            priority_set = set(priority)
+            rest = sorted(
+                (t for t in candidates_by_ticker if t not in priority_set),
+                key=lambda t: candidates_by_ticker[t],
+                reverse=True,
+            )
+            scan_tickers = priority + rest
+            print(
+                f"📡 [Scan] 스냅샷 필터 통과 {len(scan_tickers)}개 (스크리너 우선 "
+                f"{len(priority)}개 + 달러볼륨 순 {len(rest)}개)"
+            )
 
         if not scan_tickers:
             fallback_tickers = [
@@ -374,15 +397,28 @@ async def run_quant_scan_internal(
                 signal_type = "HOLD"
                 strength = "NORMAL"
 
-                if dna_score >= 85.0:
-                    signal_type = "BUY"
-                    strength = "STRONG"
-                elif dna_score >= 80.0:
-                    signal_type = "BUY"
-                    strength = "NORMAL"
-                elif dna_score <= 40.0:
-                    signal_type = "SELL"
-                    strength = "STRONG"
+                # quant_engine.py calculate_advanced_signals()의 tier1/tier2/tier_penny와
+                # 정합시킨 컷오프 — 스캔 단계 라벨(Discord 알림·daily_discovery 표시)이
+                # 실시간 경로의 실제 매수 게이트(paper_engine.py dna_gate)와 어긋나면
+                # 관심종목으로는 등록됐지만 실제로는 절대 매수되지 않는 종목이 생긴다.
+                is_penny_item = price <= 1.0
+                if is_penny_item:
+                    if dna_score >= 65.0:
+                        signal_type = "BUY"
+                        strength = "STRONG"
+                    elif dna_score <= 40.0:
+                        signal_type = "SELL"
+                        strength = "STRONG"
+                else:
+                    if dna_score >= 80.0 and rvol > 1.0:
+                        signal_type = "BUY"
+                        strength = "STRONG"
+                    elif dna_score >= 75.0 and rvol > 1.5:
+                        signal_type = "BUY"
+                        strength = "NORMAL"
+                    elif dna_score <= 40.0:
+                        signal_type = "SELL"
+                        strength = "STRONG"
 
                 results.append(
                     {
@@ -422,7 +458,10 @@ async def run_quant_scan_internal(
     auto_registered: List[str] = []
     if supabase and results:
         for item in results[:top_n]:
-            if item.get("dna_score", 0) < 70:
+            # paper_engine.py dna_gate(페니 65 / 일반 75)와 정합 — 이보다 낮은 DNA로
+            # watchlist에 등록해봤자 실시간 경로의 실제 매수 게이트를 절대 통과할 수 없다.
+            min_dna = 65.0 if item.get("price", 0) <= 1.0 else 75.0
+            if item.get("dna_score", 0) < min_dna:
                 continue
             try:
                 payload = {

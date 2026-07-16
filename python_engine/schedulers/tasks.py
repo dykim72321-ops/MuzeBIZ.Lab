@@ -9,7 +9,7 @@ import pandas as pd
 
 from state import app_state
 from routers import checklist
-from core.quant_scanner import run_quant_scan_internal
+from core.quant_scanner import run_quant_scan_internal, SCAN_INTERVAL_SECONDS
 from market.alpaca_stream import start_alpaca_stream, _stop_current_stream
 from utils.utils import is_market_hours
 
@@ -43,7 +43,7 @@ async def mtf_cache_scheduler():
 
 
 async def auto_quant_scan_scheduler():
-    """서버 시작 시 즉시 + 이후 4시간 주기로 퀀트 스캔 자동 실행 ($100 이하 일반주식)."""
+    """서버 시작 시 즉시 + 이후 SCAN_INTERVAL_SECONDS 주기로 퀀트 스캔 자동 실행 ($100 이하 일반주식)."""
     import gc
 
     await asyncio.sleep(30)
@@ -52,13 +52,15 @@ async def auto_quant_scan_scheduler():
         try:
             print("📡 [Auto-Scan] 자동 퀀트 스캔 시작 (자동 퀀트 스캔)")
             await run_quant_scan_internal()
-            print("✅ [Auto-Scan] 퀀트 스캔 완료 — 다음 실행까지 4시간 대기")
+            print(
+                f"✅ [Auto-Scan] 퀀트 스캔 완료 — 다음 실행까지 {SCAN_INTERVAL_SECONDS // 3600}시간 대기"
+            )
         except Exception as e:
             print(f"⚠️ [Auto-Scan] 스캔 중 오류: {e}")
         finally:
             gc.collect()
 
-        await asyncio.sleep(4 * 3600)
+        await asyncio.sleep(SCAN_INTERVAL_SECONDS)
 
 
 async def auto_paper_history_cleanup_scheduler():
@@ -276,11 +278,12 @@ async def stream_liveness_watchdog():
             print(
                 f"⚠️ [Liveness] No bar received for {elapsed:.0f}s — forcing stream reconnect."
             )
-            if app_state._current_ws_stream is not None:
-                try:
-                    await app_state._current_ws_stream.close()
-                except Exception:
-                    pass
+            # _stop_current_stream()이 _current_stream_task를 취소·대기하고 나서야
+            # 새 스트림을 시작해야 한다 — 이전에는 _current_ws_stream.close()만 fire-and-forget으로
+            # 호출하고 곧바로 start_alpaca_stream()을 create_task로 띄워, 이전 연결의 종료가
+            # 완료되기 전에 새 연결 시도가 겹쳐 Alpaca에 "connection limit exceeded"를
+            # 유발할 수 있었다.
+            await _stop_current_stream()
             discovery_tickers = await asyncio.to_thread(
                 app_state.db.get_active_tickers, limit=15
             )
@@ -293,7 +296,9 @@ async def stream_liveness_watchdog():
                 | app_state._held_tickers
             )
             if active_tickers:
-                asyncio.create_task(start_alpaca_stream(active_tickers))
+                app_state._current_stream_task = asyncio.create_task(
+                    start_alpaca_stream(active_tickers)
+                )
 
 
 async def system_heartbeat():
