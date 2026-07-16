@@ -17,6 +17,7 @@ import {
   sellPaperPosition,
   toggleSystemArm,
 } from '../services/pythonApiService';
+import { ApiClientError } from '../services/apiClient';
 import { useNavigate } from 'react-router-dom';
 
 
@@ -393,8 +394,9 @@ export function useDashboardData() {
               } else {
                 toast.error(result?.error || '청산 실패', { id: toastId });
               }
-            } catch {
-              toast.error('청산 에러', { id: toastId });
+            } catch (e: unknown) {
+              const detail = e instanceof ApiClientError ? e.detail : undefined;
+              toast.error(detail || '청산 에러', { id: toastId });
             }
           },
         },

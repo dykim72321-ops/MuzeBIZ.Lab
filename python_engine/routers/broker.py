@@ -791,6 +791,12 @@ async def manual_paper_sell(
         # watchlist EXITED 동기화.
         result = await engine._close_position(pos, signal_price, "Manual Sell")
         if result is None:
+            fail_reason = getattr(engine, "last_order_fail_reason", None)
+            if fail_reason == "MARKET_CLOSED":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{ticker}: 시장이 닫혀 있어 지금은 청산할 수 없습니다. 정규장 개장 후 다시 시도하세요.",
+                )
             raise HTTPException(
                 status_code=502,
                 detail=f"{ticker} 실거래 매도 주문 실패/미확인 — 포지션을 유지합니다",

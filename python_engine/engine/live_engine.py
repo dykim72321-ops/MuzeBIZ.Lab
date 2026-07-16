@@ -68,6 +68,9 @@ class LiveTradingManager(PaperTradingManager):
     def __init__(self, supabase_client: Client, trading_client: TradingClient):
         super().__init__(supabase_client)
         self.alpaca = trading_client
+        # _submit_alpaca_order()가 실패 시 원인을 구분해 남겨두는 슬롯 — 호출부(라우터)가
+        # 사용자에게 "체결 미확인"과 "시장 폐장" 등 서로 다른 원인을 구분해 안내할 수 있게 한다.
+        self.last_order_fail_reason: str | None = None
 
     # ── Alpaca 주문 공통 헬퍼 ─────────────────────────────────────────────────
 
@@ -86,7 +89,28 @@ class LiveTradingManager(PaperTradingManager):
         fallback_price(호출측 슬리피지 추정가)로 대체한다.
         """
         side_str = "BUY" if side == OrderSide.BUY else "SELL"
+        self.last_order_fail_reason = None
         try:
+            # 시장이 닫혀 있으면 TimeInForce.DAY 시장가 주문은 개장 전까지 체결되지 않아
+            # 아래 폴링이 무조건 타임아웃 → 자동 취소로 이어진다. 제출 자체를 생략하고
+            # 명확한 사유를 남겨 호출부가 "체결 실패"가 아닌 "장 폐장"으로 안내하게 한다.
+            clock = await asyncio.to_thread(self.alpaca.get_clock)
+            if not clock.is_open:
+                print(
+                    f"⛔ [{ticker}] {side_str} 주문 차단 — 시장 폐장 중 "
+                    f"(다음 개장: {clock.next_open})"
+                )
+                self.last_order_fail_reason = "MARKET_CLOSED"
+                await self.webhook.send_alert(
+                    title=f"⛔ [{side_str} 차단] {ticker}",
+                    description=(
+                        f"시장이 닫혀 있어 시장가 주문을 제출하지 않았습니다. "
+                        f"다음 개장: {clock.next_open}"
+                    ),
+                    color=0xE67E22,
+                )
+                return None
+
             # 매수(BUY)일 때만 정수로 내림 처리하여 예산 초과 방지
             # 매도(SELL)일 때는 소수점(부분/분할) 수량을 그대로 전송해야 잔여 수량이 묶이지 않음
             order_qty = float(math.floor(qty)) if side == OrderSide.BUY else float(qty)
@@ -180,6 +204,7 @@ class LiveTradingManager(PaperTradingManager):
                 print(
                     f"❌ [LIVE ORDER {order.status}] {ticker} {side_str} order_id={order.id}"
                 )
+                self.last_order_fail_reason = "REJECTED"
                 await self.webhook.send_alert(
                     title=f"🚨 [LIVE ORDER {str(order.status).upper()}] {ticker}",
                     description=f"주문이 체결되지 않았습니다 (order_id: `{order.id}`)",
@@ -195,6 +220,7 @@ class LiveTradingManager(PaperTradingManager):
                     f"⚠️ [LIVE ORDER UNCONFIRMED] {ticker} {side_str} "
                     f"order_id={order.id} status={order.status} — 취소 시도"
                 )
+                self.last_order_fail_reason = "UNCONFIRMED"
                 try:
                     await asyncio.to_thread(self.alpaca.cancel_order_by_id, order.id)
                 except Exception as cancel_err:
@@ -230,8 +256,10 @@ class LiveTradingManager(PaperTradingManager):
         except Exception as e:
             print(f"❌ [LIVE ORDER FAILED] {ticker} {side}: {e}")
             if side == OrderSide.SELL and _is_phantom_position_error(e):
+                self.last_order_fail_reason = "PHANTOM_POSITION"
                 await self._reconcile_phantom_position(ticker, e)
             else:
+                self.last_order_fail_reason = "ERROR"
                 await self.webhook.send_alert(
                     title=f"🚨 [LIVE ORDER ERROR] {ticker}",
                     description=f"주문 실패: {e}",
