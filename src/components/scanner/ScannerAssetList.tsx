@@ -6,6 +6,7 @@ import {
 import { TargetStopDisplay } from './TargetStopDisplay';
 import clsx from 'clsx';
 import type { Stock } from '../../types';
+import { DNA_BUY, DNA_SELL } from '../../constants/dnaThresholds';
 
 interface ScannerAssetListProps {
   viewMode: 'table' | 'grid';
@@ -99,8 +100,8 @@ export const ScannerAssetList = ({
                             transition={{ duration: 1.5, ease: "circOut" }}
                             className={clsx(
                               "h-full rounded-full transition-all duration-1000",
-                              stock.dnaScore >= 70 ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]" :
-                                stock.dnaScore >= 40 ? "bg-indigo-500" : "bg-rose-500"
+                              stock.dnaScore >= DNA_BUY ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]" :
+                                stock.dnaScore >= DNA_SELL ? "bg-indigo-500" : "bg-rose-500"
                             )}
                           />
                         </div>
@@ -156,7 +157,7 @@ export const ScannerAssetList = ({
                 <div className="text-right">
                   <p className="text-[10px] text-blue-600 uppercase font-black tracking-widest mb-2">DNA Power</p>
                   <div className="flex items-center gap-3 justify-end leading-none">
-                    <Zap className={clsx("w-5 h-5 fill-current", stock.dnaScore >= 70 ? "text-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.5)]" : "text-blue-600")} />
+                    <Zap className={clsx("w-5 h-5 fill-current", stock.dnaScore >= DNA_BUY ? "text-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.5)]" : "text-blue-600")} />
                     <p className="text-3xl font-mono text-white font-black tracking-tighter leading-none">{stock.dnaScore}</p>
                   </div>
                 </div>

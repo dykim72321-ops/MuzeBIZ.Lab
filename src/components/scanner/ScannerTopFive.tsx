@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { TrendingUp } from 'lucide-react';
 import clsx from 'clsx';
 import type { Stock } from '../../types';
+import { DNA_BUY } from '../../constants/dnaThresholds';
 
 interface ScannerTopFiveProps {
   stocks: Stock[];
@@ -74,7 +75,7 @@ export const ScannerTopFive = ({ stocks, onDeepDive }: ScannerTopFiveProps) => {
                    <div 
                       className={clsx(
                         "h-full rounded-full transition-all duration-1000 ease-out",
-                        stock.dnaScore >= 70 ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : stock.dnaScore >= 50 ? "bg-amber-500" : "bg-rose-500"
+                        stock.dnaScore >= DNA_BUY ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : stock.dnaScore >= 50 ? "bg-amber-500" : "bg-rose-500"
                       )} 
                       style={{ width: `${stock.dnaScore}%` }} 
                    />

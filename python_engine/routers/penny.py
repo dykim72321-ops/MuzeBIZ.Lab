@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from api.deps import get_api_key
 from state import app_state
-from core.quant_scanner import run_quant_scan_internal
+from core.quant_scanner import run_quant_scan_internal, SCAN_INTERVAL_SECONDS
 
 router = APIRouter(prefix="/api/quant", tags=["quant-scan"])
 
@@ -45,8 +45,7 @@ async def penny_scan_status():
     next_scan_seconds: Optional[int] = None
     if last_penny_scan_at:
         elapsed = (datetime.now() - last_penny_scan_at).total_seconds()
-        interval = 4 * 3600
-        remaining = interval - elapsed
+        remaining = SCAN_INTERVAL_SECONDS - elapsed
         next_scan_seconds = max(0, int(remaining))
 
     return {

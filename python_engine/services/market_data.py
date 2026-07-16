@@ -402,6 +402,10 @@ class MomentumValidator:
     def validate(
         self, ticker: str, current_price: float, rvol: float, dna_score: float = 0.0
     ) -> tuple[bool, str]:
+        # 0. DNA≥80 스킵 — 이미 tier1 최상급 신호이므로 RVOL/MTF 재검증 없이 통과
+        if dna_score >= 80.0:
+            return True, "DNA≥80 — 인터셉터 스킵"
+
         # 1. RVOL 검증
         if rvol < self.rvol_threshold:
             return (

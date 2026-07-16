@@ -4,6 +4,7 @@ import { ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { StockTerminalModal } from '../dashboard/StockTerminalModal';
 
 import clsx from 'clsx';
+import { DNA_STRONG_BUY, DNA_BUY } from '../../constants/dnaThresholds';
 
 interface AnalysisResultCardProps {
     ticker: string;
@@ -30,8 +31,8 @@ export const AnalysisResultCard = ({
 }: AnalysisResultCardProps) => {
     const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
-    const isSTier = dnaScore >= 80;
-    const isATier = dnaScore >= 70 && dnaScore < 80;
+    const isSTier = dnaScore >= DNA_STRONG_BUY;
+    const isATier = dnaScore >= DNA_BUY && dnaScore < DNA_STRONG_BUY;
 
     // Sparkline data (mocked for visual effect)
     const sparkData = [
@@ -64,7 +65,7 @@ export const AnalysisResultCard = ({
                                         dnaScore >= 50 ? "bg-amber-500/10 border-amber-500/30 text-amber-400" :
                                             "bg-rose-500/10 border-rose-500/30 text-rose-400"
                             )}>
-                                {isSTier ? 'QUANT S' : dnaScore >= 70 ? 'QUANT A' : 'QUANT B'}
+                                {isSTier ? 'QUANT S' : dnaScore >= DNA_BUY ? 'QUANT A' : 'QUANT B'}
                             </div>
                         </div>
                         <div className="flex items-center gap-3">

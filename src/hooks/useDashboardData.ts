@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { useTradingStore } from '../store/useTradingStore';
 import { useMarketEngine } from './useMarketEngine';
 import { processSignal } from '../utils/signalProcessor';
+import { DNA_BUY } from '../constants/dnaThresholds';
 
 import type { DiscoveryStock, TerminalData } from '../types/dashboard';
 import {
@@ -284,7 +285,7 @@ export function useDashboardData() {
         bullPoints: displaySignal.bullPoints,
         bearPoints: displaySignal.bearPoints,
         riskLevel:
-          (stock.dna_score || 0) >= 70 ? 'Low' : (stock.dna_score || 0) >= 50 ? 'Medium' : 'High',
+          (stock.dna_score || 0) >= DNA_BUY ? 'Low' : (stock.dna_score || 0) >= 50 ? 'Medium' : 'High',
         formulaVerdict: displaySignal.reasoning,
         price: stock.price || 0,
         change: `${(stock.change_percent || stock.changePercent || 0).toFixed(2)}%`,
