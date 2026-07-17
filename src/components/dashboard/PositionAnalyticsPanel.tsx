@@ -82,7 +82,7 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
                 </Pie>
                 <Tooltip
                   contentStyle={{ background: '#ffffff', border: '2px solid #bfdbfe', borderRadius: '4px', fontSize: '11px', color: '#000000', fontWeight: 'bold' }}
-                  formatter={(v: any, name: any) => [`${Number(v ?? 0).toFixed(2)}%`, String(name)]}
+                  formatter={(v: unknown, name: unknown) => [`${Number(v ?? 0).toFixed(2)}%`, String(name)]}
                 />
               </RechartsPieChart>
             </ResponsiveContainer>

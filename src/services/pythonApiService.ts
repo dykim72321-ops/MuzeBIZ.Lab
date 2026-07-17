@@ -360,9 +360,9 @@ export async function fetchClosedTrades(limit: number = 30): Promise<ClosedTrade
 /**
  * Alpaca 실제 포트폴리오 히스토리 조회
  */
-export async function fetchPortfolioHistory(period: string = "all", timeframe: string = "1D"): Promise<any[]> {
+export async function fetchPortfolioHistory(period: string = "all", timeframe: string = "1D"): Promise<unknown[]> {
   try {
-    const data = await apiClient.broker.get<any[]>(`/api/broker/portfolio-history?period=${period}&timeframe=${timeframe}`);
+    const data = await apiClient.broker.get<unknown[]>(`/api/broker/portfolio-history?period=${period}&timeframe=${timeframe}`);
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('[PythonAPI] Portfolio history fetch error:', error);

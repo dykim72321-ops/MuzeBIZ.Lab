@@ -19,7 +19,7 @@ export const useSystemStatus = () => {
           setIsOnline(res.ok);
           setLastChecked(new Date());
         }
-      } catch (err) {
+      } catch {
         if (mounted) {
           setIsOnline(false);
           setLastChecked(new Date());
