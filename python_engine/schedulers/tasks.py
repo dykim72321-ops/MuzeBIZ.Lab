@@ -262,6 +262,126 @@ async def paper_portfolio_updater():
         await asyncio.sleep(30)  # 30초 주기 업데이트 (메모리 및 CPU 절약)
 
 
+async def position_ts_sweeper():
+    """30초 주기로 보유 포지션(paper_positions)의 최신 체결가를 직접 조회해
+    트레일링 스탑 이탈을 평가하는 안전망 태스크.
+
+    TS 청산은 원래 on_minute_bar_closed() 1분봉 이벤트로만 실행된다. IEX 피드에서
+    봉이 뜸한 저유동성 종목이나 서버 재시작 직후(봉 공백)에는 가격이 TS 아래로
+    내려가도 다음 봉이 올 때까지 청산이 무기한 지연되는 사각지대가 있었다
+    (RAYA 사례, 2026-07-17: TS $2.698 아래 봉 32개가 서버 공백·봉 공백과 겹쳐
+    한 번도 평가되지 않음). 이 스윕은 봉 도착과 무관하게 최신 체결가 기준으로
+    `price < ts_threshold`만 평가해 청산한다.
+
+    TS 상향(트레일링)·Scale-Out·Time-Decay·EOD는 여전히 1분봉 경로
+    (process_signal) 담당이므로 여기서는 ts_threshold/highest_price를 건드리지
+    않는다. ARM 해제 상태에서도 실행된다 (TS 청산은 손실 확대 방지 우선 원칙).
+    """
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockLatestTradeRequest
+
+    SWEEP_INTERVAL_SEC = 30
+    print("🧹 [TS Sweeper] Trailing-stop safety sweep started.")
+
+    api_key = os.getenv("APCA_API_KEY_ID")
+    api_secret = os.getenv("APCA_API_SECRET_KEY")
+    client = None
+    if api_key and api_secret:
+        try:
+            client = StockHistoricalDataClient(api_key, api_secret)
+        except Exception as e:
+            print(f"⚠️ [TS Sweeper] Alpaca client init error: {e}")
+
+    while True:
+        try:
+            engine = app_state.active_engine
+            if (
+                client is None
+                or not app_state.supabase
+                or engine is None
+                or not is_market_hours()
+            ):
+                await asyncio.sleep(60)
+                continue
+
+            res = await asyncio.to_thread(
+                app_state.supabase.table("paper_positions")
+                .select("*")
+                .in_("status", ["HOLD", "SCALE_OUT"])
+                .execute
+            )
+            positions = res.data or []
+            if not positions:
+                await asyncio.sleep(SWEEP_INTERVAL_SEC)
+                continue
+
+            tickers = sorted({p["ticker"] for p in positions})
+            try:
+                trades = await asyncio.to_thread(
+                    client.get_stock_latest_trade,
+                    StockLatestTradeRequest(symbol_or_symbols=tickers),
+                )
+            except Exception as e:
+                print(f"⚠️ [TS Sweeper] latest trade fetch failed: {e}")
+                await asyncio.sleep(SWEEP_INTERVAL_SEC)
+                continue
+
+            for pos in positions:
+                ticker = pos["ticker"]
+                trade = trades.get(ticker)
+                if not trade:
+                    continue
+                price = float(trade.price)
+                if price <= 0:
+                    continue
+
+                ts_threshold = float(pos["ts_threshold"])
+
+                # 봉이 안 와도 대시보드/DB 현재가는 최신으로 유지 (스테일 방지)
+                if abs(float(pos.get("current_price") or 0) - price) > 0.0001:
+                    try:
+                        await asyncio.to_thread(
+                            app_state.supabase.table("paper_positions")
+                            .update({"current_price": round(price, 4)})
+                            .eq("ticker", ticker)
+                            .in_("status", ["HOLD", "SCALE_OUT"])
+                            .execute
+                        )
+                    except Exception:
+                        pass
+
+                if price >= ts_threshold:
+                    continue
+
+                # 1분봉 경로(process_signal)와 동일한 청산 직렬화 락 사용.
+                # _close_position 내부의 원자적 CLOSING 클레임이 프로세스 간
+                # 중복 청산을 재차 방지한다.
+                async with engine._get_exit_lock(ticker):
+                    result = await engine._close_position(pos, price, "Trailing Stop")
+                if result is None:
+                    print(f"⚠️ [TS Sweeper] {ticker} 청산 실패/중복 — 포지션 유지")
+                    continue
+
+                app_state._held_tickers.discard(ticker)
+                status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
+                slip_exit_pct = (result["fill_price"] / price - 1) * 100
+                print(
+                    f"🧹 [TS Sweeper] {ticker} TS 청산 — 최신가 ${price:.4f} < TS ${ts_threshold:.4f}"
+                )
+                await engine.webhook.send_alert(
+                    title=f"{status_emoji} [PAPER EXIT] {ticker}",
+                    description=(
+                        f"청산가: ${result['fill_price']:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n"
+                        f"사유: 트레일링 스탑 발동 (TS 스윕 — 1분봉 공백 구간 감지)"
+                    ),
+                    color=0x34495E,
+                )
+        except Exception as e:
+            print(f"⚠️ [TS Sweeper] Error: {e}")
+
+        await asyncio.sleep(SWEEP_INTERVAL_SEC)
+
+
 async def stream_liveness_watchdog():
     """3분 주기로 Alpaca WebSocket 생존 여부를 확인."""
     STALE_THRESHOLD_SEC = 300
