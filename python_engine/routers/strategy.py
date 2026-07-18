@@ -236,16 +236,37 @@ async def get_strategy_reports(period: str = "month"):
             .order("closed_at", desc=False)
             .execute
         )
-        trades = res.data or []
+        all_trades = res.data or []
 
-        if not trades:
+        if not all_trades:
             result = {"period": period, "buckets": [], "message": "거래 내역 없음"}
             with _stats_cache_lock:
                 stats_cache[cache_key] = result
             return result
 
-        buckets: dict[str, list] = {}
         ny_tz = ZoneInfo("America/New_York")
+        now_dt = datetime.now(ny_tz)
+
+        # UI 렌더링 부하 방지를 위한 기간 제한 적용 (Day: 3개월, Week: 1년, Month: 5년)
+        if period == "day":
+            cutoff_dt = now_dt - timedelta(days=90)
+        elif period == "week":
+            cutoff_dt = now_dt - timedelta(days=365)
+        else:
+            cutoff_dt = now_dt - timedelta(days=365 * 5)
+
+        cutoff_iso = cutoff_dt.astimezone(timezone.utc).isoformat()
+
+        # 화면에 표시하지 않는 이전 기간의 수익을 누적하여 MDD 계산의 기준 자본금(global_equity)을 정확히 맞춤
+        global_equity = INITIAL_CAPITAL
+        trades = []
+        for t in all_trades:
+            if (t.get("closed_at") or "") < cutoff_iso:
+                global_equity += float(t.get("profit_amt") or 0)
+            else:
+                trades.append(t)
+
+        buckets: dict[str, list] = {}
         min_dt = None
 
         for t in trades:
@@ -292,7 +313,7 @@ async def get_strategy_reports(period: str = "month"):
                     buckets[label] = []
 
         bucket_list = []
-        global_equity = INITIAL_CAPITAL
+        # global_equity는 위의 루프에서 cutoff 이전 누적분을 이미 포함하고 있음
 
         for label in sorted(buckets.keys()):
             bucket_trades = buckets[label]

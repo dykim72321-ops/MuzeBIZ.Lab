@@ -93,18 +93,59 @@ from services.kelly_sizer import KellySizer
 _kelly_sizer = KellySizer()
 
 
+# ── ATR 기반 초기 스탑 폭 (2026-07-18) ───────────────────────────────────────
+# 고정 %(TS_INIT_PCT/PENNY_TS_INIT_PCT) 하나로만 초기 스탑을 잡으면, 변동성이
+# 큰 종목은 정상적인 가격 노이즈에도 스탑에 잘리고(승률 분석에서 확인된
+# Trailing Stop 청산의 낮은 승률의 원인 중 하나) 변동성이 작은 종목은 스탑이
+# 지나치게 느슨해 손실을 필요 이상으로 키운다. CHANDELIER_K_*(원래 정의만
+# 되고 어디서도 쓰이지 않던 상수)를 사용해 ATR로 폭을 조절하되, 고정 % 대비
+# 0.5~1.5배 범위로 클램프해 ATR 추정치가 튀어도 리스크가 과도하게 벌어지거나
+# 좁아지지 않게 한다.
+ENTRY_STOP_ATR_CLAMP_LOW = 0.5  # 고정 % 대비 최소 폭 배수
+ENTRY_STOP_ATR_CLAMP_HIGH = 1.5  # 고정 % 대비 최대 폭 배수
+
+
+def _compute_entry_stop_pct(entry_price: float, atr: float, is_penny: bool) -> float:
+    """진입 시점 ATR로 초기 스탑 거리(0~1, 예: 0.12 = -12%)를 계산.
+
+    ATR<=0(데이터 부족)이면 고정 %를 그대로 반환해 기존 동작과 동일하게
+    폴백한다. 반환값은 이후 포지션 생존 기간 내내 재사용되는 고정값이므로,
+    이 함수 자체는 진입 시 1회만 호출해야 한다(매 봉 호출 금지 — 라이브 ATR
+    변동으로 이미 확보한 방어선이 흔들리면 안 됨).
+    """
+    fixed_pct = 1.0 - (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
+    if atr <= 0 or entry_price <= 0:
+        return fixed_pct
+    k = CHANDELIER_K_PENNY if is_penny else CHANDELIER_K_NORMAL
+    atr_pct = (k * atr) / entry_price
+    return min(
+        max(atr_pct, fixed_pct * ENTRY_STOP_ATR_CLAMP_LOW),
+        fixed_pct * ENTRY_STOP_ATR_CLAMP_HIGH,
+    )
+
+
 def _compute_locked_floor(
-    entry_price: float, highest_price: float, is_penny: bool
+    entry_price: float,
+    highest_price: float,
+    is_penny: bool,
+    entry_stop_pct: float | None = None,
 ) -> float:
     """
     비가역(monotonic) 리스크 방어 하한선.
 
-    - 정적 초기 스탑(퍼센트 기반)은 항상 최저 방어선으로 유지된다.
+    - 정적 초기 스탑은 항상 최저 방어선으로 유지된다. entry_stop_pct(진입 시점에
+      1회 계산되어 DB에 저장된 ATR 기반 거리)가 있으면 그 값을, 없으면(레거시
+      포지션) 고정 %를 사용한다 — 라이브 ATR을 여기서 다시 읽지 않는 이유는
+      ATR 급변(뉴스 이벤트 등) 시 이미 확보한 방어선이 느슨해지는 것을 막기
+      위함이다.
     - 페니 종목이 +10%(PENNY_BREAKEVEN_TRIGGER) 이상 도달한 이력이 있으면 본전(entry_price)
       으로 영구 락인된다. highest_price는 호출부에서 이미 max()로 단조 갱신되므로,
       이 락인 여부를 별도 상태(DB 컬럼/플래그) 없이 highest_price만으로 파생할 수 있다.
     """
-    init_pct = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
+    if entry_stop_pct is not None:
+        init_pct = 1.0 - entry_stop_pct
+    else:
+        init_pct = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
     static_floor = entry_price * init_pct
     if is_penny and highest_price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
         return max(static_floor, entry_price)
@@ -117,6 +158,7 @@ def update_reversible_trailing_stop(
     atr_value: float,
     current_smoothed_er: float,
     is_penny: bool,
+    entry_stop_pct: float | None = None,
 ) -> float:
     """
     가역적(reversible) 스위칭 트레일링 스탑.
@@ -141,11 +183,18 @@ def update_reversible_trailing_stop(
     k_t = k_min + (k_max - k_min) * current_smoothed_er
     adaptive_stop = highest_price - (k_t * atr_value)
 
-    locked_floor = _compute_locked_floor(entry_price, highest_price, is_penny)
+    locked_floor = _compute_locked_floor(
+        entry_price, highest_price, is_penny, entry_stop_pct
+    )
     return max(locked_floor, adaptive_stop)
 
 
 class PaperTradingManager:
+    # LiveTradingManager가 True로 오버라이드 — _close_position()의 하드 스탑
+    # 시뮬레이션처럼 "실제 체결가가 없는 페이퍼 모드에서만" 적용해야 하는 로직을
+    # 구분하는 데 사용한다.
+    IS_LIVE = False
+
     def __init__(self, supabase_client: Client):
         self.supabase = supabase_client
         self.webhook = WebhookManager()
@@ -437,6 +486,35 @@ class PaperTradingManager:
             return None
         units, fill_price = executed
 
+        # ── 브로커 하드 스탑(Hard Stop-Loss) 주문 시뮬레이션 (PAPER 전용) ────────
+        # 웹소켓(데이터 공백)이나 폴링 주기 지연으로 인해 1분봉 종가가
+        # -15% 한참 아래(예: -40%)에서 포착되더라도,
+        # 실제 환경(Alpaca OCO/OTO)에서는 브로커 서버가 -15% 선에서 이미 Stop Market 주문을
+        # 발동시키므로 이를 반영하여 치명적 손실(Gap-down)을 차단한다.
+        # LIVE 모드에서는 fill_price가 이미 Alpaca가 실제로 지급한 체결가이므로
+        # (self.IS_LIVE) 이 시뮬레이션으로 덮어쓰면 실제 체결가와 내부 현금 장부·
+        # paper_history 기록이 어긋난다 — PAPER 모드에서만 적용한다.
+        entry_stop_pct = pos.get("entry_stop_pct")
+        hard_stop_init_pct = (
+            (1.0 - entry_stop_pct)
+            if entry_stop_pct is not None
+            else (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
+        )
+        hard_stop_limit = entry_price * hard_stop_init_pct
+        if (
+            not self.IS_LIVE
+            and exit_reason == "Trailing Stop"
+            and fill_price < hard_stop_limit
+        ):
+            # 스탑 트리거 후 시장가 슬리피지를 감안해 Hard Limit 대비 2% 추가 손실로 시뮬레이션
+            simulated_broker_fill = hard_stop_limit * 0.98
+            if simulated_broker_fill > fill_price:
+                print(
+                    f"🛡️ [Hard Stop 방어] {ticker} 급락(데이터 공백) 방어! "
+                    f"기존 {fill_price:.4f} -> 브로커 스탑 체결가 {simulated_broker_fill:.4f} 로 보정"
+                )
+                fill_price = simulated_broker_fill
+
         pnl_pct = (fill_price / entry_price - 1) * 100
         profit_amt = (fill_price - entry_price) * units
         proceeds = units * fill_price
@@ -564,12 +642,12 @@ class PaperTradingManager:
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
         is_penny_signal = price <= PENNY_MAX_PRICE
-        # quant_engine.calculate_advanced_signals()의 tier_penny(DNA≥65)/tier2(DNA≥75) 기준과
+        # quant_engine.calculate_advanced_signals()의 tier_penny(DNA≥80)/tier2(DNA≥75) 기준과
         # 정합. Strong_Buy는 DNA 기준(tier1/2/penny) 외에 numba_strong_buy(RSI·RVOL 백분위
         # 랭크 기반) 경로로도 True가 될 수 있어 DNA_Score가 tier 기준 미만인 신호가 섞여
         # 들어올 수 있으므로, 이 게이트가 tier 최저선 아래로는 항상 차단해야 한다
-        # (과거 55/70으로 완화됐던 회귀 수정 — 2026-07-15).
-        dna_gate = 65 if is_penny_signal else 75
+        # (페니주 쓰레기 신호 차단을 위해 65 -> 80으로 대폭 상향 — 2026-07-17).
+        dna_gate = 80 if is_penny_signal else 75
 
         # ── Gate: signal 조건 사전 체크 (ARMED 여부 포함) ────────────────────
         if signal_type == "BUY" and strength == "STRONG" and not pos:
@@ -597,6 +675,52 @@ class PaperTradingManager:
                     note=f"DNA {dna_score:.1f} < gate {dna_gate} ({'penny' if is_penny_signal else 'normal'})",
                 )
                 return
+
+            # 글로벌 서킷 브레이커 (Whipsaw 패닉장 방어)
+            try:
+                # NY 자정을 UTC로 변환해 조회해야 한다 — 날짜 문자열에 그대로
+                # "T00:00:00Z"를 붙이면 UTC 자정 기준이 되어 NY 자정(UTC 04-05시)보다
+                # 4~5시간 이르게 잡혀 전날 애프터아워 거래까지 "오늘"에 섞여 든다.
+                today_ny_midnight_utc = (
+                    datetime.now(_NY_TZ)
+                    .replace(hour=0, minute=0, second=0, microsecond=0)
+                    .astimezone(timezone.utc)
+                )
+                cb_history = await asyncio.to_thread(
+                    self.supabase.table("paper_history")
+                    .select("pnl_pct,profit_amt")
+                    .gte("closed_at", today_ny_midnight_utc.isoformat())
+                    .execute
+                )
+                cb_rows = cb_history.data or []
+                if len(cb_rows) > 0:
+                    total_pnl = sum(float(r.get("profit_amt") or 0) for r in cb_rows)
+                    loss_count = sum(
+                        1 for r in cb_rows[-5:] if float(r.get("pnl_pct") or 0) < 0
+                    )
+
+                    if loss_count >= 5 or total_pnl <= -(
+                        acc.get("capital", INITIAL_CAPITAL) * 0.02
+                    ):
+                        from state import app_state
+
+                        app_state.SYSTEM_ARMED = False
+                        print(
+                            f"🚨 [CIRCUIT BREAKER] 당일 연속 손절 {loss_count}회 또는 누적 손실 ${total_pnl:.2f}. 시스템 강제 정지(ARMED=False)."
+                        )
+                        await self._log_decision(
+                            ticker=ticker,
+                            gate="CIRCUIT_BREAKER",
+                            outcome="BLOCKED",
+                            signal=signal_type,
+                            dna_score=dna_score,
+                            rsi=rsi,
+                            price=price,
+                            note="Global Circuit Breaker Activated",
+                        )
+                        return
+            except Exception as cb_err:
+                print(f"⚠️ [Circuit Breaker Check] 실패: {cb_err}")
 
             # 당일 재진입 금지(Cool-down) + 종목당 일일 최대 거래 횟수 제한
             # 오버트레이딩(Whipsaw) 방지: 오늘 손실/트레일링스탑 청산 이력이 있으면 당일 재진입
@@ -837,7 +961,11 @@ class PaperTradingManager:
                         price, is_buy=True, is_penny=is_penny_signal
                     )
                     est_units = buy_budget / est_fill_price
-                    ts_init = PENNY_TS_INIT_PCT if is_penny_signal else TS_INIT_PCT
+                    # ATR 기반 초기 스탑 폭 — 진입 시점에 1회 계산해 고정한다(_compute_entry_stop_pct
+                    # 참고). atr<=0(데이터 부족)이면 기존 고정 %와 동일한 값으로 폴백된다.
+                    entry_stop_pct = _compute_entry_stop_pct(
+                        est_fill_price, atr, is_penny_signal
+                    )
 
                     # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문
                     # 제출 전에 추정치로 먼저 INSERT해 unique violation으로 동시 프로세스의
@@ -852,7 +980,8 @@ class PaperTradingManager:
                         "entry_slippage": (est_fill_price / price - 1) * 100,
                         "current_price": est_fill_price,
                         "highest_price": est_fill_price,
-                        "ts_threshold": est_fill_price * ts_init,
+                        "ts_threshold": est_fill_price * (1.0 - entry_stop_pct),
+                        "entry_stop_pct": entry_stop_pct,
                         "units": est_units,
                         "is_scaled_out": False,
                         "scale_out_bar_count": 0,
@@ -897,7 +1026,7 @@ class PaperTradingManager:
                     )
                     return
                 units, fill_price = executed
-                ts_threshold = fill_price * ts_init
+                ts_threshold = fill_price * (1.0 - entry_stop_pct)
 
                 try:
                     # 클레임 행을 실체결 결과로 확정 (실거래 체결가·체결 수량 반영)
@@ -984,6 +1113,9 @@ class PaperTradingManager:
                 is_scaled_out = pos["is_scaled_out"]
                 ts_threshold = pos["ts_threshold"]
                 is_penny = entry_price <= PENNY_MAX_PRICE
+                entry_stop_pct = pos.get(
+                    "entry_stop_pct"
+                )  # 레거시 포지션은 None → 고정 % 폴백
 
                 # A-0. EOD 강제 청산 최우선 처리 (Scale-Out보다 앞에 위치 — 동시 발동 시 EOD 우선)
                 # 수익 포지션(현재가 > 진입가)은 익일 홀딩 — 승자를 일찍 자르지 않음
@@ -1084,7 +1216,12 @@ class PaperTradingManager:
                 if not is_scaled_out:
                     effective_atr = atr if atr > 0 else (entry_price * 0.02)
                     ts_threshold = update_reversible_trailing_stop(
-                        entry_price, highest_price, effective_atr, smoothed_er, is_penny
+                        entry_price,
+                        highest_price,
+                        effective_atr,
+                        smoothed_er,
+                        is_penny,
+                        entry_stop_pct,
                     )
                 else:
                     # Scale-Out 후 물량: 이익 보전을 위해 TS_TRAIL_PCT로 타이트하게 조이거나 본절 유지

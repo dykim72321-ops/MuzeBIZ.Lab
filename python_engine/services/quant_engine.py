@@ -106,7 +106,7 @@ def calculate_advanced_signals(
 
     ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
     df["Is_Extended"] = (
-        (df["Close"] > day_open * 1.25)
+        (df["Close"] > day_open * 1.30)
         | (df["Close"] > df["Close"].shift(1) * 1.25)
         | (df["Close"] > ma20 * 1.30)
     )
@@ -119,8 +119,11 @@ def calculate_advanced_signals(
     df["smoothed_er"] = df["ER"].ewm(span=15, adjust=False).mean()
 
     score = pd.Series(50.0, index=df.index)
+    # paper_engine.PENNY_MAX_PRICE / quant_scanner.is_penny_item과 정합된 단일 경계값($1)
+    is_penny_df = df["Close"] <= 1.0
 
-    score += np.where(
+    # 일반 주식: 과매도(Mean-Reversion) 전략
+    normal_rsi = np.where(
         df["RSI"].isna(),
         0,
         np.where(
@@ -151,6 +154,27 @@ def calculate_advanced_signals(
             ),
         ),
     )
+
+    # 페니 주식: 수급 돌파(Momentum) 전략
+    penny_rsi = np.where(
+        df["RSI"].isna(),
+        0,
+        np.where(
+            df["RSI"] < 45,
+            -20,  # 떨어지는 칼날 방지
+            np.where(
+                df["RSI"] < 60,
+                -10,
+                np.where(
+                    df["RSI"] < 85,
+                    np.where(df["RVOL"] >= 3.0, 20, 5),  # 수급 동반 돌파 가점
+                    np.where(df["RVOL"] >= 3.0, 10, -10),
+                ),
+            ),
+        ),  # 초과매수 구간
+    )
+
+    score += np.where(is_penny_df, penny_rsi, normal_rsi)
 
     macd_diff = df["MACD_Diff"]
     macd_diff_prev = df["MACD_Diff"].shift(1).bfill()
@@ -233,7 +257,9 @@ def calculate_advanced_signals(
     is_penny = df["Close"] <= 1.0
     tier1 = (~is_penny) & (df["DNA_Score"] >= 80.0) & (df["RVOL"] > 1.0)
     tier2 = (~is_penny) & (df["DNA_Score"] >= 75.0) & (df["RVOL"] > 1.5)
-    tier_penny = is_penny & (df["DNA_Score"] >= 65.0)
+    # 페니주의 경우 DNA 게이트를 80으로 대폭 상향하여 어설픈 신호 차단
+    # (paper_engine.py dna_gate(penny)=80, quant_scanner.py 스캔 라벨/워치리스트 컷도 동일하게 정합)
+    tier_penny = is_penny & (df["DNA_Score"] >= 80.0)
 
     # 기존 전략(DNA)과 새로운 Numba 과매도 포착 전략을 병합 (Or 조건)
     df["Strong_Buy"] = (
@@ -256,26 +282,41 @@ def calculate_dna_score(
     di_minus: float,
     rvol: float,
     is_extended: bool,
+    price: float = 10.0,
     return_deltas: bool = False,
 ):
     """RSI·MACD·ADX·RVOL을 합성한 0~100 DNA 점수."""
     score = 50.0
     d_rsi = d_macd = d_adx = d_rvol = d_ext = 0.0
+    is_penny = price <= 1.0
 
     if pd.isna(rsi):
         d_rsi = 0.0
-    elif rsi < 30:
-        d_rsi = 20
-    elif rsi < 45:
-        d_rsi = 20 - (rsi - 30) / 15 * 5
-    elif rsi < 55:
-        d_rsi = 15 * (55 - rsi) / 10
-    elif rsi < 65:
-        d_rsi = 0 if rvol >= 3.0 else -((rsi - 55) / 10 * 10)
-    elif rsi < 75:
-        d_rsi = 0 if rvol >= 3.0 else -(10 + (rsi - 65) / 10 * 10)
     else:
-        d_rsi = -5 if rvol >= 5.0 else (-10 if rvol >= 3.0 else -20)
+        if is_penny:
+            # 페니주: 돌파 모멘텀 로직
+            if rsi < 45:
+                d_rsi = -20
+            elif rsi < 60:
+                d_rsi = -10
+            elif rsi < 85:
+                d_rsi = 20 if rvol >= 3.0 else 5
+            else:
+                d_rsi = 10 if rvol >= 3.0 else -10
+        else:
+            # 일반주: 과매도 반등 로직
+            if rsi < 30:
+                d_rsi = 20
+            elif rsi < 45:
+                d_rsi = 20 - (rsi - 30) / 15 * 5
+            elif rsi < 55:
+                d_rsi = 15 * (55 - rsi) / 10
+            elif rsi < 65:
+                d_rsi = 0 if rvol >= 3.0 else -((rsi - 55) / 10 * 10)
+            elif rsi < 75:
+                d_rsi = 0 if rvol >= 3.0 else -(10 + (rsi - 65) / 10 * 10)
+            else:
+                d_rsi = -5 if rvol >= 5.0 else (-10 if rvol >= 3.0 else -20)
     score += d_rsi
 
     if pd.isna(macd_diff) or pd.isna(macd_diff_prev):

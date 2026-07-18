@@ -706,6 +706,10 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
                 )
             await asyncio.sleep(300)
             if is_market_hours():
+                # REST 폴링 태스크를 취소하지 않고 WS 태스크로 덮어쓰면 폴링 루프가
+                # 고아 상태로 계속 실행되어 매 봉이 중복 처리되고, WS가 다시
+                # connection limit에 걸릴 경우 폴링 루프가 계속 누적된다.
+                await _stop_current_stream()
                 app_state._current_stream_task = asyncio.create_task(
                     start_alpaca_stream(active_tickers)
                 )

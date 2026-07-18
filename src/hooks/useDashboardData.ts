@@ -98,6 +98,7 @@ export function useDashboardData() {
   const displayedAccount = useMemo(
     () => ({
       total_assets: paperAccount?.total_assets ?? 0,
+      equity: paperAccount?.equity ?? 0,
       cash_available: paperAccount?.cash_available ?? 0,
       today_pnl: paperAccount?.today_pnl ?? 0,
       today_pnl_pct: paperAccount?.today_pnl_pct ?? 0,
@@ -125,7 +126,7 @@ export function useDashboardData() {
   // ── Derived: Win Rate & Total Trades ──
   const displayedWinRate = useMemo(() => {
     if (!slicedHistory || slicedHistory.length === 0) return 0;
-    const wins = slicedHistory.filter((t) => (t.pnl_pct ?? 0) > 0).length;
+    const wins = slicedHistory.filter((t) => (t.pnl ?? 0) > 0).length;
     return (wins / slicedHistory.length) * 100;
   }, [slicedHistory]);
 
@@ -135,7 +136,7 @@ export function useDashboardData() {
   const totalPnl = useMemo(
     () =>
       livePositions.reduce(
-        (sum, p) => sum + (((p.current_price ?? p.entry_price) - p.entry_price) * p.units || 0),
+        (sum, p) => sum + (((p.current_price || p.entry_price) - p.entry_price) * p.units || 0),
         0,
       ),
     [livePositions],
@@ -145,14 +146,15 @@ export function useDashboardData() {
   const investedCapital = useMemo(
     () =>
       livePositions.reduce(
-        (sum, p) => sum + ((p.current_price ?? 0) * (p.units ?? 0)),
+        (sum, p) => sum + ((p.current_price || p.entry_price || 0) * (p.units ?? 0)),
         0,
       ),
     [livePositions],
   );
 
   const concentrationPct = useMemo(() => {
-    const equity = displayedAccount.total_assets || 100000;
+    // total_assets가 없으면 equity 사용
+    const equity = displayedAccount.total_assets || displayedAccount.equity || 100000;
     if (equity === 0) return 0;
     return (investedCapital / equity) * 100;
   }, [investedCapital, displayedAccount]);

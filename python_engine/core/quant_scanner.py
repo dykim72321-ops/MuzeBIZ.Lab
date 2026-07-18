@@ -30,9 +30,10 @@ SCAN_TOP_N = 10
 # RAM 비용은 더 이상 주기를 늦춰야 할 이유가 아니다. 4시간 주기의 실질적 비용은
 # "신규 후보 발굴 지연"이었다 — 정규장 6.5시간 동안 스캔이 1~2회만 돌아, 장중
 # 갑자기 DNA가 상승한 종목 상당수가 그날 안에 watchlist에 진입하지 못했다.
-# 2시간은 과거 장기간 무중단 운영 이력이 있는(=RAM 문제의 원인이 아니었던) 값이므로,
-# 근본 원인이 수정된 지금 여기로 되돌리는 것이 30분/1시간 같은 미검증 값보다 안전하다.
-SCAN_INTERVAL_SECONDS = 2 * 3600
+# 2026-07-17: 대표님의 피드백 수용. 2시간은 기회손실, 15분은 데이터 공백 및 yf 제한 리스크 존재.
+# 절충안으로 30분(1800초) 스캔을 적용하며, 스트림 재시작 시 보유 종목(held)이 있으면 재시작을
+# 보류하여 데이터 공백(TS 누락)을 원천 차단하는 하이브리드 안전망 아키텍처 적용.
+SCAN_INTERVAL_SECONDS = 30 * 60
 
 # 하위 호환 — Paper Engine 내부 페니 상태머신 파라미터 (변경 금지)
 PENNY_DATA_LOOKBACK = "2mo"
@@ -392,6 +393,7 @@ async def run_quant_scan_internal(
                     ),
                     rvol=rvol,
                     is_extended=is_extended,
+                    price=price,
                 )
 
                 signal_type = "HOLD"
@@ -401,9 +403,11 @@ async def run_quant_scan_internal(
                 # 정합시킨 컷오프 — 스캔 단계 라벨(Discord 알림·daily_discovery 표시)이
                 # 실시간 경로의 실제 매수 게이트(paper_engine.py dna_gate)와 어긋나면
                 # 관심종목으로는 등록됐지만 실제로는 절대 매수되지 않는 종목이 생긴다.
+                # (2026-07-17: 페니주 쓰레기 신호 차단을 위해 65 -> 80으로 상향된
+                # paper_engine.py dna_gate(penny)/quant_engine.py tier_penny와 동일하게 정합)
                 is_penny_item = price <= 1.0
                 if is_penny_item:
-                    if dna_score >= 65.0:
+                    if dna_score >= 80.0:
                         signal_type = "BUY"
                         strength = "STRONG"
                     elif dna_score <= 40.0:
@@ -458,9 +462,9 @@ async def run_quant_scan_internal(
     auto_registered: List[str] = []
     if supabase and results:
         for item in results[:top_n]:
-            # paper_engine.py dna_gate(페니 65 / 일반 75)와 정합 — 이보다 낮은 DNA로
+            # paper_engine.py dna_gate(페니 80 / 일반 75)와 정합 — 이보다 낮은 DNA로
             # watchlist에 등록해봤자 실시간 경로의 실제 매수 게이트를 절대 통과할 수 없다.
-            min_dna = 65.0 if item.get("price", 0) <= 1.0 else 75.0
+            min_dna = 80.0 if item.get("price", 0) <= 1.0 else 75.0
             if item.get("dna_score", 0) < min_dna:
                 continue
             try:
@@ -554,10 +558,20 @@ async def run_quant_scan_internal(
     app_state.penny_scan_results_cache = results
 
     if auto_registered and is_market_hours():
+        # 보유 종목이 있어도 스트림을 재시작한다 — 재시작을 전면 보류하면 신규
+        # 워치리스트 종목이 모든 보유 포지션이 청산될 때까지 스트림 구독 자체를
+        # 받지 못해 신호 감지가 무기한 불가능해진다(과거 "워치리스트 스트림 구독
+        # 누락" 버그의 재발). 재연결 중 짧은 데이터 공백 동안의 보유 포지션
+        # 트레일링 스탑은 position_ts_sweeper()(30초 주기, 스트림과 무관하게
+        # 최신 체결가로 TS 평가)가 안전망으로 커버한다.
         print(
-            f"🔄 [Auto-Scan] 신규 종목 {auto_registered} 등록됨 — 장 중 스트림 재시작"
+            f"🔄 [Auto-Scan] 신규 종목 {auto_registered} 등록됨 — 장 중 스트림 재시작 "
+            f"(보유 종목 {len(app_state._held_tickers)}개, TS Sweeper가 재연결 중 안전망 역할)"
         )
         await _stop_current_stream()
+        # 클라이언트 측 close 직후 곧바로 재연결하면 Alpaca 서버가 WS 슬롯을
+        # 아직 해제하지 못해 "connection limit exceeded"가 발생할 수 있다.
+        await asyncio.sleep(3)
         app_state._current_stream_task = asyncio.create_task(start_alpaca_stream())
 
     if "df_all" in locals() and df_all is not None:

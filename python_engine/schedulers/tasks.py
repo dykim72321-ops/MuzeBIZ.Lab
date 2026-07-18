@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -60,6 +61,12 @@ async def auto_quant_scan_scheduler():
         finally:
             gc.collect()
 
+        # 상태 표시(/api/quant/scan/status)가 실제 스케줄러의 다음 실행 시각을
+        # 그대로 보여줄 수 있도록 기록 — 수동 스캔이 last_penny_scan_at을 갱신해도
+        # 이 값은 변하지 않으므로 표시가 실제 스케줄과 어긋나지 않는다.
+        app_state.next_auto_scan_at = datetime.now() + timedelta(
+            seconds=SCAN_INTERVAL_SECONDS
+        )
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)
 
 
@@ -280,7 +287,9 @@ async def position_ts_sweeper():
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
 
-    SWEEP_INTERVAL_SEC = 30
+    # 10초 주기 — 보유 종목 전체를 배치 1요청으로 조회하므로 분당 6요청,
+    # Alpaca 200req/min 제한 대비 3% 수준. 청산 지연을 최대 30초 → 10초로 단축.
+    SWEEP_INTERVAL_SEC = 10
     print("🧹 [TS Sweeper] Trailing-stop safety sweep started.")
 
     api_key = os.getenv("APCA_API_KEY_ID")
@@ -326,60 +335,206 @@ async def position_ts_sweeper():
                 await asyncio.sleep(SWEEP_INTERVAL_SEC)
                 continue
 
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            is_eod = now_et.time() >= dtime(15, 30)
+
             for pos in positions:
-                ticker = pos["ticker"]
-                trade = trades.get(ticker)
-                if not trade:
-                    continue
-                price = float(trade.price)
-                if price <= 0:
-                    continue
+                # 종목 하나의 처리 중 예외(예: 필드 누락·네트워크 오류)가 나머지
+                # 보유 종목의 이번 틱 TS 점검까지 통째로 스킵시키지 않도록 종목별로
+                # 격리한다 — 바깥의 함수 전체 try/except는 fetch 단계 실패용.
+                try:
+                    ticker = pos["ticker"]
+                    trade = trades.get(ticker)
+                    if not trade:
+                        continue
+                    price = float(trade.price)
+                    if price <= 0:
+                        continue
 
-                ts_threshold = float(pos["ts_threshold"])
+                    # 봉이 안 와도 대시보드/DB 현재가는 최신으로 유지 (스테일 방지)
+                    if abs(float(pos.get("current_price") or 0) - price) > 0.0001:
+                        try:
+                            await asyncio.to_thread(
+                                app_state.supabase.table("paper_positions")
+                                .update({"current_price": round(price, 4)})
+                                .eq("ticker", ticker)
+                                .in_("status", ["HOLD", "SCALE_OUT"])
+                                .execute
+                            )
+                        except Exception:
+                            pass
 
-                # 봉이 안 와도 대시보드/DB 현재가는 최신으로 유지 (스테일 방지)
-                if abs(float(pos.get("current_price") or 0) - price) > 0.0001:
-                    try:
-                        await asyncio.to_thread(
-                            app_state.supabase.table("paper_positions")
-                            .update({"current_price": round(price, 4)})
-                            .eq("ticker", ticker)
-                            .in_("status", ["HOLD", "SCALE_OUT"])
-                            .execute
+                    # EOD 강제청산도 1분봉 경로(on_minute_bar_closed)에만 의존하므로
+                    # 같은 종류의 봉 공백 사각지대에 노출된다 — 장 마감 임박 구간에는
+                    # 스트림 상태와 무관하게 여기서도 기존 EOD 로직(process_signal)을
+                    # 직접 호출해 오버나이트 리스크를 놓치지 않게 한다.
+                    if is_eod:
+                        # process_signal()이 기존 포지션 분기에서 자체적으로
+                        # _get_exit_lock(ticker)을 잡는다 — 여기서 또 잡으면
+                        # asyncio.Lock은 재진입 불가라 데드락이 난다.
+                        await engine.process_signal(
+                            ticker=ticker,
+                            price=price,
+                            signal_type="SELL",
+                            strength="EOD_FORCE",
+                            rsi=None,
+                            ai_report="[EOD Sweep] 장 마감 강제 청산",
+                            is_armed=app_state.SYSTEM_ARMED,
+                            dna_score=0.0,
+                            recommended_weight=0.0,
                         )
-                    except Exception:
-                        pass
+                        # EOD 처리로 포지션이 닫혔을 수 있으므로 이번 틱의 TS 평가는
+                        # 다음 스윕(30초 후) 최신 상태에 맡기고 다음 종목으로 넘어간다.
+                        continue
 
-                if price >= ts_threshold:
+                    ts_threshold = float(pos["ts_threshold"])
+                    if price >= ts_threshold:
+                        continue
+
+                    # 1분봉 경로(process_signal)와 동일한 청산 직렬화 락 사용.
+                    # _close_position 내부의 원자적 CLOSING 클레임이 프로세스 간
+                    # 중복 청산을 재차 방지한다.
+                    async with engine._get_exit_lock(ticker):
+                        result = await engine._close_position(
+                            pos, price, "Trailing Stop"
+                        )
+                    if result is None:
+                        print(f"⚠️ [TS Sweeper] {ticker} 청산 실패/중복 — 포지션 유지")
+                        continue
+
+                    app_state._held_tickers.discard(ticker)
+                    status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
+                    slip_exit_pct = (result["fill_price"] / price - 1) * 100
+                    print(
+                        f"🧹 [TS Sweeper] {ticker} TS 청산 — 최신가 ${price:.4f} < TS ${ts_threshold:.4f}"
+                    )
+                    await engine.webhook.send_alert(
+                        title=f"{status_emoji} [PAPER EXIT] {ticker}",
+                        description=(
+                            f"청산가: ${result['fill_price']:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n"
+                            f"사유: 트레일링 스탑 발동 (TS 스윕 — 1분봉 공백 구간 감지)"
+                        ),
+                        color=0x34495E,
+                    )
+                except Exception as pos_err:
+                    print(
+                        f"⚠️ [TS Sweeper] {pos.get('ticker')} 처리 오류(다른 종목엔 영향 없음): {pos_err}"
+                    )
                     continue
-
-                # 1분봉 경로(process_signal)와 동일한 청산 직렬화 락 사용.
-                # _close_position 내부의 원자적 CLOSING 클레임이 프로세스 간
-                # 중복 청산을 재차 방지한다.
-                async with engine._get_exit_lock(ticker):
-                    result = await engine._close_position(pos, price, "Trailing Stop")
-                if result is None:
-                    print(f"⚠️ [TS Sweeper] {ticker} 청산 실패/중복 — 포지션 유지")
-                    continue
-
-                app_state._held_tickers.discard(ticker)
-                status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
-                slip_exit_pct = (result["fill_price"] / price - 1) * 100
-                print(
-                    f"🧹 [TS Sweeper] {ticker} TS 청산 — 최신가 ${price:.4f} < TS ${ts_threshold:.4f}"
-                )
-                await engine.webhook.send_alert(
-                    title=f"{status_emoji} [PAPER EXIT] {ticker}",
-                    description=(
-                        f"청산가: ${result['fill_price']:.4f} (슬리피지 {slip_exit_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n"
-                        f"사유: 트레일링 스탑 발동 (TS 스윕 — 1분봉 공백 구간 감지)"
-                    ),
-                    color=0x34495E,
-                )
         except Exception as e:
             print(f"⚠️ [TS Sweeper] Error: {e}")
 
         await asyncio.sleep(SWEEP_INTERVAL_SEC)
+
+
+async def forward_return_logger():
+    """engine_decisions에 기록된 모든 신호(실행/차단 무관)에 대해 30분·60분 뒤
+    실제 가격 변화(forward return)를 채워 넣는다.
+
+    2026-07-18 수익률 분석에서 DNA≥80 진입조차 승률 22.7%로 드러나 "DNA 점수가
+    실제로 수익률을 예측하는가"를 데이터로 검증할 필요가 생겼다. BLOCKED 신호도
+    포함하는 이유는 게이트를 낮췄으면 어땠을지까지 사후 검증하기 위함 — 이
+    로거가 없으면 게이트 임계값 조정이 항상 추측에 의존하게 된다.
+
+    티커 목록을 모아 배치 1요청으로 최신가를 조회하므로, 결정 건수가 많아져도
+    Alpaca 요청 수는 증가하지 않는다(position_ts_sweeper와 동일 패턴).
+    """
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockLatestTradeRequest
+
+    CHECK_INTERVAL_SEC = 300
+    # 30분/60분이 훨씬 지나도록(장 마감 등으로) 확인 못한 건은 무한정 미확인
+    # 상태로 남겨두지 않고 backlog 방지를 위해 24시간 후 포기 처리한다.
+    GIVE_UP_AFTER_HOURS = 24
+    print("📐 [Forward Return] Signal outcome logger started.")
+
+    api_key = os.getenv("APCA_API_KEY_ID")
+    api_secret = os.getenv("APCA_API_SECRET_KEY")
+    client = None
+    if api_key and api_secret:
+        try:
+            client = StockHistoricalDataClient(api_key, api_secret)
+        except Exception as e:
+            print(f"⚠️ [Forward Return] Alpaca client init error: {e}")
+
+    async def _process_window(column_prefix: str, minutes: int):
+        checked_col = f"forward_{column_prefix}_checked"
+        return_col = f"forward_return_{column_prefix}"
+        due_before = (
+            datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        ).isoformat()
+        give_up_before = (
+            datetime.now(timezone.utc) - timedelta(hours=GIVE_UP_AFTER_HOURS)
+        ).isoformat()
+
+        res = await asyncio.to_thread(
+            app_state.supabase.table("engine_decisions")
+            .select("id,ticker,price,ts")
+            .eq(checked_col, False)
+            .lte("ts", due_before)
+            .limit(300)
+            .execute
+        )
+        rows = res.data or []
+        if not rows:
+            return
+
+        expired = [r for r in rows if r["ts"] < give_up_before]
+        pending = [r for r in rows if r["ts"] >= give_up_before]
+
+        if expired:
+            await asyncio.to_thread(
+                app_state.supabase.table("engine_decisions")
+                .update({checked_col: True})
+                .in_("id", [r["id"] for r in expired])
+                .execute
+            )
+            print(
+                f"⌛ [Forward Return] {column_prefix}: {len(expired)}건 24시간 경과로 포기 처리"
+            )
+
+        if not pending or client is None:
+            return
+
+        tickers = sorted({r["ticker"] for r in pending if r.get("price")})
+        if not tickers:
+            return
+        try:
+            trades = await asyncio.to_thread(
+                client.get_stock_latest_trade,
+                StockLatestTradeRequest(symbol_or_symbols=tickers),
+            )
+        except Exception as e:
+            print(f"⚠️ [Forward Return] {column_prefix}: latest trade fetch failed: {e}")
+            return
+
+        for r in pending:
+            trade = trades.get(r["ticker"])
+            if not trade or not r.get("price"):
+                continue
+            current_price = float(trade.price)
+            if current_price <= 0:
+                continue
+            forward_return = (current_price / r["price"] - 1) * 100
+            try:
+                await asyncio.to_thread(
+                    app_state.supabase.table("engine_decisions")
+                    .update({return_col: round(forward_return, 3), checked_col: True})
+                    .eq("id", r["id"])
+                    .execute
+                )
+            except Exception as e:
+                print(f"⚠️ [Forward Return] {r['ticker']} update failed: {e}")
+
+    while True:
+        try:
+            if app_state.supabase and client is not None:
+                await _process_window("30m", 30)
+                await _process_window("60m", 60)
+        except Exception as e:
+            print(f"⚠️ [Forward Return] Error: {e}")
+
+        await asyncio.sleep(CHECK_INTERVAL_SEC)
 
 
 async def stream_liveness_watchdog():

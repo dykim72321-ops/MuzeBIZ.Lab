@@ -85,7 +85,7 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory }: RiskAnalyticsP
       const sorted = [...history].sort(
         (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
       );
-      let equity = 10000;
+      let equity = 100000;
       let peak = equity;
       let maxDD = 0;
       for (const item of sorted) {

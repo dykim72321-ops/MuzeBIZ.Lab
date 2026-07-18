@@ -42,6 +42,10 @@ class AppState:
 
     # ── Penny 스캔 상태 ─────────────────────────────────────────────────
     last_penny_scan_at: Optional[object] = None  # datetime | None
+    # 자동 스캔 스케줄러의 실제 다음 실행 예정 시각 (datetime | None).
+    # last_penny_scan_at은 수동 스캔으로도 갱신되므로, 상태 표시가 이 값 대신
+    # last_penny_scan_at 기준으로 남은 시간을 계산하면 실제 스케줄과 어긋난다.
+    next_auto_scan_at: Optional[object] = None
     penny_scan_results_cache: List[dict] = []
 
     # ── MTF 캐시 (15분봉 20 EMA) ───────────────────────────────────────

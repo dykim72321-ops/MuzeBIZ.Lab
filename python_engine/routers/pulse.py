@@ -43,18 +43,21 @@ async def get_pulse_history(limit: int = 20):
     if not supabase:
         return []
 
-    try:
-        res = await asyncio.to_thread(
-            supabase.table("realtime_signals")
-            .select("*")
-            .order("timestamp", desc=True)
-            .limit(limit)
-            .execute
-        )
-        return res.data
-    except Exception as e:
-        print(f"❌ Pulse History Fetch Error: {e}")
-        return []
+    for attempt in range(2):
+        try:
+            res = await asyncio.to_thread(
+                supabase.table("realtime_signals")
+                .select("*")
+                .order("timestamp", desc=True)
+                .limit(limit)
+                .execute
+            )
+            return res.data
+        except Exception as e:
+            if attempt == 0 and "Server disconnected" in str(e):
+                continue
+            print(f"❌ Pulse History Fetch Error: {e}")
+            return []
 
 
 @router.get("/strong-buy-log")
@@ -64,40 +67,45 @@ async def get_strong_buy_log(limit: int = 50):
     if not supabase:
         return {"events": [], "total": 0}
 
-    try:
-        res = await asyncio.to_thread(
-            supabase.table("realtime_signals")
-            .select("ticker,timestamp,rsi,adx,rvol,price,signal,strength,ai_metadata")
-            .eq("signal", "BUY")
-            .eq("strength", "STRONG")
-            .order("timestamp", desc=True)
-            .limit(limit)
-            .execute
-        )
-        events = []
-        for row in res.data or []:
-            ai_meta = row.get("ai_metadata") or {}
-            if isinstance(ai_meta, str):
-                try:
-                    ai_meta = _json.loads(ai_meta)
-                except Exception:
-                    ai_meta = {}
-            dna = ai_meta.get("dna_score")
-            events.append(
-                {
-                    "ticker": row.get("ticker"),
-                    "timestamp": row.get("timestamp"),
-                    "price": row.get("price"),
-                    "dna_score": dna,
-                    "rsi": row.get("rsi"),
-                    "adx": row.get("adx"),
-                    "rvol": row.get("rvol"),
-                }
+    for attempt in range(2):
+        try:
+            res = await asyncio.to_thread(
+                supabase.table("realtime_signals")
+                .select(
+                    "ticker,timestamp,rsi,adx,rvol,price,signal,strength,ai_metadata"
+                )
+                .eq("signal", "BUY")
+                .eq("strength", "STRONG")
+                .order("timestamp", desc=True)
+                .limit(limit)
+                .execute
             )
-        return {"events": events, "total": len(events)}
-    except Exception as e:
-        print(f"❌ Strong Buy Log Error: {e}")
-        return {"events": [], "total": 0, "error": str(e)}
+            events = []
+            for row in res.data or []:
+                ai_meta = row.get("ai_metadata") or {}
+                if isinstance(ai_meta, str):
+                    try:
+                        ai_meta = _json.loads(ai_meta)
+                    except Exception:
+                        ai_meta = {}
+                dna = ai_meta.get("dna_score")
+                events.append(
+                    {
+                        "ticker": row.get("ticker"),
+                        "timestamp": row.get("timestamp"),
+                        "price": row.get("price"),
+                        "dna_score": dna,
+                        "rsi": row.get("rsi"),
+                        "adx": row.get("adx"),
+                        "rvol": row.get("rvol"),
+                    }
+                )
+            return {"events": events, "total": len(events)}
+        except Exception as e:
+            if attempt == 0 and "Server disconnected" in str(e):
+                continue
+            print(f"❌ Strong Buy Log Error: {e}")
+            return {"events": [], "total": 0, "error": str(e)}
 
 
 @router.get("/indicators")
@@ -205,6 +213,7 @@ async def get_indicator_snapshot():
                 ),
                 rvol=rvol,
                 is_extended=is_extended,
+                price=float(latest["Close"]) if "Close" in latest else 10.0,
             )
             strong_buy_active = (
                 bool(latest["Strong_Buy"]) if "Strong_Buy" in latest else False

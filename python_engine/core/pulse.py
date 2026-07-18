@@ -127,6 +127,11 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
             else 1.0
         ),
         is_extended=bool(latest["Is_Extended"]) if "Is_Extended" in latest else False,
+        price=(
+            float(latest["Close"])
+            if "Close" in latest and not pd.isna(latest["Close"])
+            else 10.0
+        ),
     )
 
     if strength == "STRONG":

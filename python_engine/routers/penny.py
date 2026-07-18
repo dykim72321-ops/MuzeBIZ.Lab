@@ -43,7 +43,13 @@ async def penny_scan_status():
     penny_scan_results_cache = app_state.penny_scan_results_cache
 
     next_scan_seconds: Optional[int] = None
-    if last_penny_scan_at:
+    # 자동 스케줄러가 기록한 실제 다음 실행 시각을 우선 사용 — last_penny_scan_at은
+    # 수동 스캔(POST /api/quant/scan)으로도 갱신되어 실제 자동 스캔 스케줄과
+    # 어긋난 값을 표시하는 문제가 있었다.
+    if app_state.next_auto_scan_at is not None:
+        remaining = (app_state.next_auto_scan_at - datetime.now()).total_seconds()
+        next_scan_seconds = max(0, int(remaining))
+    elif last_penny_scan_at:
         elapsed = (datetime.now() - last_penny_scan_at).total_seconds()
         remaining = SCAN_INTERVAL_SECONDS - elapsed
         next_scan_seconds = max(0, int(remaining))

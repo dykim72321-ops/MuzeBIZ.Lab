@@ -23,7 +23,7 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
   const weightData = useMemo(() => {
     if (!positions || positions.length === 0) return [];
     return positions.map(pos => {
-      const value = (pos.current_price != null ? Number(pos.current_price) : Number(pos.entry_price)) * Number(pos.units);
+      const value = (pos.current_price != null ? Number(pos.current_price) : Number(pos.entry_price)) * Math.abs(Number(pos.units));
       const weight = totalEquity > 0 ? (value / totalEquity) * 100 : 0;
       return {
         ticker: pos.ticker,

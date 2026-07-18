@@ -13,7 +13,8 @@ export const DNA_STRONG_BUY = 80;
 export const DNA_BUY = 75;
 
 // 페니 종목(가격 ≤ $1) STRONG BUY — quant_engine.py tier_penny / paper_engine.py dna_gate(penny)
-export const DNA_PENNY_STRONG_BUY = 65;
+// (2026-07-17: 페니주 쓰레기 신호 차단을 위해 65 -> 80으로 상향)
+export const DNA_PENNY_STRONG_BUY = 80;
 
 // STRONG SELL — quant_engine.py Strong_Sell
 export const DNA_SELL = 40;

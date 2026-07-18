@@ -120,6 +120,7 @@ def test_dna_score_sync():
             di_minus=float(latest["-DI"]) if not pd.isna(latest["-DI"]) else 0.0,
             rvol=float(latest["RVOL"]) if not pd.isna(latest["RVOL"]) else 1.0,
             is_extended=bool(latest["Is_Extended"]),
+            price=float(latest["Close"]),
         )
 
         diff = abs(df_score - scalar_score)

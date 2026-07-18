@@ -65,6 +65,8 @@ class LiveTradingManager(PaperTradingManager):
     주문 실패/체결 미확인 시 None을 반환 → 상위 호출부에서 DB write 차단.
     """
 
+    IS_LIVE = True
+
     def __init__(self, supabase_client: Client, trading_client: TradingClient):
         super().__init__(supabase_client)
         self.alpaca = trading_client
@@ -123,6 +125,31 @@ class LiveTradingManager(PaperTradingManager):
                 return None
 
             if side == OrderSide.SELL:
+                # ── 실제 Alpaca 잔고 체크 (공매도 방지) ──
+                try:
+                    alpaca_pos = await asyncio.to_thread(
+                        self.alpaca.get_open_position, ticker
+                    )
+                    actual_qty = float(alpaca_pos.qty)
+                except Exception:
+                    # 포지션이 없으면 예외 발생 (404 Not Found)
+                    actual_qty = 0.0
+
+                if actual_qty <= 0:
+                    print(
+                        f"⛔ [{ticker}] {side_str} 주문 차단 — Alpaca 실제 잔고 없음 "
+                        f"(요청: {order_qty:.4f}, 실보유: {actual_qty:.4f})"
+                    )
+                    self.last_order_fail_reason = "NO_POSITION"
+                    return None
+
+                if order_qty > actual_qty:
+                    print(
+                        f"⚠️ [{ticker}] {side_str} 주문 수량 보정 — DB 수량({order_qty:.4f})이 "
+                        f"Alpaca 실보유({actual_qty:.4f})보다 많아 보정됨"
+                    )
+                    order_qty = actual_qty
+
                 try:
                     open_req = GetOrdersRequest(
                         status=QueryOrderStatus.OPEN, symbols=[ticker]

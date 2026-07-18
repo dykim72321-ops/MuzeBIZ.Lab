@@ -206,6 +206,7 @@ from schedulers.tasks import (  # noqa: E402
     stream_scheduler,
     paper_portfolio_updater,
     position_ts_sweeper,
+    forward_return_logger,
     stream_liveness_watchdog,
     system_heartbeat,
     _spawn_watchdog_if_not_running,
@@ -221,6 +222,7 @@ async def startup_event():
     asyncio.create_task(stream_liveness_watchdog())
     asyncio.create_task(paper_portfolio_updater())
     asyncio.create_task(position_ts_sweeper())
+    asyncio.create_task(forward_return_logger())
 
 
 @app.on_event("shutdown")

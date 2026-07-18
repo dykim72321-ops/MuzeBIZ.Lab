@@ -41,7 +41,7 @@ const CompactGauge = React.memo(function CompactGauge({
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-[13px] font-black text-black tabular-nums">{Math.round(pct)}</span>
+          <span className="text-[13px] font-black text-black tabular-nums">{Math.round(pct)}%</span>
         </div>
       </div>
       <div className="flex flex-col justify-center overflow-hidden">

@@ -81,31 +81,32 @@ interface TradingState {
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
 function mapPaperPositions(raw: BrokerPositionRaw[]): PaperPosition[] {
-  return raw.map((pp) => {
-    const entry = Number(pp.entry_price);
-    const current = pp.current_price != null ? Number(pp.current_price) : entry;
-    const units = Number(pp.units ?? pp.quantity);
-    const isPenny = pp.is_penny ?? entry <= PENNY_THRESHOLD;
-    const highestPrice = pp.highest_price != null ? Number(pp.highest_price) : Math.max(entry, current);
-    const tsThreshold = pp.ts_threshold != null ? Number(pp.ts_threshold) : highestPrice * (isPenny ? 0.90 : 0.95);
+  return raw
+    .map((pp) => {
+      const entry = Number(pp.entry_price);
+      const current = pp.current_price != null ? Number(pp.current_price) : entry;
+      const units = Number(pp.units ?? pp.quantity);
+      const isPenny = pp.is_penny ?? entry <= PENNY_THRESHOLD;
+      const highestPrice = pp.highest_price != null ? Number(pp.highest_price) : Math.max(entry, current);
+      const tsThreshold = pp.ts_threshold != null ? Number(pp.ts_threshold) : highestPrice * (isPenny ? 0.90 : 0.95);
 
-    return {
-      ticker: pp.ticker,
-      units,
-      entry_price: entry,
-      current_price: current,
-      ts_threshold: tsThreshold,
-      trailing_stop: tsThreshold,
-      highest_price: highestPrice,
-      status: pp.status ?? 'HOLDING',
-      is_penny: isPenny,
-      created_at: pp.created_at ?? undefined,
-      // 백엔드(Decimal 정밀도)에서 계산된 값을 그대로 사용 — 프론트엔드에서 재계산하지 않는다.
-      unrealized_pl: Number(pp.unrealized_pl ?? 0),
-      unrealized_plpc: Number(pp.unrealized_plpc ?? 0),
-      isPenny,
-    };
-  });
+      return {
+        ticker: pp.ticker,
+        units,
+        entry_price: entry,
+        current_price: current,
+        ts_threshold: tsThreshold,
+        trailing_stop: tsThreshold,
+        highest_price: highestPrice,
+        status: pp.status ?? 'HOLDING',
+        is_penny: isPenny,
+        created_at: pp.created_at ?? undefined,
+        unrealized_pl: Number(pp.unrealized_pl ?? 0),
+        unrealized_plpc: Number(pp.unrealized_plpc ?? 0),
+        isPenny,
+      };
+    })
+    .filter((p) => p.units > 0);
 }
 
 function mapPaperHistory(raw: ClosedTradeRaw[]): PaperHistory[] {
