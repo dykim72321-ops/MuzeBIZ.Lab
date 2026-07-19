@@ -381,7 +381,16 @@ async def run_startup_sequence():
     asyncio.create_task(auto_checklist_eval_scheduler())
 
     # 실거래 모드: Alpaca Trade Update 스트림 기동
-    if app_state.TRADE_MODE == "LIVE" and app_state.live_engine is not None:
+    # DISABLE_ALPACA_STREAM=true(로컬 개발 전용 standby)인 인스턴스는 여기서도
+    # 제외한다 — 이 인스턴스는 process_signal()을 호출하지 않아 주문을 낼 일이
+    # 없으므로 이 스트림을 열 이유가 없고, 시장데이터 WS/TS 스위퍼와 마찬가지로
+    # 로컬↔Railway가 같은 Alpaca 계정으로 동시에 이 채널을 여는 것 자체가
+    # 잠재적 충돌 지점이었다.
+    if (
+        app_state.TRADE_MODE == "LIVE"
+        and app_state.live_engine is not None
+        and os.getenv("DISABLE_ALPACA_STREAM", "false").lower() != "true"
+    ):
         from engine.live_engine import start_trade_update_stream
 
         app_state._trade_update_task = asyncio.create_task(
@@ -390,6 +399,10 @@ async def run_startup_sequence():
                 api_secret=_APCA_API_SECRET,
                 webhook_manager=app_state.webhook,
             )
+        )
+    elif app_state.TRADE_MODE == "LIVE":
+        print(
+            "🔌 [LiveEngine] DISABLE_ALPACA_STREAM=true — Trade Update 스트림 비활성화 (개발 전용 standby)."
         )
 
 
