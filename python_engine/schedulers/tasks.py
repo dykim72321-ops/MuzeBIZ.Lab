@@ -546,6 +546,19 @@ async def stream_liveness_watchdog():
         await asyncio.sleep(CHECK_INTERVAL_SEC)
         if not is_market_hours():
             continue
+
+        # 스트림 락을 쥐고 있으면 TTL을 계속 연장 — 이 갱신이 멈추면(크래시 등)
+        # 락이 자동 만료돼 다른 인스턴스(로컬↔Railway)가 승계할 수 있다.
+        if app_state._stream_lock_owned and app_state.db and app_state.db.supabase:
+            renewed = await asyncio.to_thread(
+                app_state.db.renew_stream_lock, app_state._instance_id
+            )
+            if not renewed:
+                print(
+                    "⚠️ [Stream Lock] 갱신 실패 — 다른 인스턴스가 락을 가져간 것으로 보임."
+                )
+                app_state._stream_lock_owned = False
+
         if app_state._last_bar_received_at is None:
             continue
         elapsed = (datetime.now() - app_state._last_bar_received_at).total_seconds()

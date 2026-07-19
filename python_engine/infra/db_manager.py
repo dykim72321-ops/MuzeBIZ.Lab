@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -133,6 +134,75 @@ class DBManager:
         except Exception as e:
             print(f"⚠️ watchlist fetch error: {e}")
             return []
+
+    def try_acquire_stream_lock(self, owner_id: str, ttl_seconds: int = 240) -> bool:
+        """
+        Alpaca WebSocket 스트림 소유권을 위한 TTL 기반 분산 락 획득 시도.
+        락이 비어있거나(owner NULL), 만료됐거나(expires_at < now), 이미 내가
+        주인인 경우에만 UPDATE가 걸리도록 WHERE 조건에 그 세 상황을 넣어
+        compare-and-swap처럼 동작시킨다 — 다른 인스턴스가 동시에 시도해도
+        조건을 만족하는 쪽만 행을 갱신할 수 있다.
+        """
+        if not self.supabase:
+            return False
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+            ).isoformat()
+            response = (
+                self.supabase.table("system_settings")
+                .update(
+                    {
+                        "stream_lock_owner": owner_id,
+                        "stream_lock_expires_at": expires_at,
+                    }
+                )
+                .eq("id", 1)
+                .or_(
+                    f"stream_lock_owner.is.null,stream_lock_expires_at.lt.{now_iso},stream_lock_owner.eq.{owner_id}"
+                )
+                .execute()
+            )
+            return bool(response.data)
+        except Exception as e:
+            print(f"❌ DB Stream Lock Acquire Error: {e}")
+            return False
+
+    def renew_stream_lock(self, owner_id: str, ttl_seconds: int = 240) -> bool:
+        """보유 중인 스트림 락의 TTL 연장. 내가 주인일 때만 갱신된다."""
+        if not self.supabase:
+            return False
+        try:
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+            ).isoformat()
+            response = (
+                self.supabase.table("system_settings")
+                .update({"stream_lock_expires_at": expires_at})
+                .eq("id", 1)
+                .eq("stream_lock_owner", owner_id)
+                .execute()
+            )
+            return bool(response.data)
+        except Exception as e:
+            print(f"❌ DB Stream Lock Renew Error: {e}")
+            return False
+
+    def release_stream_lock(self, owner_id: str) -> None:
+        """정상 종료 시 스트림 락 반납 — 상대 인스턴스가 TTL 만료를 기다리지 않고 즉시 승계 가능."""
+        if not self.supabase:
+            return
+        try:
+            (
+                self.supabase.table("system_settings")
+                .update({"stream_lock_owner": None, "stream_lock_expires_at": None})
+                .eq("id", 1)
+                .eq("stream_lock_owner", owner_id)
+                .execute()
+            )
+        except Exception as e:
+            print(f"❌ DB Stream Lock Release Error: {e}")
 
 
 if __name__ == "__main__":

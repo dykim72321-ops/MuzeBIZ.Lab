@@ -7,7 +7,23 @@ state.py — AppState 공유 전역 상태 컨테이너
 
 from __future__ import annotations
 
+import os
+import socket
+import uuid
 from typing import List, Optional
+
+
+def _resolve_instance_id() -> str:
+    """
+    로컬/Railway 등 서로 다른 실행 환경을 구분하는 스트림 락 소유자 식별자.
+    Railway는 RAILWAY_REPLICA_ID(또는 RAILWAY_DEPLOYMENT_ID)를 자동 주입하므로
+    그 존재로 "나는 Railway"를 판별하고, 없으면 로컬 실행으로 간주해 호스트명 +
+    프로세스별 UUID로 식별한다.
+    """
+    railway_id = os.getenv("RAILWAY_REPLICA_ID") or os.getenv("RAILWAY_DEPLOYMENT_ID")
+    if railway_id:
+        return f"railway:{railway_id}"
+    return f"local:{socket.gethostname()}:{uuid.uuid4().hex[:8]}"
 
 
 class AppState:
@@ -67,9 +83,14 @@ class AppState:
     # ── 경량 모니터 경로용 HOLD 포지션 셋 (DB 조회 없이 O(1) 분기) ─────
     _held_tickers: set = None  # type: ignore
 
+    # ── 스트림 분산 락 소유자 식별자 (로컬↔Railway 동시 WS 충돌 방지) ────
+    _instance_id: str = ""
+    _stream_lock_owned: bool = False
+
     def __init__(self):
         self._held_tickers = set()
         self.penny_scan_results_cache = []
+        self._instance_id = _resolve_instance_id()
 
 
 # 단일 공유 인스턴스

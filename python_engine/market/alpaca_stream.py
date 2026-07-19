@@ -482,6 +482,17 @@ async def _stop_current_stream():
             pass
     app_state._current_stream_task = None
 
+    # 로컬↔Railway 등 다른 인스턴스가 즉시 스트림을 승계할 수 있도록, 내가
+    # 스트림 락을 쥐고 있었다면 정상 종료 경로(폐장/재연결/앱 종료)에서 반납한다.
+    if app_state._stream_lock_owned and app_state.db and app_state.db.supabase:
+        try:
+            await asyncio.to_thread(
+                app_state.db.release_stream_lock, app_state._instance_id
+            )
+        except Exception:
+            pass
+        app_state._stream_lock_owned = False
+
 
 async def start_rest_polling(tickers: Optional[List[str]] = None):
     """REST API 폴링 모드 — WebSocket 비활성화 또는 connection limit 시 60초 주기"""
@@ -570,6 +581,25 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
         print("🔌 [Pulse Engine] WebSocket 비활성화 — REST Polling 모드로 전환합니다.")
         await start_rest_polling(tickers)
         return
+
+    # 로컬/Railway 등 서로 다른 인스턴스가 같은 Alpaca 계정으로 동시에 WS를
+    # 열면 "connection limit exceeded"가 발생한다. system_settings에 TTL 기반
+    # 분산 락을 두어, 다른 인스턴스가 이미 스트림을 쥐고 있으면 자동으로
+    # REST Polling으로 물러나고, 락을 잡으면 그 인스턴스만 WS를 연다.
+    if app_state.db and app_state.db.supabase:
+        acquired = await asyncio.to_thread(
+            app_state.db.try_acquire_stream_lock, app_state._instance_id
+        )
+        if not acquired:
+            print(
+                f"🔒 [Stream Lock] 다른 인스턴스가 스트림 보유 중 — REST Polling으로 전환 (me={app_state._instance_id})"
+            )
+            app_state._stream_lock_owned = False
+            await start_rest_polling(tickers)
+            return
+        app_state._stream_lock_owned = True
+        print(f"🔑 [Stream Lock] 스트림 락 획득 (me={app_state._instance_id})")
+
     print("📡 [Pulse Engine] Initializing Event-Driven Stream...")
 
     active_tickers = tickers
