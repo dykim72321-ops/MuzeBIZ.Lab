@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel
 
 from api.deps import get_api_key
-from state import app_state
+from app.state import app_state
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 

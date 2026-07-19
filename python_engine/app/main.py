@@ -28,7 +28,7 @@ from supabase import Client, create_client
 
 from infra.db_manager import DBManager
 from engine.paper_engine import PaperTradingManager
-from state import app_state
+from app.state import app_state
 from utils.utils import (
     is_market_hours,
 )  # noqa: F401 — 하위 호환 재노출 (test_pipeline.py 등)

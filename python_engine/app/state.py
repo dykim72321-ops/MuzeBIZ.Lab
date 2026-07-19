@@ -1,7 +1,7 @@
 """
 state.py — AppState 공유 전역 상태 컨테이너
 
-모든 라우터와 main.py에서 `from state import app_state` 로 접근한다.
+모든 라우터와 main.py에서 `from app.state import app_state` 로 접근한다.
 초기화는 main.py의 startup_event 또는 module import 시점에 수행된다.
 """
 

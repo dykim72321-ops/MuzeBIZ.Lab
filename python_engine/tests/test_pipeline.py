@@ -25,8 +25,8 @@ FAIL = "❌ FAIL"
 # =============================================================================
 async def test_volume_calibration():
     print("\n[Test 1] Volume Calibration Multiplier")
-    import main  # noqa: F401 — app_state.candle_state를 주입하기 위한 부팅 트리거
-    from state import app_state
+    import app.main  # noqa: F401 — app_state.candle_state를 주입하기 위한 부팅 트리거
+    from app.state import app_state
 
     candle_state = app_state.candle_state
 
@@ -106,8 +106,8 @@ async def test_data_source_tagging():
     )
 
     # volume_multiplier 등록
-    import main  # noqa: F401 — app_state.candle_state를 주입하기 위한 부팅 트리거
-    from state import app_state
+    import app.main  # noqa: F401 — app_state.candle_state를 주입하기 위한 부팅 트리거
+    from app.state import app_state
     from core.pulse import run_pulse_engine
 
     candle_state = app_state.candle_state

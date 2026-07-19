@@ -21,7 +21,7 @@ async def run_memory_test():
     print_mem("Initial")
 
     from services.market_data import MTFCache
-    from main import run_quant_scan_internal, app_state
+    from app.main import run_quant_scan_internal, app_state
 
     print_mem("After Imports")
 

@@ -8,7 +8,7 @@ import os
 from fastapi import APIRouter, Security
 
 from api.deps import get_api_key
-from state import app_state
+from app.state import app_state
 
 router = APIRouter(prefix="/api/edge", tags=["edge"])
 

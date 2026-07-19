@@ -702,7 +702,7 @@ class PaperTradingManager:
                     if loss_count >= 5 or total_pnl <= -(
                         acc.get("capital", INITIAL_CAPITAL) * 0.02
                     ):
-                        from state import app_state
+                        from app.state import app_state
 
                         app_state.SYSTEM_ARMED = False
                         print(

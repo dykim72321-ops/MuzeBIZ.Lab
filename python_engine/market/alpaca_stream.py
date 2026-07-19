@@ -12,7 +12,7 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.live import StockDataStream
 
-from state import app_state
+from app.state import app_state
 from core.pulse import run_pulse_engine
 from core.indicators import _rsi_atr_er_last
 from utils.utils import is_market_hours

@@ -8,7 +8,7 @@ import pytz
 import ta
 import yfinance as yf
 
-from state import app_state
+from app.state import app_state
 from services.quant_engine import calculate_dna_score
 from utils.utils import is_market_hours
 from market.alpaca_stream import start_alpaca_stream, _stop_current_stream

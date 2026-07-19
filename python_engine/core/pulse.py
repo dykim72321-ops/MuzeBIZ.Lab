@@ -7,7 +7,7 @@ from services.quant_engine import (
     calculate_position_sizing,
     generate_ai_investment_report,
 )
-from state import app_state
+from app.state import app_state
 from routers.strategy import stats_cache, _stats_cache_lock
 
 

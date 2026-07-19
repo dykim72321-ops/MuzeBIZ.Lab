@@ -12,7 +12,7 @@ from cachetools import TTLCache
 from fastapi import APIRouter
 
 from engine.paper_engine import INITIAL_CAPITAL
-from state import app_state
+from app.state import app_state
 
 router = APIRouter(prefix="/api/strategy", tags=["strategy"])
 

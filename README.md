@@ -366,7 +366,7 @@ supabase functions deploy
 ```bash
 cd python_engine
 pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8001 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
 ### 3b. Run Python Backend (Docker)

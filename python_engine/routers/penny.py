@@ -12,7 +12,7 @@ from fastapi import APIRouter, Body, Security
 from pydantic import BaseModel
 
 from api.deps import get_api_key
-from state import app_state
+from app.state import app_state
 from core.quant_scanner import run_quant_scan_internal, SCAN_INTERVAL_SECONDS
 
 router = APIRouter(prefix="/api/quant", tags=["quant-scan"])

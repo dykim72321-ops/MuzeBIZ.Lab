@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from state import app_state
+from app.state import app_state
 from routers import checklist
 from core.quant_scanner import run_quant_scan_internal, SCAN_INTERVAL_SECONDS
 from market.alpaca_stream import start_alpaca_stream, _stop_current_stream
@@ -598,7 +598,7 @@ async def system_heartbeat():
 
 
 # ── Watchdog 프로세스 ────────────────────────────────────────────────────────
-# watchdog.py는 python_engine/ 루트에 위치 (schedulers/ 하위로 이동되지 않음) —
+# watchdog.py는 python_engine/app/ 아래에 위치 (subprocess로 별도 기동, import되지 않음) —
 # __file__ 기준 경로는 반드시 상위 디렉터리(python_engine/)를 가리켜야 한다.
 _ENGINE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _WATCHDOG_PID_FILE = os.path.join(_ENGINE_ROOT, ".watchdog.pid")
@@ -606,7 +606,7 @@ _WATCHDOG_PID_FILE = os.path.join(_ENGINE_ROOT, ".watchdog.pid")
 
 def _spawn_watchdog_if_not_running() -> None:
     """PID 파일로 중복 spawn을 방지하며 watchdog 프로세스를 기동한다."""
-    watchdog_path = os.path.join(_ENGINE_ROOT, "watchdog.py")
+    watchdog_path = os.path.join(_ENGINE_ROOT, "app", "watchdog.py")
 
     if os.path.exists(_WATCHDOG_PID_FILE):
         try:

@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter
 
-from state import app_state
+from app.state import app_state
 
 router = APIRouter(prefix="/api/pulse", tags=["pulse"])
 

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Security, status
 
 from api.deps import get_api_key
-from state import app_state
+from app.state import app_state
 from routers.strategy import _compute_bucket_stats
 
 router = APIRouter(prefix="/api/checklist", tags=["checklist"])

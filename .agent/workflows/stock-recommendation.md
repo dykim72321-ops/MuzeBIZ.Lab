@@ -68,7 +68,7 @@ MuzeBIZ.Lab의 "오늘의 추천 종목"은 단순한 기술적 지표를 넘어
 
 ## 관련 파일
 
-- `python_engine/scraper.py`: 수집 및 자동 검증 엔진
-- `python_engine/main.py`: 백테스트 및 데이터 제공 API
+- `python_engine/scripts/scraper.py`: 수집 및 자동 검증 엔진
+- `python_engine/app/main.py`: 백테스트 및 데이터 제공 API
 - `src/services/pythonApiService.ts`: 프론트엔드 API 연동
 - `src/components/dashboard/DailyDiscoveries.tsx`: 추천 종목 대시보드 UI
