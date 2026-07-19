@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ShieldCheck, Check, X as XIcon } from 'lucide-react';
 import clsx from 'clsx';
 import { fetchChecklist, toggleChecklistItem, type ChecklistItem } from '../../services/pythonApiService';
+import { ImprovementTracker } from './ImprovementTracker';
 
 const STATUS_STYLES = {
   pass: {
@@ -142,6 +143,11 @@ export const LiveTransitionChecklist = () => {
             })}
           </div>
         )}
+
+        {/* 전략 개선 검증 트래커 — Forward Return/ATR 스탑/페니 게이트/Whipsaw 진행 현황 */}
+        <div className="mt-6">
+          <ImprovementTracker />
+        </div>
       </div>
       <div className="p-8 bg-slate-50">
         <button

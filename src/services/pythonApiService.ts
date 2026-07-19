@@ -453,6 +453,40 @@ export async function toggleChecklistItem(itemKey: string): Promise<ChecklistIte
   return apiClient.broker.post<ChecklistItem>(`/api/checklist/${itemKey}/toggle`, {});
 }
 
+export type ImprovementStatus = 'COLLECTING' | 'ON_TRACK' | 'VERIFIED' | 'REGRESSED';
+
+export interface ImprovementMetric {
+  label: string;
+  value: string;
+}
+
+export interface ImprovementItem {
+  key: string;
+  label: string;
+  adopted_at: string;
+  status: ImprovementStatus;
+  progress_pct: number;
+  metrics: ImprovementMetric[];
+  note: string;
+}
+
+export interface ImprovementStatusResponse {
+  generated_at: string;
+  items: ImprovementItem[];
+}
+
+/**
+ * 4대 개선 항목(Forward Return 로거/ATR 스탑/페니 게이트/Whipsaw) 검증 진행 현황
+ */
+export async function fetchImprovementStatus(): Promise<ImprovementStatusResponse | null> {
+  try {
+    return await apiClient.broker.get<ImprovementStatusResponse>('/api/checklist/improvements');
+  } catch (error) {
+    console.error('[PythonAPI] Improvement status error:', error);
+    return null;
+  }
+}
+
 export async function fetchPennyScanStatus(): Promise<PennyScanStatusResponse | null> {
   try {
     return await apiClient.get<PennyScanStatusResponse>('/api/quant/scan/status');

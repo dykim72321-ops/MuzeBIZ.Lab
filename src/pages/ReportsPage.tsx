@@ -3,14 +3,16 @@ import { BarChart3, CalendarClock, CalendarDays, CalendarRange, Loader2 } from '
 import clsx from 'clsx';
 import {
   ResponsiveContainer,
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
   ReferenceLine,
+  Legend,
 } from 'recharts';
 import { fetchStrategyReports, type StrategyReportBucket } from '../services/pythonApiService';
 import { LiveTransitionChecklist } from '../components/dashboard/LiveTransitionChecklist';
@@ -57,23 +59,30 @@ export default function ReportsPage() {
     loadData();
   }, [timeRange]);
 
-  // Aggregate Data for Chart
+  // Aggregate Data for Chart — 기간별 순이익(바) + 누적 순이익(자산곡선 라인).
+  // 두 시리즈 모두 달러 단위이므로 하나의 Y축을 공유한다 (이중축 금지).
+  let cumulative = 0;
   let chartData = reportData
     ? [...reportData]
         .sort((a, b) => a.period_label.localeCompare(b.period_label))
-        .map(item => ({
-          period: item.period_label,
-          winRate: item.win_rate,
-          tradeCount: item.total_trades,
-          netProfit: Math.round((item.gross_profit - item.gross_loss) * 100) / 100,
-        }))
+        .map(item => {
+          const netProfit = Math.round((item.gross_profit - item.gross_loss) * 100) / 100;
+          cumulative = Math.round((cumulative + netProfit) * 100) / 100;
+          return {
+            period: item.period_label,
+            winRate: item.win_rate,
+            tradeCount: item.total_trades,
+            netProfit,
+            cumulative,
+          };
+        })
     : [];
 
-  // Recharts BarChart는 데이터가 1개일 때 선을 그리지 못하는 문제가 없지만,
-  // 시각적 인지를 위해 점을 하나 더 찍어줄 수 있습니다.
+  // 데이터가 1개면 누적 라인이 점 하나로만 남아 추세를 읽을 수 없으므로
+  // 0에서 시작하는 기준점을 앞에 추가한다.
   if (chartData.length === 1) {
     chartData = [
-      { ...chartData[0], period: `${chartData[0].period} (Start)`, netProfit: 0 },
+      { ...chartData[0], period: `${chartData[0].period} (Start)`, netProfit: 0, cumulative: 0 },
       chartData[0],
     ];
   }
@@ -162,41 +171,32 @@ export default function ReportsPage() {
                   </h2>
                 </div>
                 
-                <div className="w-full h-[320px] relative z-10">
+                <div className="w-full h-[340px] relative z-10">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#10b981" stopOpacity={1}/>
-                          <stop offset="100%" stopColor="#059669" stopOpacity={0.6}/>
-                        </linearGradient>
-                        <linearGradient id="colorLoss" x1="0" y1="1" x2="0" y2="0">
-                          <stop offset="0%" stopColor="#f43f5e" stopOpacity={1}/>
-                          <stop offset="100%" stopColor="#e11d48" stopOpacity={0.6}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" strokeOpacity={0.5} />
-                      <XAxis 
-                        dataKey="period" 
-                        stroke="#64748b" 
-                        fontSize={11} 
+                    <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                      {/* 그리드/기준선은 솔리드 헤어라인 — 대시는 시각적 노이즈이며 '예측선'으로 오독됨 */}
+                      <CartesianGrid vertical={false} stroke="#e2e8f0" strokeOpacity={0.5} />
+                      <XAxis
+                        dataKey="period"
+                        stroke="#64748b"
+                        fontSize={11}
                         fontWeight={600}
-                        tickLine={false} 
-                        axisLine={false} 
-                        dy={12} 
+                        tickLine={false}
+                        axisLine={false}
+                        dy={12}
                       />
-                      <YAxis 
-                        stroke="#64748b" 
-                        fontSize={11} 
+                      <YAxis
+                        stroke="#64748b"
+                        fontSize={11}
                         fontWeight={600}
-                        tickLine={false} 
-                        axisLine={false} 
+                        tickLine={false}
+                        axisLine={false}
                         tickFormatter={(val) => {
                           if (Math.abs(val) >= 1000) {
                             return `$${(val / 1000).toFixed(val % 1000 !== 0 ? 1 : 0)}K`;
                           }
                           return `$${val}`;
-                        }} 
+                        }}
                       />
                       <RechartsTooltip
                         cursor={{ fill: '#f8fafc', opacity: 0.6 }}
@@ -204,14 +204,21 @@ export default function ReportsPage() {
                           if (active && payload && payload.length) {
                             const data = payload[0].payload;
                             const isProfit = data.netProfit >= 0;
+                            const isCumProfit = data.cumulative >= 0;
                             return (
-                              <div className="bg-white/90 backdrop-blur-md border border-slate-200/60 p-4 rounded-xl shadow-xl min-w-[160px]">
+                              <div className="bg-white/90 backdrop-blur-md border border-slate-200/60 p-4 rounded-xl shadow-xl min-w-[180px]">
                                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
-                                <div className="flex items-end gap-1 mb-3">
+                                <div className="flex items-end gap-1 mb-1">
                                   <span className={clsx("text-xl font-black tracking-tighter", isProfit ? "text-emerald-500" : "text-rose-500")}>
                                     {isProfit ? '+' : '-'}${Math.abs(data.netProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </span>
                                 </div>
+                                <p className="text-[10px] font-bold text-slate-500 mb-3">
+                                  누적{' '}
+                                  <span className={clsx("font-black", isCumProfit ? "text-indigo-600" : "text-rose-500")}>
+                                    {isCumProfit ? '+' : '-'}${Math.abs(data.cumulative).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </p>
                                 <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100">
                                   <div>
                                     <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">Trades</span>
@@ -228,13 +235,32 @@ export default function ReportsPage() {
                           return null;
                         }}
                       />
-                      <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" opacity={0.5} />
-                      <Bar dataKey="netProfit" radius={[6, 6, 6, 6]} barSize={40}>
+                      <Legend
+                        verticalAlign="top"
+                        align="right"
+                        height={28}
+                        iconSize={10}
+                        formatter={(value: string) => (
+                          <span className="text-[11px] font-bold text-slate-600">{value}</span>
+                        )}
+                      />
+                      <ReferenceLine y={0} stroke="#94a3b8" opacity={0.6} />
+                      <Bar name="기간 순이익" dataKey="netProfit" radius={[4, 4, 0, 0]} maxBarSize={28}>
                         {chartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.netProfit >= 0 ? 'url(#colorProfit)' : 'url(#colorLoss)'} />
+                          <Cell key={`cell-${index}`} fill={entry.netProfit >= 0 ? '#10b981' : '#f43f5e'} />
                         ))}
                       </Bar>
-                    </BarChart>
+                      {/* 누적 순이익 자산곡선 — 바(기간 손익)와 같은 달러 축 공유 */}
+                      <Line
+                        name="누적 순이익"
+                        type="monotone"
+                        dataKey="cumulative"
+                        stroke="#6366f1"
+                        strokeWidth={2}
+                        dot={{ r: 3, fill: '#6366f1', strokeWidth: 2, stroke: '#ffffff' }}
+                        activeDot={{ r: 5, strokeWidth: 2, stroke: '#ffffff' }}
+                      />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               </div>
