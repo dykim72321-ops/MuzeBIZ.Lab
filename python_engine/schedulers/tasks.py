@@ -292,6 +292,18 @@ async def position_ts_sweeper():
     SWEEP_INTERVAL_SEC = 10
     print("🧹 [TS Sweeper] Trailing-stop safety sweep started.")
 
+    # 이 스위퍼는 start_alpaca_stream()의 스트림 락과 무관하게 앱 시작 시
+    # 무조건 켜진다 — 로컬을 DISABLE_ALPACA_STREAM=true(개발 전용 standby)로
+    # 띄워도 그대로 매매 실행 경로(_close_position/process_signal)를 태워
+    # Railway와 같은 계좌를 계속 건드리게 된다. 실제 중복 체결 자체는
+    # paper_positions.ticker UNIQUE 제약·CLOSING 클레임이 DB 레벨에서 막지만,
+    # 개발 전용 인스턴스는 애초에 이 루프를 돌 필요가 없다.
+    if os.getenv("DISABLE_ALPACA_STREAM", "false").lower() == "true":
+        print(
+            "🧹 [TS Sweeper] DISABLE_ALPACA_STREAM=true — 개발 전용 standby, 스위퍼 비활성화."
+        )
+        return
+
     api_key = os.getenv("APCA_API_KEY_ID")
     api_secret = os.getenv("APCA_API_SECRET_KEY")
     client = None
