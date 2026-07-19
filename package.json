@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:frontend": "vite",
     "dev:python": "cd python_engine && PYTHONUNBUFFERED=1 ./.venv/bin/python -m uvicorn app.main:app --port 8001 --reload --reload-dir . --reload-exclude \"$(pwd)/.venv\"",
-    "dev:all": "npm-run-all --parallel dev:frontend dev:python",
+    "dev:all": "bash scripts/dev_all_toggle.sh",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
