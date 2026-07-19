@@ -577,26 +577,34 @@ async def start_rest_polling(tickers: Optional[List[str]] = None):
 
 async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     """Alpaca WebSocket 스트림 데몬 시작"""
+    # REST Polling도 on_minute_bar_closed()를 그대로 호출하는 완전한 매매
+    # 경로다 — "스트림만 끄고 폴링으로 계속 거래"는 로컬↔Railway 이중 매매를
+    # 만들므로, 이 플래그는 매매 루프 자체를 켜지 않는 완전 대기(standby)를
+    # 의미한다 (개발 전용 인스턴스 고정용).
     if os.getenv("DISABLE_ALPACA_STREAM", "false").lower() == "true":
-        print("🔌 [Pulse Engine] WebSocket 비활성화 — REST Polling 모드로 전환합니다.")
-        await start_rest_polling(tickers)
+        print(
+            "🔌 [Pulse Engine] DISABLE_ALPACA_STREAM=true — 매매 루프 비활성화 (개발 전용 standby)."
+        )
         return
 
     # 로컬/Railway 등 서로 다른 인스턴스가 같은 Alpaca 계정으로 동시에 WS를
     # 열면 "connection limit exceeded"가 발생한다. system_settings에 TTL 기반
-    # 분산 락을 두어, 다른 인스턴스가 이미 스트림을 쥐고 있으면 자동으로
-    # REST Polling으로 물러나고, 락을 잡으면 그 인스턴스만 WS를 연다.
+    # 분산 락을 두어, 락을 잡은 인스턴스만 매매 루프를 연다. 락을 못 잡은
+    # 인스턴스는 REST Polling으로 물러나는 게 아니라(그것도 매매 경로라 이중
+    # 매매가 됨) 완전 대기하며 60초마다 재시도만 한다 — 상대가 정상 종료(락
+    # 반납)하거나 크래시(TTL 만료)하면 자동 승계된다.
     if app_state.db and app_state.db.supabase:
-        acquired = await asyncio.to_thread(
+        announced = False
+        while not await asyncio.to_thread(
             app_state.db.try_acquire_stream_lock, app_state._instance_id
-        )
-        if not acquired:
-            print(
-                f"🔒 [Stream Lock] 다른 인스턴스가 스트림 보유 중 — REST Polling으로 전환 (me={app_state._instance_id})"
-            )
+        ):
             app_state._stream_lock_owned = False
-            await start_rest_polling(tickers)
-            return
+            if not announced:
+                print(
+                    f"🔒 [Stream Lock] 다른 인스턴스가 스트림 보유 중 — 승계 대기 (me={app_state._instance_id})"
+                )
+                announced = True
+            await asyncio.sleep(60)
         app_state._stream_lock_owned = True
         print(f"🔑 [Stream Lock] 스트림 락 획득 (me={app_state._instance_id})")
 
