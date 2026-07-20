@@ -105,16 +105,21 @@ ENTRY_STOP_ATR_CLAMP_LOW = 0.5  # 고정 % 대비 최소 폭 배수
 ENTRY_STOP_ATR_CLAMP_HIGH = 1.5  # 고정 % 대비 최대 폭 배수
 
 
-def _compute_entry_stop_pct(entry_price: float, atr: float, is_penny: bool) -> float:
+def _compute_entry_stop_pct(
+    entry_price: float, atr: float, is_penny: bool, atr_stop_enabled: bool = True
+) -> float:
     """진입 시점 ATR로 초기 스탑 거리(0~1, 예: 0.12 = -12%)를 계산.
 
     ATR<=0(데이터 부족)이면 고정 %를 그대로 반환해 기존 동작과 동일하게
     폴백한다. 반환값은 이후 포지션 생존 기간 내내 재사용되는 고정값이므로,
     이 함수 자체는 진입 시 1회만 호출해야 한다(매 봉 호출 금지 — 라이브 ATR
     변동으로 이미 확보한 방어선이 흔들리면 안 됨).
+
+    atr_stop_enabled=False면 개선 검증 트래커의 자동 롤백으로 ATR 기반 스탑이
+    비활성화된 상태 — 항상 고정 %만 반환한다 (checklist.evaluate_improvement_rollback 참고).
     """
     fixed_pct = 1.0 - (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
-    if atr <= 0 or entry_price <= 0:
+    if not atr_stop_enabled or atr <= 0 or entry_price <= 0:
         return fixed_pct
     k = CHANDELIER_K_PENNY if is_penny else CHANDELIER_K_NORMAL
     atr_pct = (k * atr) / entry_price
@@ -219,6 +224,15 @@ class PaperTradingManager:
         # 포지션 사이징이 현재 변동성을 반영한다 (apply_volatility_penalty 참고).
         self._kelly_cache: dict[str, dict | None] = {}
         self._kelly_cache_updated_at: dict[str, float] = {}
+
+        # ── 개선 검증 트래커 자동 롤백 대상 파라미터 (2026-07-20) ──────────────
+        # 모듈 상수 대신 인스턴스 속성으로 둬서, checklist.evaluate_improvement_rollback()가
+        # REGRESSED 연속 판정 시 프로세스 재시작 없이 즉시 되돌릴 수 있게 한다.
+        # 서버 기동 시 system_settings에 저장된 값으로 덮어써진다(app/main.py run_startup_sequence).
+        self.penny_dna_gate = 80
+        self.atr_stop_enabled = True
+        self.max_daily_trades_per_ticker = MAX_DAILY_TRADES_PER_TICKER
+        self.REENTRY_COOLDOWN_MINUTES = self.REENTRY_COOLDOWN_MINUTES
 
     def _get_buy_lock(self, ticker: str) -> asyncio.Lock:
         """티커별 매수 락 — 동일 종목의 신규 진입 처리(실주문 제출·체결 확인 포함)가
@@ -647,7 +661,8 @@ class PaperTradingManager:
         # 랭크 기반) 경로로도 True가 될 수 있어 DNA_Score가 tier 기준 미만인 신호가 섞여
         # 들어올 수 있으므로, 이 게이트가 tier 최저선 아래로는 항상 차단해야 한다
         # (페니주 쓰레기 신호 차단을 위해 65 -> 80으로 대폭 상향 — 2026-07-17).
-        dna_gate = 80 if is_penny_signal else 75
+        # self.penny_dna_gate: 개선 검증 트래커가 REGRESSED 연속 판정 시 65로 자동 롤백할 수 있음.
+        dna_gate = self.penny_dna_gate if is_penny_signal else 75
 
         # ── Gate: signal 조건 사전 체크 (ARMED 여부 포함) ────────────────────
         if signal_type == "BUY" and strength == "STRONG" and not pos:
@@ -779,7 +794,7 @@ class PaperTradingManager:
                 daily_trade_count = sum(
                     1 for r in today_rows if r.get("exit_reason") != "Scale-Out 50%"
                 )
-                if daily_trade_count >= MAX_DAILY_TRADES_PER_TICKER:
+                if daily_trade_count >= self.max_daily_trades_per_ticker:
                     await self._log_decision(
                         ticker=ticker,
                         gate="DAILY_TRADE_LIMIT",
@@ -788,7 +803,7 @@ class PaperTradingManager:
                         dna_score=dna_score,
                         rsi=rsi,
                         price=price,
-                        note=f"당일 거래 {daily_trade_count}건 ≥ 한도 {MAX_DAILY_TRADES_PER_TICKER}건",
+                        note=f"당일 거래 {daily_trade_count}건 ≥ 한도 {self.max_daily_trades_per_ticker}건",
                     )
                     print(
                         f"🛑 [Daily Limit] {ticker} 당일 거래 {daily_trade_count}건 — 신규 진입 차단."
@@ -964,7 +979,7 @@ class PaperTradingManager:
                     # ATR 기반 초기 스탑 폭 — 진입 시점에 1회 계산해 고정한다(_compute_entry_stop_pct
                     # 참고). atr<=0(데이터 부족)이면 기존 고정 %와 동일한 값으로 폴백된다.
                     entry_stop_pct = _compute_entry_stop_pct(
-                        est_fill_price, atr, is_penny_signal
+                        est_fill_price, atr, is_penny_signal, self.atr_stop_enabled
                     )
 
                     # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문

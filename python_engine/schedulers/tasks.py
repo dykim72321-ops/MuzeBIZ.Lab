@@ -111,6 +111,29 @@ async def auto_checklist_eval_scheduler():
         await asyncio.sleep(86400)
 
 
+async def auto_improvement_rollback_scheduler():
+    """매일 1회 실행: 개선 검증 트래커가 REGRESSED를 연속 판정한 항목을 자동 롤백
+    (routers/checklist.py의 evaluate_improvement_rollback()에 위임).
+
+    엔진 파라미터(dna_gate/atr_stop_enabled 등)를 직접 mutate하는 조치이므로, 로컬
+    개발 전용 standby 인스턴스(DISABLE_ALPACA_STREAM=true)에서는 돌 필요가 없다 —
+    position_ts_sweeper()와 동일한 가드를 사용한다.
+    """
+    if os.getenv("DISABLE_ALPACA_STREAM", "false").lower() == "true":
+        print(
+            "🔻 [ImprovementRollback] DISABLE_ALPACA_STREAM=true — 개발 전용 standby, 스케줄러 비활성화."
+        )
+        return
+
+    while True:
+        try:
+            await checklist.evaluate_improvement_rollback()
+        except Exception as e:
+            print(f"❌ [ImprovementRollback Error] {e}")
+
+        await asyncio.sleep(86400)
+
+
 async def stream_scheduler():
     """개장 시간을 감지해 Alpaca 스트림을 자동 시작/종료하는 스케줄러."""
     was_market_open = False

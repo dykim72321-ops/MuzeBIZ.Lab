@@ -42,6 +42,12 @@ WHIPSAW_OBSERVE_DAYS = 14  # whipsaw 재발 감시 기간 (일)
 
 IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items()}
 
+# ── 자동 롤백 대상 항목 (forward_return_logger는 되돌릴 파라미터가 없어 제외) ──
+ROLLBACK_ACTIONABLE_ITEMS = {"atr_stop", "penny_gate_80", "whipsaw_fix"}
+# flip-flop 방지: 같은 상태(REGRESSED)가 이만큼 연속 확인돼야 실제 조치를 실행한다.
+# evaluate_improvement_rollback()은 24시간 주기로 호출되므로 사실상 "이틀 연속" 의미.
+CONSECUTIVE_REGRESSED_THRESHOLD = 2
+
 
 def _verify_status(n: int, target: int, metric: float, baseline: float) -> str:
     if n < target:
@@ -68,22 +74,26 @@ async def get_checklist(api_key: str = Security(get_api_key)):
 
 @router.get("/improvements")
 async def get_improvement_status(api_key: str = Security(get_api_key)):
+    """4대 개선 항목의 검증 진행 현황 조회 엔드포인트. 실계산은 compute_improvement_status()에 위임
+    (evaluate_improvement_rollback() 스케줄러도 동일 함수를 재사용해 판정 로직을 단일화한다)."""
+    supabase = app_state.supabase
+    if not supabase:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DB 미연결"
+        )
+    return await compute_improvement_status(supabase)
+
+
+async def compute_improvement_status(supabase) -> dict:
     """4대 개선 항목(Forward Return 로거 / ATR 초기 스탑 / 페니 게이트 80 /
     Whipsaw 수정)의 검증 진행 현황을 실데이터로 자동 분석해 반환.
 
-    성과 리포트 페이지의 실계좌 전환 체크리스트 섹션에서 표시한다.
     상태 의미:
       COLLECTING — 판정에 필요한 최소 표본 미달 (데이터 축적 중)
       ON_TRACK   — 표본 축적 중이지만 현재까지 지표가 기준선보다 개선됨
       VERIFIED   — 목표 표본 도달 + 지표가 기준선 대비 개선 확인
       REGRESSED  — 지표가 기준선보다 악화 (재검토 필요)
     """
-    supabase = app_state.supabase
-    if not supabase:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DB 미연결"
-        )
-
     now_utc = datetime.now(timezone.utc)
 
     # ── 데이터 일괄 조회 (2회 왕복) ──────────────────────────────────────────
@@ -283,6 +293,28 @@ async def get_improvement_status(api_key: str = Security(get_api_key)):
             "note": "당일 재진입 금지 도입 후 같은 종목 반복 손절(6/30 유형) 재발 감시",
         }
     )
+
+    # ── 자동 롤백 이력 병합 ──────────────────────────────────────────────────
+    # evaluate_improvement_rollback()이 이미 조치를 실행한 항목은 대시보드에서
+    # "자동 롤백 적용됨" 배지로 보이도록 최신 조치 로그를 items에 붙인다.
+    rollback_res = await asyncio.to_thread(
+        supabase.table("improvement_rollback_log")
+        .select("item_key,action_detail,checked_at")
+        .in_("item_key", list(ROLLBACK_ACTIONABLE_ITEMS))
+        .eq("action_taken", True)
+        .order("checked_at", desc=True)
+        .execute
+    )
+    rollback_by_key = {}
+    for row in rollback_res.data or []:
+        rollback_by_key.setdefault(
+            row["item_key"], row
+        )  # 최신순 정렬이므로 첫 값만 사용
+
+    for item in items:
+        applied = rollback_by_key.get(item["key"])
+        item["auto_rollback_applied"] = applied is not None
+        item["auto_rollback_detail"] = applied["action_detail"] if applied else None
 
     return {"generated_at": now_utc.isoformat(), "items": items}
 
@@ -516,4 +548,141 @@ async def evaluate_checklist():
         )
         print(
             f"✅ [Checklist Eval] {key} 갱신: {old_checked}->{new_checked} ({new_note})"
+        )
+
+
+def _apply_rollback_action(key: str, engines: list) -> str:
+    """REGRESSED 연속 확정된 개선 항목의 파라미터를 이전 값으로 되돌린다.
+
+    engines에 담긴 PaperTradingManager/LiveTradingManager 인스턴스를 직접 mutate하므로
+    프로세스 재시작 없이 다음 신호부터 즉시 반영된다. 반환값은 Discord 알림·로그에 쓰인다.
+    """
+    if key == "atr_stop":
+        for e in engines:
+            e.atr_stop_enabled = False
+        return "ATR 기반 초기 스탑 비활성화 → 고정 % 스탑(-10%/페니 -15%)으로 롤백"
+    if key == "penny_gate_80":
+        for e in engines:
+            e.penny_dna_gate = 65
+        return "페니 진입 DNA 게이트 80 → 65로 롤백"
+    if key == "whipsaw_fix":
+        for e in engines:
+            e.max_daily_trades_per_ticker = 1
+            e.REENTRY_COOLDOWN_MINUTES = 60
+        return "종목당 일일 거래한도 2→1건, 재진입 쿨다운 15→60분으로 강화"
+    return "알 수 없는 항목 — 조치 없음"
+
+
+async def _persist_rollback_settings(supabase, key: str) -> None:
+    """엔진 인스턴스 mutate와 별개로 system_settings에도 저장 — 서버 재시작 후에도
+    run_startup_sequence()가 이 값을 읽어 롤백 상태를 유지하도록 한다."""
+    field_map = {
+        "atr_stop": {"atr_stop_enabled": False},
+        "penny_gate_80": {"penny_dna_gate": 65},
+        "whipsaw_fix": {
+            "max_daily_trades_per_ticker": 1,
+            "reentry_cooldown_minutes": 60,
+        },
+    }
+    fields = field_map.get(key)
+    if not fields:
+        return
+    await asyncio.to_thread(
+        supabase.table("system_settings").update(fields).eq("id", 1).execute
+    )
+
+
+async def evaluate_improvement_rollback():
+    """개선 검증 트래커가 REGRESSED를 CONSECUTIVE_REGRESSED_THRESHOLD회 연속(24시간 주기 호출
+    기준 이틀 연속) 판정하면 해당 개선의 파라미터를 자동으로 되돌리고 Discord로 통보한다.
+
+    schedulers/tasks.py의 auto_improvement_rollback_scheduler가 24시간마다 호출한다.
+    한 항목당 자동 조치는 평생 1회만 실행한다 — 롤백 이후에도 REGRESSED가 이어지면
+    이미 완화된 파라미터로도 개선되지 않는다는 뜻이므로, 더 되돌릴 곳이 없어 반복 조치는
+    의미가 없고(무한 flip-flop 방지) 사람이 재검토해야 한다는 신호로 로그만 남긴다.
+    """
+    supabase = app_state.supabase
+    if not supabase:
+        return
+
+    result = await compute_improvement_status(supabase)
+    engines = [
+        e for e in (app_state.paper_engine, app_state.live_engine) if e is not None
+    ]
+
+    for item in result["items"]:
+        key = item["key"]
+        if key not in ROLLBACK_ACTIONABLE_ITEMS:
+            continue
+        item_status = item["status"]
+
+        prev_res = await asyncio.to_thread(
+            supabase.table("improvement_rollback_log")
+            .select("status,consecutive_regressed,action_taken")
+            .eq("item_key", key)
+            .order("checked_at", desc=True)
+            .limit(1)
+            .execute
+        )
+        prev_rows = prev_res.data or []
+        prev = prev_rows[0] if prev_rows else None
+
+        ever_rolled_back_res = await asyncio.to_thread(
+            supabase.table("improvement_rollback_log")
+            .select("id")
+            .eq("item_key", key)
+            .eq("action_taken", True)
+            .limit(1)
+            .execute
+        )
+        already_rolled_back = bool(ever_rolled_back_res.data)
+
+        if item_status == "REGRESSED":
+            consecutive = (
+                prev["consecutive_regressed"] + 1
+                if prev and prev.get("status") == "REGRESSED"
+                else 1
+            )
+        else:
+            consecutive = 0
+
+        action_taken = False
+        action_detail = None
+        if (
+            item_status == "REGRESSED"
+            and consecutive >= CONSECUTIVE_REGRESSED_THRESHOLD
+            and not already_rolled_back
+        ):
+            action_detail = _apply_rollback_action(key, engines)
+            await _persist_rollback_settings(supabase, key)
+            action_taken = True
+            print(f"🔻 [ImprovementRollback] {key} 자동 롤백 실행: {action_detail}")
+
+            webhook = engines[0].webhook if engines else app_state.webhook
+            if webhook:
+                try:
+                    await webhook.send_alert(
+                        title=f"⚠️ 개선 검증 트래커 — {item['label']} 자동 롤백",
+                        description=(
+                            f"REGRESSED가 {consecutive}회 연속 판정되어 파라미터를 자동으로 되돌렸습니다.\n\n"
+                            f"**조치:** {action_detail}\n\n"
+                            f"도입일: {item['adopted_at']} · 확인 시각: {result['generated_at']}"
+                        ),
+                        color=0xE11D48,
+                    )
+                except Exception as webhook_err:
+                    print(f"⚠️ [ImprovementRollback] Discord 알림 실패: {webhook_err}")
+
+        await asyncio.to_thread(
+            supabase.table("improvement_rollback_log")
+            .insert(
+                {
+                    "item_key": key,
+                    "status": item_status,
+                    "consecutive_regressed": consecutive,
+                    "action_taken": action_taken,
+                    "action_detail": action_detail,
+                }
+            )
+            .execute
         )

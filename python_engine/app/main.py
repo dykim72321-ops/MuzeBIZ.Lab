@@ -202,6 +202,7 @@ from schedulers.tasks import (  # noqa: E402
     auto_quant_scan_scheduler,
     auto_paper_history_cleanup_scheduler,
     auto_checklist_eval_scheduler,
+    auto_improvement_rollback_scheduler,
     _stop_current_stream,
     stream_scheduler,
     paper_portfolio_updater,
@@ -271,6 +272,46 @@ async def run_startup_sequence():
                 )
             else:
                 print(f"⚠️ [Startup] Could not restore ARM state: {e}")
+
+    # 0a-2. 개선 검증 트래커 자동 롤백으로 조정됐을 수 있는 런타임 파라미터 복원
+    # (penny_dna_gate/atr_stop_enabled/max_daily_trades_per_ticker/reentry_cooldown_minutes —
+    # checklist.evaluate_improvement_rollback() 참고). 컬럼이 없으면(마이그레이션 미적용)
+    # 조용히 건너뛰고 engine __init__의 기본값을 그대로 사용한다.
+    if supabase:
+        engines = [
+            e for e in (app_state.paper_engine, app_state.live_engine) if e is not None
+        ]
+        if engines:
+            try:
+                res = await asyncio.to_thread(
+                    supabase.table("system_settings")
+                    .select(
+                        "penny_dna_gate,atr_stop_enabled,max_daily_trades_per_ticker,reentry_cooldown_minutes"
+                    )
+                    .eq("id", 1)
+                    .single()
+                    .execute
+                )
+                row = res.data or {}
+                for e in engines:
+                    if row.get("penny_dna_gate") is not None:
+                        e.penny_dna_gate = row["penny_dna_gate"]
+                    if row.get("atr_stop_enabled") is not None:
+                        e.atr_stop_enabled = row["atr_stop_enabled"]
+                    if row.get("max_daily_trades_per_ticker") is not None:
+                        e.max_daily_trades_per_ticker = row[
+                            "max_daily_trades_per_ticker"
+                        ]
+                    if row.get("reentry_cooldown_minutes") is not None:
+                        e.REENTRY_COOLDOWN_MINUTES = row["reentry_cooldown_minutes"]
+                print(
+                    f"📡 [Startup] Runtime rollback params restored: "
+                    f"penny_dna_gate={row.get('penny_dna_gate')}, atr_stop_enabled={row.get('atr_stop_enabled')}, "
+                    f"max_daily_trades_per_ticker={row.get('max_daily_trades_per_ticker')}, "
+                    f"reentry_cooldown_minutes={row.get('reentry_cooldown_minutes')}"
+                )
+            except Exception as e:
+                print(f"⚠️ [Startup] Could not restore rollback runtime params: {e}")
 
     # 0b. 페이퍼 트레이딩 계좌 초기화
     if app_state.paper_engine:
@@ -379,6 +420,9 @@ async def run_startup_sequence():
 
     # 실계좌 전환 체크리스트 매일 검증 스케줄러 시작
     asyncio.create_task(auto_checklist_eval_scheduler())
+
+    # 개선 검증 트래커 자동 롤백 스케줄러 시작 (REGRESSED 연속 판정 시 파라미터 자동 되돌림)
+    asyncio.create_task(auto_improvement_rollback_scheduler())
 
     # 실거래 모드: Alpaca Trade Update 스트림 기동
     # DISABLE_ALPACA_STREAM=true(로컬 개발 전용 standby)인 인스턴스는 여기서도

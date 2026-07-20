@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FlaskConical, CheckCircle2, TrendingUp, Database, AlertTriangle } from 'lucide-react';
+import { FlaskConical, CheckCircle2, TrendingUp, Database, AlertTriangle, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 import {
   fetchImprovementStatus,
@@ -131,6 +131,13 @@ export const ImprovementTracker = () => {
               <p className="text-[10px] font-medium text-slate-400 leading-snug mt-2 pt-2 border-t border-slate-50">
                 {item.note} <span className="font-mono">(도입 {item.adopted_at})</span>
               </p>
+
+              {item.auto_rollback_applied && (
+                <p className="flex items-start gap-1 text-[10px] font-bold text-rose-600 leading-snug mt-2 pt-2 border-t border-rose-100">
+                  <RotateCcw className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>자동 롤백 적용됨 — {item.auto_rollback_detail}</span>
+                </p>
+              )}
             </div>
           );
         })}

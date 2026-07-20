@@ -468,6 +468,10 @@ export interface ImprovementItem {
   progress_pct: number;
   metrics: ImprovementMetric[];
   note: string;
+  /** REGRESSED가 연속 확정되어 파라미터가 자동으로 되돌려졌는지 (forward_return_logger는 항상 false) */
+  auto_rollback_applied: boolean;
+  /** 자동 롤백이 실제로 무엇을 바꿨는지 (auto_rollback_applied=false면 null) */
+  auto_rollback_detail: string | null;
 }
 
 export interface ImprovementStatusResponse {
