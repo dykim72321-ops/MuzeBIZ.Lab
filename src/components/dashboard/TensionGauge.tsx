@@ -7,8 +7,12 @@ interface TensionGaugeProps {
   isPenny?: boolean;
 }
 
-// paper_engine.py process_signal() 실매수 게이트와 정합 (2026-07-15 dna_gate 복원 기준)
-const DNA_GATE_PENNY = 65;
+// paper_engine.py process_signal()의 self.penny_dna_gate 실매수 게이트와 정합.
+// 2026-07-17 "penny_gate_80" 개선으로 65→80 상향됨 (routers/checklist.py
+// IMPROVEMENT_ADOPTED 참고). 단, self.penny_dna_gate는 개선 검증 트래커가
+// REGRESSED 연속 판정 시 런타임에 65로 자동 롤백될 수 있는 값이라 이 상수는
+// 백엔드와 실시간으로 동기화되지 않는다 — 롤백 발생 시 이 값도 수동으로 되돌려야 한다.
+const DNA_GATE_PENNY = 80;
 const DNA_GATE_STANDARD = 75;
 // MomentumValidator.validate() — DNA≥80이면 RVOL 재검증을 스킵 (services/market_data.py)
 const MOMENTUM_SKIP_DNA = 80;

@@ -3,13 +3,22 @@ import os
 from datetime import datetime
 from typing import List
 
+import numpy as np
 import pandas as pd
 import pytz
 import ta
 import yfinance as yf
 
 from app.state import app_state
-from services.quant_engine import calculate_dna_score
+from services.quant_engine import (
+    calculate_dna_score,
+    EXTENSION_DAY_OPEN_PCT_NORMAL,
+    EXTENSION_DAY_OPEN_PCT_PENNY,
+    EXTENSION_PREV_CLOSE_PCT_NORMAL,
+    EXTENSION_PREV_CLOSE_PCT_PENNY,
+    EXTENSION_MA20_PCT_NORMAL,
+    EXTENSION_MA20_PCT_PENNY,
+)
 from utils.utils import is_market_hours
 from market.alpaca_stream import start_alpaca_stream, _stop_current_stream
 
@@ -58,6 +67,12 @@ async def run_quant_scan_internal(
     supabase = app_state.supabase
     trading_client = app_state.trading_client
     webhook = app_state.webhook
+    # 개선 검증 트래커가 REGRESSED 연속 판정 시 app_state.paper_engine의 이 속성을 끄면
+    # (routers/checklist.py _apply_rollback_action) 다음 스캔부터 즉시 완화된 임계값으로
+    # 되돌아간다 — quant_engine.calculate_advanced_signals()의 penny_extension_tight와 동일한 스위치.
+    penny_extension_tight = getattr(
+        app_state.paper_engine, "extension_guard_penny_tight_enabled", True
+    )
 
     scan_tickers: List[str] = []
     try:
@@ -334,10 +349,38 @@ async def run_quant_scan_internal(
                 df["RVOL"] = df["Volume"] / (df["Avg_Vol"] + 1e-9)
 
                 ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
+                # quant_engine.calculate_advanced_signals()의 실시간 진입 필터와 동일한
+                # 상수를 사용 — watchlist 등록(스캔) 단계와 실제 매수(1분봉) 단계의 과열
+                # 판정 기준이 어긋나지 않도록 정합시킴 (2026-07-20).
+                is_penny_row = df["Close"] <= 1.0
+                _penny_day_open_pct = (
+                    EXTENSION_DAY_OPEN_PCT_PENNY
+                    if penny_extension_tight
+                    else EXTENSION_DAY_OPEN_PCT_NORMAL
+                )
+                _penny_prev_close_pct = (
+                    EXTENSION_PREV_CLOSE_PCT_PENNY
+                    if penny_extension_tight
+                    else EXTENSION_PREV_CLOSE_PCT_NORMAL
+                )
+                _penny_ma20_pct = (
+                    EXTENSION_MA20_PCT_PENNY
+                    if penny_extension_tight
+                    else EXTENSION_MA20_PCT_NORMAL
+                )
+                day_open_pct = np.where(
+                    is_penny_row, _penny_day_open_pct, EXTENSION_DAY_OPEN_PCT_NORMAL
+                )
+                prev_close_pct = np.where(
+                    is_penny_row, _penny_prev_close_pct, EXTENSION_PREV_CLOSE_PCT_NORMAL
+                )
+                ma20_pct = np.where(
+                    is_penny_row, _penny_ma20_pct, EXTENSION_MA20_PCT_NORMAL
+                )
                 df["Is_Extended"] = (
-                    (df["Close"] > df["Open"] * 1.25)
-                    | (df["Close"] > df["Close"].shift(1) * 1.25)
-                    | (df["Close"] > ma20 * 1.30)
+                    (df["Close"] > df["Open"] * day_open_pct)
+                    | (df["Close"] > df["Close"].shift(1) * prev_close_pct)
+                    | (df["Close"] > ma20 * ma20_pct)
                 )
 
                 latest = df.iloc[-1]

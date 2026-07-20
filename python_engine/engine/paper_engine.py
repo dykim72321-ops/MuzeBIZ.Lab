@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from services.quant_engine import SPIKE_GUARD_PCT_NORMAL, SPIKE_GUARD_PCT_PENNY
+
 _NY_TZ = ZoneInfo(
     "America/New_York"
 )  # 모듈 레벨 캐시 — ZoneInfo는 호출마다 재생성 불필요
@@ -233,6 +235,12 @@ class PaperTradingManager:
         self.atr_stop_enabled = True
         self.max_daily_trades_per_ticker = MAX_DAILY_TRADES_PER_TICKER
         self.REENTRY_COOLDOWN_MINUTES = self.REENTRY_COOLDOWN_MINUTES
+        # "고점 매수" 개선(2026-07-20): 확장도 가드(페니 임계값 강화) + 급등 스파이크 가드.
+        # extension_guard_penny_tight_enabled는 quant_engine.calculate_advanced_signals()의
+        # penny_extension_tight 인자로 그대로 흘러들어간다(core/pulse.py, core/quant_scanner.py
+        # 참고) — DNA 점수 산출 자체에 영향을 주므로 이 엔진 레벨에서 직접 게이트를 걸지 않는다.
+        self.extension_guard_penny_tight_enabled = True
+        self.spike_guard_enabled = True
 
     def _get_buy_lock(self, ticker: str) -> asyncio.Lock:
         """티커별 매수 락 — 동일 종목의 신규 진입 처리(실주문 제출·체결 확인 포함)가
@@ -605,6 +613,7 @@ class PaperTradingManager:
         recommended_weight: float = 0.0,
         atr: float = 0.0,
         smoothed_er: float = 0.5,
+        recent_spike_pct: float = 0.0,
     ) -> bool:
         """진입/청산 처리 — 매수는 _get_buy_lock, 청산은 _get_exit_lock으로 각각
         직렬화한다 (_process_signal_locked 내부에서 분기별로 락을 잡는다). 두 락을
@@ -622,6 +631,7 @@ class PaperTradingManager:
             recommended_weight=recommended_weight,
             atr=atr,
             smoothed_er=smoothed_er,
+            recent_spike_pct=recent_spike_pct,
         )
 
     async def _process_signal_locked(
@@ -637,6 +647,7 @@ class PaperTradingManager:
         recommended_weight: float = 0.0,
         atr: float = 0.0,
         smoothed_er: float = 0.5,
+        recent_spike_pct: float = 0.0,
     ) -> bool:
         """
         v4 State Machine:
@@ -833,6 +844,30 @@ class PaperTradingManager:
                     )
                     print(
                         f"🛑 [Volatility Filter] {ticker} 변동성비 {volatility_ratio*100:.1f}% — 신규 진입 차단."
+                    )
+                    return
+
+            # 급등 스파이크 가드: 직전 SPIKE_GUARD_LOOKBACK(5)봉 저점 대비 현재가가 과도하게
+            # 튀었으면 "돌파 확인 봉"을 바로 사는 대신 눌림목(재조정)을 기다린다 — 신호 자체는
+            # 유효하게 유지한 채 이 봉만 스킵하므로, 다음 봉에서 spike_pct가 다시 낮아지면
+            # (즉 가격이 눌리거나 시간이 지나 저점 창이 갱신되면) 자동으로 재평가된다.
+            if self.spike_guard_enabled and recent_spike_pct > 0:
+                spike_cap = (
+                    SPIKE_GUARD_PCT_PENNY if is_penny_signal else SPIKE_GUARD_PCT_NORMAL
+                )
+                if recent_spike_pct > spike_cap:
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="SPIKE_GUARD",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note=f"직전 5분 급등폭 {recent_spike_pct*100:.1f}% > 상한 {spike_cap*100:.1f}% — 눌림목 대기",
+                    )
+                    print(
+                        f"🛑 [Spike Guard] {ticker} 직전 5분 급등폭 {recent_spike_pct*100:.1f}% — 신규 진입 차단."
                     )
                     return
 

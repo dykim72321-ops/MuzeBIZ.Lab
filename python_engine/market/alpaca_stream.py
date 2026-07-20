@@ -450,6 +450,7 @@ async def on_minute_bar_closed(bar):
                 recommended_weight=float(payload.get("recommended_weight", 0.0)),
                 atr=float(payload.get("atr", 0.0)),
                 smoothed_er=float(payload.get("smoothed_er", 0.5)),
+                recent_spike_pct=float(payload.get("recent_spike_pct", 0.0)),
             )
             if buy_executed:
                 app_state._held_tickers.add(ticker_symbol)

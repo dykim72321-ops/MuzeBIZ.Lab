@@ -30,20 +30,34 @@ IMPROVEMENT_ADOPTED = {
     "penny_gate_80": "2026-07-17",  # 페니 DNA 게이트 65→80 상향
     "atr_stop": "2026-07-18",  # ATR 기반 초기 트레일링 스탑 (entry_stop_pct)
     "forward_return_logger": "2026-07-18",  # 신호 30m/60m forward return 자동 기록
+    "extension_guard_tighten": "2026-07-20",  # Is_Extended 임계값 강화(페니 타이트화) + 스캔/실시간 정합
 }
 # 2026-07-18 수익률 전수분석(198건)에서 산출된 개선 전 기준선 — 효과 비교용
 BASELINE_TS_WIN_RATE = 8.8  # Trailing Stop 청산 승률 (개선 전)
 BASELINE_PENNY_WIN_RATE = 13.5  # 페니 종목(진입가 ≤ $1) 승률 (개선 전)
+BASELINE_OVERALL_WIN_RATE = (
+    19.2  # 전체 신규 진입(Scale-Out 제외) 승률 (개선 전, 6/17~7/17 198건)
+)
 # 판정에 필요한 최소 표본 수 — 미달이면 COLLECTING 상태로 표시
 TARGET_FWD_SAMPLES = 100  # forward return 수집 목표 건수
 TARGET_TS_EXITS = 30  # ATR 스탑 효과 판정에 필요한 TS 청산 수
 TARGET_PENNY_TRADES = 20  # 페니 게이트 효과 판정에 필요한 페니 거래 수
+TARGET_EXTENSION_TRADES = 30  # 확장도 가드 효과 판정에 필요한 신규 진입 수
 WHIPSAW_OBSERVE_DAYS = 14  # whipsaw 재발 감시 기간 (일)
 
 IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items()}
 
-# ── 자동 롤백 대상 항목 (forward_return_logger는 되돌릴 파라미터가 없어 제외) ──
-ROLLBACK_ACTIONABLE_ITEMS = {"atr_stop", "penny_gate_80", "whipsaw_fix"}
+# ── 자동 롤백 대상 항목 ──────────────────────────────────────────────────────
+# forward_return_logger는 되돌릴 파라미터가 없어 제외한다(신호 로깅 자체이지 매매
+# 판단 파라미터가 아님). extension_guard_tighten(확장도 가드 강화 + 급등 스파이크
+# 가드)은 2026-07-20부터 PaperTradingManager.extension_guard_penny_tight_enabled /
+# spike_guard_enabled 두 인스턴스 속성으로 핫스왑 가능해져 이 목록에 포함한다.
+ROLLBACK_ACTIONABLE_ITEMS = {
+    "atr_stop",
+    "penny_gate_80",
+    "whipsaw_fix",
+    "extension_guard_tighten",
+}
 # flip-flop 방지: 같은 상태(REGRESSED)가 이만큼 연속 확인돼야 실제 조치를 실행한다.
 # evaluate_improvement_rollback()은 24시간 주기로 호출되므로 사실상 "이틀 연속" 의미.
 CONSECUTIVE_REGRESSED_THRESHOLD = 2
@@ -291,6 +305,46 @@ async def compute_improvement_status(supabase) -> dict:
                 {"label": "관찰 경과", "value": f"{days_observed}일"},
             ],
             "note": "당일 재진입 금지 도입 후 같은 종목 반복 손절(6/30 유형) 재발 감시",
+        }
+    )
+
+    # ── 5. 확장도·급등 매수 방지 가드 ────────────────────────────────────────
+    ext_adopted = IMPROVEMENT_ADOPTED["extension_guard_tighten"]
+    ext_trades = [
+        t
+        for t in trades
+        if t["closed_at"] >= IMPROVEMENT_CUTOFFS["extension_guard_tighten"]
+        and t["exit_reason"] != "Scale-Out 50%"
+    ]
+    n_ext = len(ext_trades)
+    ext_wins = sum(1 for t in ext_trades if (t.get("pnl_pct") or 0) > 0)
+    ext_win_rate = (ext_wins / n_ext * 100) if n_ext else 0.0
+
+    metrics = [
+        {
+            "label": "도입 후 신규 진입",
+            "value": f"{n_ext} / {TARGET_EXTENSION_TRADES}건",
+        }
+    ]
+    if n_ext > 0:
+        metrics.append({"label": "도입 후 전체 승률", "value": f"{ext_win_rate:.1f}%"})
+    metrics.append(
+        {"label": "개선 전 전체 승률(기준선)", "value": f"{BASELINE_OVERALL_WIN_RATE}%"}
+    )
+
+    ext_status = _verify_status(
+        n_ext, TARGET_EXTENSION_TRADES, ext_win_rate, BASELINE_OVERALL_WIN_RATE
+    )
+    items.append(
+        {
+            "key": "extension_guard_tighten",
+            "label": "확장도·급등 매수 방지 가드",
+            "adopted_at": ext_adopted,
+            "status": ext_status,
+            "progress_pct": min(round(n_ext / TARGET_EXTENSION_TRADES * 100), 100),
+            "metrics": metrics,
+            "note": "고점(과열·직전 급등 구간) 매수 비중을 줄여 전체 승률(기준 19.2%)을 올리는지 "
+            "검증 중 — REGRESSED 2회 연속 확정 시 두 가드 모두 비활성화(자동 롤백)",
         }
     )
 
@@ -570,6 +624,11 @@ def _apply_rollback_action(key: str, engines: list) -> str:
             e.max_daily_trades_per_ticker = 1
             e.REENTRY_COOLDOWN_MINUTES = 60
         return "종목당 일일 거래한도 2→1건, 재진입 쿨다운 15→60분으로 강화"
+    if key == "extension_guard_tighten":
+        for e in engines:
+            e.extension_guard_penny_tight_enabled = False
+            e.spike_guard_enabled = False
+        return "페니 확장도 임계값을 일반 종목과 동일하게 완화 + 급등 스파이크 가드 비활성화로 롤백"
     return "알 수 없는 항목 — 조치 없음"
 
 
@@ -582,6 +641,10 @@ async def _persist_rollback_settings(supabase, key: str) -> None:
         "whipsaw_fix": {
             "max_daily_trades_per_ticker": 1,
             "reentry_cooldown_minutes": 60,
+        },
+        "extension_guard_tighten": {
+            "extension_guard_penny_tight_enabled": False,
+            "spike_guard_enabled": False,
         },
     }
     fields = field_map.get(key)

@@ -20,6 +20,30 @@ import ta
 from numba import njit
 
 
+# ── 확장도(과열) 판정 임계값 ───────────────────────────────────────────────────
+# quant_scanner.py(스캔 단계 watchlist 라벨링)도 반드시 이 상수를 그대로 import해 써야
+# 한다 — 실시간 진입 필터(여기)와 스캔 라벨링이 서로 다른 기준을 쓰면 watchlist 등록
+# 시점엔 "정상"으로 표시된 종목이 실제 진입 시점엔 과열로 걸러지는 정합성 문제가 생긴다.
+# 페니 종목은 변동성·되돌림 폭이 커서 동일 %라도 반전 리스크가 크므로 일반 종목보다
+# 타이트하게 적용한다(2026-07-20, "고점 매수" 승률 저하 개선).
+EXTENSION_DAY_OPEN_PCT_NORMAL = 1.30
+EXTENSION_DAY_OPEN_PCT_PENNY = 1.15
+EXTENSION_PREV_CLOSE_PCT_NORMAL = 1.25
+EXTENSION_PREV_CLOSE_PCT_PENNY = 1.15
+EXTENSION_MA20_PCT_NORMAL = 1.30
+EXTENSION_MA20_PCT_PENNY = 1.20
+
+# ── 직전 N봉 급등 폭(Spike Guard) 판정 상수 ───────────────────────────────────
+# "돌파 확인 봉 자체"를 바로 사는 대신, 최근 lookback 구간 저점 대비 얼마나 수직으로
+# 튀었는지를 별도로 산출해 paper_engine.py의 신규 진입 게이트가 차단 기준으로 쓴다.
+# Is_Extended(당일/이평선 대비 과열)와 달리 짧은 창(5봉=5분)에서의 "속도"를 보므로
+# 상호 보완적이다. 페니는 원래 변동성이 커서 상한을 완화한다(paper_engine.py의
+# VOLATILITY_MAX_RATIO/PENNY_VOLATILITY_MAX_RATIO와 동일한 완화 비율 관례를 따름).
+SPIKE_GUARD_LOOKBACK = 5
+SPIKE_GUARD_PCT_NORMAL = 0.05
+SPIKE_GUARD_PCT_PENNY = 0.08
+
+
 # ── DNA Signal Engine (DataFrame 버전) ────────────────────────────────────────
 
 
@@ -52,11 +76,17 @@ def safe_rolling_percentile_numba(arr, window_size):
 
 
 def calculate_advanced_signals(
-    df: pd.DataFrame, avg_daily_volume: float = 0.0
+    df: pd.DataFrame,
+    avg_daily_volume: float = 0.0,
+    penny_extension_tight: bool = True,
 ) -> pd.DataFrame:
     """
     RSI와 MACD를 결합한 고도화된 신호 엔진.
     avg_daily_volume: 30일 일봉 평균 거래량 (주입 시 분봉 RVOL 정확도 향상)
+    penny_extension_tight: False면 페니 종목의 Is_Extended 임계값을 일반 종목과 동일한
+        완화된 값(EXTENSION_*_NORMAL)으로 되돌린다 — 개선 검증 트래커가 REGRESSED 연속
+        판정 시 PaperTradingManager.extension_guard_penny_tight_enabled를 끄면 이 인자로
+        전파되어 즉시 반영된다 (routers/checklist.py _apply_rollback_action 참고).
     """
     if len(df) < 26:
         df = df.copy()
@@ -69,6 +99,7 @@ def calculate_advanced_signals(
         df["-DI"] = 0.0
         df["RVOL"] = 1.0
         df["Is_Extended"] = False
+        df["Recent_Spike_Pct"] = 0.0
         df["DNA_Score"] = 50.0
         df["Strong_Buy"] = False
         df["Strong_Sell"] = False
@@ -104,11 +135,36 @@ def calculate_advanced_signals(
         _dates = pd.to_datetime(df.index).date
     day_open = df.groupby(_dates)["Open"].transform("first")
 
+    # paper_engine.PENNY_MAX_PRICE / quant_scanner.is_penny_item과 정합된 단일 경계값($1)
+    is_penny_df = df["Close"] <= 1.0
+
     ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
+    # penny_extension_tight=False(자동 롤백)면 페니도 일반 종목과 같은 완화된
+    # 임계값을 쓰도록 되돌린다 — is_penny_df 자체는 여전히 참이어도 상수 선택만 바뀐다.
+    penny_day_open_pct = (
+        EXTENSION_DAY_OPEN_PCT_PENNY
+        if penny_extension_tight
+        else EXTENSION_DAY_OPEN_PCT_NORMAL
+    )
+    penny_prev_close_pct = (
+        EXTENSION_PREV_CLOSE_PCT_PENNY
+        if penny_extension_tight
+        else EXTENSION_PREV_CLOSE_PCT_NORMAL
+    )
+    penny_ma20_pct = (
+        EXTENSION_MA20_PCT_PENNY if penny_extension_tight else EXTENSION_MA20_PCT_NORMAL
+    )
+    day_open_pct = np.where(
+        is_penny_df, penny_day_open_pct, EXTENSION_DAY_OPEN_PCT_NORMAL
+    )
+    prev_close_pct = np.where(
+        is_penny_df, penny_prev_close_pct, EXTENSION_PREV_CLOSE_PCT_NORMAL
+    )
+    ma20_pct = np.where(is_penny_df, penny_ma20_pct, EXTENSION_MA20_PCT_NORMAL)
     df["Is_Extended"] = (
-        (df["Close"] > day_open * 1.30)
-        | (df["Close"] > df["Close"].shift(1) * 1.25)
-        | (df["Close"] > ma20 * 1.30)
+        (df["Close"] > day_open * day_open_pct)
+        | (df["Close"] > df["Close"].shift(1) * prev_close_pct)
+        | (df["Close"] > ma20 * ma20_pct)
     )
 
     # ── Kaufman Efficiency Ratio (ER) ──────────────────────────────────────────
@@ -118,9 +174,14 @@ def calculate_advanced_signals(
     df["ER"] = change / (volatility + 1e-8)
     df["smoothed_er"] = df["ER"].ewm(span=15, adjust=False).mean()
 
+    # ── Spike Guard: 직전 N봉(분) 저점 대비 급등 폭 ─────────────────────────────
+    recent_low_n = df["Low"].rolling(window=SPIKE_GUARD_LOOKBACK, min_periods=1).min()
+    df["Recent_Spike_Pct"] = (
+        (df["Close"] - recent_low_n) / recent_low_n.replace(0, np.nan)
+    ).fillna(0.0)
+
     score = pd.Series(50.0, index=df.index)
-    # paper_engine.PENNY_MAX_PRICE / quant_scanner.is_penny_item과 정합된 단일 경계값($1)
-    is_penny_df = df["Close"] <= 1.0
+    # is_penny_df는 위 Is_Extended 계산부에서 이미 산출됨 (단일 정의로 통합)
 
     # 일반 주식: 과매도(Mean-Reversion) 전략
     normal_rsi = np.where(

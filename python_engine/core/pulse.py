@@ -14,7 +14,15 @@ from routers.strategy import stats_cache, _stats_cache_lock
 def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
     """의사결정 최적화 엔진: 지표 + 포지션 사이징 + AI 결합"""
     avg_daily_vol = app_state.candle_state.avg_daily_volume.get(ticker.upper(), 0.0)
-    df = calculate_advanced_signals(df_raw, avg_daily_volume=avg_daily_vol)
+    # 개선 검증 트래커 자동 롤백 스위치 — core/quant_scanner.py와 동일 패턴
+    penny_extension_tight = getattr(
+        app_state.paper_engine, "extension_guard_penny_tight_enabled", True
+    )
+    df = calculate_advanced_signals(
+        df_raw,
+        avg_daily_volume=avg_daily_vol,
+        penny_extension_tight=penny_extension_tight,
+    )
     latest = df.iloc[-1]
 
     dynamic_kelly_weight = None
@@ -79,6 +87,11 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         "rvol": round(float(latest["RVOL"]), 2) if "RVOL" in latest else 1.0,
         "is_extended": (
             bool(latest["Is_Extended"]) if "Is_Extended" in latest else False
+        ),
+        "recent_spike_pct": (
+            round(float(latest["Recent_Spike_Pct"]), 4)
+            if "Recent_Spike_Pct" in latest and not pd.isna(latest["Recent_Spike_Pct"])
+            else 0.0
         ),
         "volatility_ann": round(float(sizing["annualized_volatility"]) * 100, 2),
         "vol_weight": sizing["vol_weight"],
