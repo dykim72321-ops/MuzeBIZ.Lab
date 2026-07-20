@@ -221,9 +221,8 @@ export default function UnifiedDashboard() {
                               {Number(stock.change_percent ?? 0) >= 0 ? '+' : ''}{Number(stock.change_percent ?? 0).toFixed(2)}%
                             </span>
                           </div>
-                          <div className="w-16 flex flex-col gap-1 items-end">
-                            <span className="text-[10px] font-mono font-bold text-slate-500">TENSION</span>
-                            <TensionGauge score={stock.dna_score} />
+                          <div className="w-20 flex flex-col gap-1 items-end">
+                            <TensionGauge score={stock.dna_score} rvol={stock.rvol} isPenny={isPenny} />
                           </div>
                         </div>
                       </div>
