@@ -48,6 +48,7 @@ from engine.paper_engine import (
 from services.kelly_sizer import KellySizer  # NEW
 from services.quant_engine import (
     calculate_advanced_signals as new_calculate_advanced_signals,
+    safe_rolling_percentile_numba,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -60,6 +61,7 @@ CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 UNIVERSE = [
+    # 원래 15종목 (밈/모멘텀 중심)
     "SOFI",
     "PLTR",
     "AMC",
@@ -75,8 +77,44 @@ UNIVERSE = [
     "SNDL",
     "NIO",
     "XPEV",
+    # 항공/여행 추가
+    "UAL",
+    "DAL",
+    "LUV",
+    # 전기차/신재생
+    "LCID",
+    "RIVN",
+    "CHPT",
+    "BLNK",
+    "FCEL",
+    # 핀테크/브로커
+    "UPST",
+    "AFRM",
+    "HOOD",
+    "COIN",
+    # 바이오/스몰캡 (페니 구간 포함)
+    "OCGN",
+    "INO",
+    "NVAX",
+    "BNGO",
+    "ATOS",
+    # 소비자/미디어/게임
+    "SNAP",
+    "PINS",
+    "ROKU",
+    "DKNG",
+    "RBLX",
+    "FUBO",
+    "WISH",
+    # 반도체/기술 모멘텀
+    "AMD",
+    "MU",
+    "SMCI",
+    # 원자재/광산 (거래량 급변 대표)
+    "FCX",
+    "AA",
 ]
-START_DATE = "2022-01-01"
+START_DATE = "2018-01-01"
 END_DATE = "2024-06-01"
 
 
@@ -139,9 +177,90 @@ def new_scaled_out_ts(entry_price, highest_price, ts_threshold, atr, is_penny):
     return max(ts_threshold, new_ts)
 
 
-def prep_signals(df: pd.DataFrame, engine_fn) -> pd.DataFrame:
+RVOL_LOOKBACK = 60  # numba_strong_buy의 rvol_rank와 동일 lookback 사용
+
+
+def _fix_daily_rvol(d: pd.DataFrame) -> pd.DataFrame:
+    """calculate_advanced_signals()의 RVOL 공식(Volume / (avg_daily_volume/390))은
+    1분봉 전용이라 avg_daily_volume 미주입 시(=이 하네스의 일봉 시뮬레이션) RVOL이
+    항상 1.0으로 고정된다. tier1(RVOL>1.0)·tier2(RVOL>1.5)·numba_strong_buy
+    (rvol_rank>=0.95) 게이트가 전부 이 상수값 때문에 원천 봉쇄되어 "NEW 로직 0건
+    거래"의 실제 원인이었다(quant_scanner 신호 병목이 아니라 하네스 데이터 결함).
+
+    일봉에 맞는 상대거래량(당일 거래량 / 20일 평균 거래량)으로 RVOL을 재계산하고,
+    이에 의존하는 rvol_rank도 함께 재산출한다. DNA_Score 자체의 RVOL 가중치 항은
+    이미 RVOL=1.0 기준으로 계산되어 있어 근사치로 남지만(정밀 재계산은 quant_engine.py의
+    스코어링 파이프라인 전체를 일봉용으로 다시 돌려야 해 과도한 범위), 이번 진단 목적
+    (RVOL 게이트가 실제로 신호를 막고 있었는지 확인)에는 충분하다.
+    """
+    d = d.copy()
+    d["RVOL"] = (d["Volume"] / d["Volume"].rolling(20, min_periods=5).mean()).fillna(
+        1.0
+    )
+    d["rvol_rank"] = safe_rolling_percentile_numba(d["RVOL"].to_numpy(), RVOL_LOOKBACK)
+    return d
+
+
+def _recompute_strong_buy(
+    d: pd.DataFrame,
+    variant: str,
+    numba_rsi_rank_max: float = 0.05,
+    numba_rvol_rank_min: float = 0.95,
+    tier1_dna_min: float = 80.0,
+) -> pd.DataFrame:
+    """RVOL 보정 후 Strong_Buy를 각 엔진의 실제 게이트 공식으로 재계산.
+    quant_engine.py / old_quant_engine.py 내부에서 이미 한 번 계산됐지만, 그 시점엔
+    보정 전 RVOL(=1.0 고정)이 쓰였으므로 여기서 다시 게이트를 통과시켜야 한다.
+
+    numba_rsi_rank_max/numba_rvol_rank_min/tier1_dna_min: Phase 3 실험용 — 라이브
+    quant_engine.py 기본값(0.05/0.95/80.0)과 다른 값을 넣어 게이트를 완화했을 때
+    신호 품질·거래량이 어떻게 바뀌는지 하네스에서 먼저 검증하기 위한 파라미터.
+    기본값은 라이브와 동일하므로 인자를 안 주면 기존 동작과 같다."""
+    d = d.copy()
+    is_not_overbought = d["RSI"] < 70.0
+    is_penny = d["Close"] <= 1.0
+
+    if variant == "OLD":
+        tier1 = (~is_penny) & (d["DNA_Score"] >= 80.0)
+        tier2 = (~is_penny) & (d["DNA_Score"] >= 75.0) & (d["RVOL"] > 1.5)
+        tier_penny = is_penny & (d["DNA_Score"] >= 65.0)
+        d["Strong_Buy"] = (tier1 | tier2 | tier_penny) & is_not_overbought
+    else:
+        tier1 = (~is_penny) & (d["DNA_Score"] >= tier1_dna_min) & (d["RVOL"] > 1.0)
+        tier2 = (~is_penny) & (d["DNA_Score"] >= 75.0) & (d["RVOL"] > 1.5)
+        tier_penny = is_penny & (d["DNA_Score"] >= 80.0)
+        numba_strong_buy = (
+            (d["rsi_rank"] <= numba_rsi_rank_max)
+            & (d["rvol_rank"] >= numba_rvol_rank_min)
+            & (d["MACD_Line"] > d["MACD_Signal"])
+            & is_not_overbought
+            & (~d["Is_Extended"])
+            & (d["ADX"] > 20)
+        ).fillna(False)
+        d["Strong_Buy"] = (
+            (tier1 | tier2 | tier_penny) & is_not_overbought
+        ) | numba_strong_buy
+    return d
+
+
+def prep_signals(
+    df: pd.DataFrame,
+    engine_fn,
+    variant: str = "NEW",
+    numba_rsi_rank_max: float = 0.05,
+    numba_rvol_rank_min: float = 0.95,
+    tier1_dna_min: float = 80.0,
+) -> pd.DataFrame:
     d = df.copy()
     d = engine_fn(d)
+    d = _fix_daily_rvol(d)
+    d = _recompute_strong_buy(
+        d,
+        variant,
+        numba_rsi_rank_max=numba_rsi_rank_max,
+        numba_rvol_rank_min=numba_rvol_rank_min,
+        tier1_dna_min=tier1_dna_min,
+    )
     atr_ind = ta.volatility.AverageTrueRange(
         high=d["High"], low=d["Low"], close=d["Close"], window=14
     )
@@ -150,10 +269,23 @@ def prep_signals(df: pd.DataFrame, engine_fn) -> pd.DataFrame:
 
 
 class Portfolio:
-    def __init__(self, variant: str, sizing: str = None, stop: str = None):
+    def __init__(
+        self,
+        variant: str,
+        sizing: str = None,
+        stop: str = None,
+        scale_out_enabled: bool = True,
+        entry_stop_tight_pct: float | None = None,
+    ):
         self.variant = variant  # "OLD" | "NEW"
         self.sizing = sizing or variant  # "OLD" | "NEW"
         self.stop = stop or variant  # "OLD" | "NEW"
+        # ── Phase 2 사전검증용 실험 스위치 (기본값은 라이브 동작과 동일) ──────────
+        self.scale_out_enabled = scale_out_enabled
+        # None이면 기존 고정 초기 스탑(TS_INIT_PCT/PENNY_TS_INIT_PCT) 사용.
+        # 값을 주면(예: 0.07 = -7%) 모든 포지션(일반/페니 공통)의 초기 스탑 폭을
+        # 이 값으로 강제 오버라이드 — "초기 스탑 타이트닝" 실험용.
+        self.entry_stop_tight_pct = entry_stop_tight_pct
         self.cash = INITIAL_CAPITAL
         self.positions = {}  # ticker -> dict
         self.closed_trades = []  # for NEW dynamic kelly rolling history
@@ -184,9 +316,9 @@ class Portfolio:
         else:
             safe_atr = atr if atr > 0 else price * 0.02
             sizer = KellySizer()
-            # self.closed_trades는 {"pnl_pct": <fraction>} 형태(compute_metrics가
+            # self.closed_trades는 {"ticker": ..., "pnl_pct": <fraction>} 형태(compute_metrics가
             # 소수 비율로 소비)만 담고 있어 KellySizer가 기대하는
-            # ticker/entry_price/profit_amt 및 퍼센트 스케일 pnl_pct와 형식이 다르다.
+            # entry_price/profit_amt 및 퍼센트 스케일 pnl_pct와 형식이 다르다.
             # 그대로 넘기면 profit_amt가 항상 0으로 채워져 entry_val=0 → 모든 표본이
             # 걸러져 compute()가 늘 None을 반환하고 NEW 사이징이 실질적으로 한 번도
             # 켈리 공식을 타지 않은 채 항상 0.05 폴백만 쓰던 문제가 있었다.
@@ -196,14 +328,24 @@ class Portfolio:
             # 여기서 pnl_pct * 100을 profit_amt로 넘기는 것은, 모든 백테스트 거래가
             # 정확히 $10,000 투입되었다고 가정하는 것과 같습니다. 만약 미래에 KellySizer가
             # 순수 달러 기준의 변동성(Vol)을 분모로 사용하도록 고도화되면 사이즈 불균형 오류가 발생할 수 있습니다.
+            #
+            # paper_engine.py(라이브)는 2026-07-15에 이 회로차단기를 종목 단위로
+            # 스코프했다(과거 수정된 버그: "Kelly 회로차단기가 계좌 전체 최근 거래로
+            # 판단해 한 종목의 손실이 전 종목 신규 매수를 잠금"). 이 하네스는 그 수정이
+            # 반영되지 않아 self.closed_trades 전체(계좌 전체)로 EV를 계산했었다 —
+            # PF<1인 백테스트에서는 표본이 10건을 넘는 순간 계좌 전체 EV가 음수로 굳어
+            # raw_kelly=0.0(None이 아님 → 0.05 폴백을 타지 않음) → budget=0으로
+            # 이후 모든 신규 진입이 영구 차단되는 결과를 낳았다. 라이브와 동일하게
+            # 같은 티커의 이력만으로 스코프한다.
+            ticker_trades = [t for t in self.closed_trades if t.get("ticker") == ticker]
             formatted_trades = [
                 {
-                    "ticker": "X",
+                    "ticker": ticker,
                     "entry_price": 100000.0 + idx,  # ZeroDivision 방지
                     "profit_amt": t["pnl_pct"] * 100,
                     "pnl_pct": t["pnl_pct"] * 100,
                 }
-                for idx, t in enumerate(self.closed_trades)
+                for idx, t in enumerate(ticker_trades)
             ]
             frac, _, _ = sizer.compute(
                 formatted_trades, current_atr=safe_atr, current_price=price
@@ -217,7 +359,10 @@ class Portfolio:
 
         fill_price = _apply_slippage(price, is_buy=True, is_penny=is_penny)
         units = budget / fill_price
-        ts_init = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
+        if self.entry_stop_tight_pct is not None:
+            ts_init = 1.0 - self.entry_stop_tight_pct
+        else:
+            ts_init = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
 
         self.cash -= budget
         self.positions[ticker] = {
@@ -262,7 +407,12 @@ class Portfolio:
             else:
                 effective_atr = atr if atr > 0 else entry_price * 0.02
                 pos["ts_threshold"] = update_reversible_trailing_stop(
-                    entry_price, highest_price, effective_atr, smoothed_er, is_penny
+                    entry_price,
+                    highest_price,
+                    effective_atr,
+                    smoothed_er,
+                    is_penny,
+                    entry_stop_pct=self.entry_stop_tight_pct,
                 )
         else:
             fn = old_scaled_out_ts if self.stop == "OLD" else new_scaled_out_ts
@@ -270,9 +420,11 @@ class Portfolio:
                 entry_price, highest_price, pos["ts_threshold"], atr, is_penny
             )
 
-        # B. Scale-Out 체크 (미실행 상태에서만)
+        # B. Scale-Out 체크 (미실행 상태에서만, scale_out_enabled=False면 전량 스킵 —
+        # 포지션은 계속 "미실행" 상태로 남아 A 분기의 ATR Trailing Stop이 전량을
+        # 계속 추적한다 — Phase 2 "Scale-Out 폐기 + TS 일원화" 실험 스위치)
         profit_pct = close / entry_price - 1
-        if not pos["is_scaled_out"]:
+        if self.scale_out_enabled and not pos["is_scaled_out"]:
             if is_penny:
                 scale_trigger = (
                     rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
@@ -294,12 +446,25 @@ class Portfolio:
             proceeds = pos["units"] * exit_price
             self.cash += proceeds
             pnl_pct = exit_price / entry_price - 1
-            self.closed_trades.append({"pnl_pct": pnl_pct})
+            self.closed_trades.append({"ticker": ticker, "pnl_pct": pnl_pct})
             del self.positions[ticker]
 
 
-def run_variant(dfs: dict, variant: str, sizing: str = None, stop: str = None):
-    pf = Portfolio(variant, sizing=sizing, stop=stop)
+def run_variant(
+    dfs: dict,
+    variant: str,
+    sizing: str = None,
+    stop: str = None,
+    scale_out_enabled: bool = True,
+    entry_stop_tight_pct: float | None = None,
+):
+    pf = Portfolio(
+        variant,
+        sizing=sizing,
+        stop=stop,
+        scale_out_enabled=scale_out_enabled,
+        entry_stop_tight_pct=entry_stop_tight_pct,
+    )
     all_dates = sorted(set().union(*[set(d.index) for d in dfs.values()]))
     for date in all_dates:
         for ticker, d in dfs.items():
@@ -325,7 +490,7 @@ def run_variant(dfs: dict, variant: str, sizing: str = None, stop: str = None):
         )
         pf.cash += pos["units"] * exit_price
         pnl_pct = exit_price / pos["entry_price"] - 1
-        pf.closed_trades.append({"pnl_pct": pnl_pct})
+        pf.closed_trades.append({"ticker": ticker, "pnl_pct": pnl_pct})
         del pf.positions[ticker]
     return pf
 
@@ -342,6 +507,11 @@ def compute_metrics(pf: Portfolio):
     profit_factor = (
         (sum(wins) / abs(sum(losses))) if losses and sum(losses) != 0 else float("inf")
     )
+    avg_win_pct = float(np.mean(wins) * 100) if wins else 0.0
+    avg_loss_pct = float(np.mean(losses) * 100) if losses else 0.0
+    win_loss_ratio = (
+        abs(avg_win_pct / avg_loss_pct) if avg_loss_pct != 0 else float("inf")
+    )
     equity = [e for _, e in pf.equity_curve]
     total_return = (equity[-1] / INITIAL_CAPITAL - 1) * 100 if equity else 0.0
     peak = -np.inf
@@ -357,6 +527,11 @@ def compute_metrics(pf: Portfolio):
             round(profit_factor, 3) if profit_factor != float("inf") else None
         ),
         "avg_pnl_pct": round(np.mean(pnls) * 100, 3),
+        "avg_win_pct": round(avg_win_pct, 3),
+        "avg_loss_pct": round(avg_loss_pct, 3),
+        "win_loss_ratio": (
+            round(win_loss_ratio, 3) if win_loss_ratio != float("inf") else None
+        ),
         "total_return_pct": round(total_return, 2),
         "mdd_pct": round(mdd, 2),
         "final_equity": round(equity[-1], 2) if equity else INITIAL_CAPITAL,
@@ -379,11 +554,13 @@ def main():
 
     print("▶ OLD 신호 계산 중 (9e52902 이전 로직)...")
     old_dfs = {
-        t: prep_signals(d, old_calculate_advanced_signals) for t, d in raw.items()
+        t: prep_signals(d, old_calculate_advanced_signals, variant="OLD")
+        for t, d in raw.items()
     }
     print("▶ NEW 신호 계산 중 (현재 저장소 로직)...")
     new_dfs = {
-        t: prep_signals(d, new_calculate_advanced_signals) for t, d in raw.items()
+        t: prep_signals(d, new_calculate_advanced_signals, variant="NEW")
+        for t, d in raw.items()
     }
 
     for t in raw:

@@ -7,3 +7,6 @@ __pycache__/
 .watchdog.pid
 backtest_harness/_cache/
 backtest_harness/comparison_result.json
+backtest_harness/zero_slippage_result.json
+backtest_harness/scale_out_experiment_result.json
+backtest_harness/signal_quality_experiment_result.json

@@ -136,6 +136,11 @@ async def compute_improvement_status(supabase) -> dict:
     items = []
 
     # ── 1. Forward Return 로거 ───────────────────────────────────────────────
+    # 아래 DNA≥80/<80 2구간 미니 분석은 대시보드용 요약이다. DNA_Score 5구간 세분화,
+    # RSI/RVOL 상관계수(Pearson/Spearman), EXECUTED vs BLOCKED 비교 등 더 깊은
+    # 오프라인 분석은 scripts/run_feature_significance.py 참고 — 그 스크립트의
+    # "0. checklist.py 대시보드 미니 분석과 대사" 섹션이 아래 계산식을 그대로
+    # 재현해 두 숫자가 어긋나지 않는지 매 실행마다 자동으로 검증한다.
     fwd_adopted = IMPROVEMENT_ADOPTED["forward_return_logger"]
     fwd_rows = [
         d for d in decisions if d["ts"] >= IMPROVEMENT_CUTOFFS["forward_return_logger"]
