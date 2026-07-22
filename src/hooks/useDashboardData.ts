@@ -98,7 +98,7 @@ export function useDashboardData() {
   const displayedAccount = useMemo(
     () => ({
       total_assets: paperAccount?.total_assets ?? 0,
-      equity: paperAccount?.equity ?? 0,
+      equity: paperAccount?.total_assets ?? 0,
       cash_available: paperAccount?.cash_available ?? 0,
       today_pnl: paperAccount?.today_pnl ?? 0,
       today_pnl_pct: paperAccount?.today_pnl_pct ?? 0,

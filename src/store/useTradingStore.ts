@@ -19,11 +19,11 @@ import type {
   PortfolioHistoryPoint,
 } from '../types/dashboard';
 
-import type { BrokerPositionRaw, ClosedTradeRaw, BrokerAccountResponse, PennyScanStatusResponse } from '../types/api';
+import type { PaperPositionRaw, ClosedTradeRaw, PaperAccountResponse, PennyScanStatusResponse } from '../types/api';
 import {
   fetchBrokerStatus,
-  fetchBrokerAccount,
-  fetchBrokerPositions,
+  fetchPaperAccount,
+  fetchPaperPositions,
   fetchClosedTrades,
   fetchPennyScanStatus,
   fetchPortfolioHistory,
@@ -57,7 +57,7 @@ interface TradingState {
   livePositions: PaperPosition[];
   liveHistory: PaperHistory[];
   portfolioHistory: PortfolioHistoryPoint[];
-  paperAccount: BrokerAccountResponse | null;
+  paperAccount: PaperAccountResponse | null;
   pennyScanStatus: PennyScanStatusResponse | null;
   edgeAlert: EdgeAlert;
   terminalData: TerminalData | null;
@@ -80,12 +80,12 @@ interface TradingState {
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
-function mapPaperPositions(raw: BrokerPositionRaw[]): PaperPosition[] {
+function mapPaperPositions(raw: PaperPositionRaw[]): PaperPosition[] {
   return raw
     .map((pp) => {
       const entry = Number(pp.entry_price);
       const current = pp.current_price != null ? Number(pp.current_price) : entry;
-      const units = Number(pp.units ?? pp.quantity);
+      const units = Number(pp.units);
       const isPenny = pp.is_penny ?? entry <= PENNY_THRESHOLD;
       const highestPrice = pp.highest_price != null ? Number(pp.highest_price) : Math.max(entry, current);
       const tsThreshold = pp.ts_threshold != null ? Number(pp.ts_threshold) : highestPrice * (isPenny ? 0.90 : 0.95);
@@ -187,11 +187,11 @@ export const useTradingStore = create<TradingState>((set) => ({
         paperAccountResult,
         discoveryResult,
         scanStatusResult,
-        brokerPositionsResult,
+        paperPositionsResult,
         paperHistoryResult,
         portfolioHistoryResult,
       ] = await Promise.allSettled([
-        fetchBrokerAccount(),
+        fetchPaperAccount(),
         supabaseClient
           .from('daily_discovery')
           .select('*')
@@ -201,7 +201,7 @@ export const useTradingStore = create<TradingState>((set) => ({
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
-        fetchBrokerPositions(),
+        fetchPaperPositions(),
         fetchClosedTrades(200),
         fetchPortfolioHistory('all', '1D'),
       ]);
@@ -221,11 +221,11 @@ export const useTradingStore = create<TradingState>((set) => ({
         console.error('Failed to load daily_discovery:', discoveryResult.reason);
       }
 
-      if (brokerPositionsResult.status === 'fulfilled') {
-        updates.livePositions = mapPaperPositions(brokerPositionsResult.value);
+      if (paperPositionsResult.status === 'fulfilled') {
+        updates.livePositions = mapPaperPositions(paperPositionsResult.value);
       } else {
         anyFailed = true;
-        console.error('Failed to load paper positions:', brokerPositionsResult.reason);
+        console.error('Failed to load paper positions:', paperPositionsResult.reason);
       }
 
       if (paperHistoryResult.status === 'fulfilled') {
