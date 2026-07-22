@@ -493,83 +493,116 @@ class PaperTradingManager:
             .execute
         )
         if not claim.data:
+            # 클레임 실패 사유를 명시적으로 남겨 호출부(예: manual_paper_sell)가
+            # last_order_fail_reason에 남아있던 다른 티커의 stale 값(NO_POSITION 등)을
+            # 오독해 "성공"으로 잘못 응답하지 않게 한다.
+            self.last_order_fail_reason = "CLAIM_CONFLICT"
             return None
 
-        fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
-        executed = await self._on_order_sell(ticker, units, fill_price, exit_reason)
-        if executed is None:
-            # 실주문 실패 — 클레임 해제(원래 상태로 복구)해 재시도 가능하게 유지
+        cash_applied = False
+        try:
+            fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
+            executed = await self._on_order_sell(ticker, units, fill_price, exit_reason)
+            if executed is None:
+                # 실주문 실패 — 클레임 해제(원래 상태로 복구)해 재시도 가능하게 유지
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .update({"status": original_status})
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                return None
+            units, fill_price = executed
+
+            # ── 브로커 하드 스탑(Hard Stop-Loss) 주문 시뮬레이션 (PAPER 전용) ────────
+            entry_stop_pct = pos.get("entry_stop_pct")
+            hard_stop_init_pct = (
+                (1.0 - entry_stop_pct)
+                if entry_stop_pct is not None
+                else (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
+            )
+            hard_stop_limit = entry_price * hard_stop_init_pct
+            if (
+                not self.IS_LIVE
+                and exit_reason == "Trailing Stop"
+                and fill_price < hard_stop_limit
+            ):
+                simulated_broker_fill = hard_stop_limit * 0.98
+                if simulated_broker_fill > fill_price:
+                    print(
+                        f"🛡️ [Hard Stop 방어] {ticker} 급락(데이터 공백) 방어! "
+                        f"기존 {fill_price:.4f} -> 브로커 스탑 체결가 {simulated_broker_fill:.4f} 로 보정"
+                    )
+                    fill_price = simulated_broker_fill
+
+            pnl_pct = (fill_price / entry_price - 1) * 100
+            profit_amt = (fill_price - entry_price) * units
+            proceeds = units * fill_price
+
+            await self._apply_cash_delta(proceeds)
+            cash_applied = True
+            history_data = {
+                "ticker": ticker,
+                "entry_price": entry_price,
+                "exit_price": fill_price,
+                "signal_price": signal_price,
+                "slippage_pct": (fill_price / signal_price - 1) * 100,
+                "pnl_pct": pnl_pct,
+                "profit_amt": profit_amt,
+                "exit_reason": exit_reason,
+            }
+            await asyncio.to_thread(
+                self.supabase.table("paper_history").insert(history_data).execute
+            )
             await asyncio.to_thread(
                 self.supabase.table("paper_positions")
-                .update({"status": original_status})
+                .delete()
                 .eq("ticker", ticker)
                 .execute
             )
-            return None
-        units, fill_price = executed
+            await self._sync_watchlist_exit(ticker)
 
-        # ── 브로커 하드 스탑(Hard Stop-Loss) 주문 시뮬레이션 (PAPER 전용) ────────
-        # 웹소켓(데이터 공백)이나 폴링 주기 지연으로 인해 1분봉 종가가
-        # -15% 한참 아래(예: -40%)에서 포착되더라도,
-        # 실제 환경(Alpaca OCO/OTO)에서는 브로커 서버가 -15% 선에서 이미 Stop Market 주문을
-        # 발동시키므로 이를 반영하여 치명적 손실(Gap-down)을 차단한다.
-        # LIVE 모드에서는 fill_price가 이미 Alpaca가 실제로 지급한 체결가이므로
-        # (self.IS_LIVE) 이 시뮬레이션으로 덮어쓰면 실제 체결가와 내부 현금 장부·
-        # paper_history 기록이 어긋난다 — PAPER 모드에서만 적용한다.
-        entry_stop_pct = pos.get("entry_stop_pct")
-        hard_stop_init_pct = (
-            (1.0 - entry_stop_pct)
-            if entry_stop_pct is not None
-            else (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
-        )
-        hard_stop_limit = entry_price * hard_stop_init_pct
-        if (
-            not self.IS_LIVE
-            and exit_reason == "Trailing Stop"
-            and fill_price < hard_stop_limit
-        ):
-            # 스탑 트리거 후 시장가 슬리피지를 감안해 Hard Limit 대비 2% 추가 손실로 시뮬레이션
-            simulated_broker_fill = hard_stop_limit * 0.98
-            if simulated_broker_fill > fill_price:
+            # KellySizer 캐시 무효화 (청산 후 과거 데이터가 변경되었으므로)
+            if ticker in self._kelly_cache:
+                del self._kelly_cache[ticker]
+
+            return {
+                "fill_price": fill_price,
+                "units": units,
+                "pnl_pct": pnl_pct,
+                "profit_amt": profit_amt,
+            }
+        except Exception as close_err:
+            if cash_applied:
+                # 현금은 이미 매도 대금으로 반영됐다 — 여기서 status를 원래 상태(HOLD 등)로
+                # 되돌리면 포지션이 다시 정상 관리 대상이 되어, 나중에 실제로 청산될 때
+                # 동일 수량에 대해 현금이 이중으로 반영된다(이중 정산). 이미 회계상
+                # "판매됨" 처리된 포지션을 재거래 가능한 상태로 되살리는 대신 CLOSING으로
+                # 묶어두고 수동 정합 확인을 유도한다.
                 print(
-                    f"🛡️ [Hard Stop 방어] {ticker} 급락(데이터 공백) 방어! "
-                    f"기존 {fill_price:.4f} -> 브로커 스탑 체결가 {simulated_broker_fill:.4f} 로 보정"
+                    f"🚨 [_close_position 부분 실패] {ticker}: {close_err} — "
+                    f"현금은 이미 반영됨(중복 정산 위험), 포지션을 CLOSING 상태로 고정하고 수동 확인 필요"
                 )
-                fill_price = simulated_broker_fill
-
-        pnl_pct = (fill_price / entry_price - 1) * 100
-        profit_amt = (fill_price - entry_price) * units
-        proceeds = units * fill_price
-
-        await self._apply_cash_delta(proceeds)
-        history_data = {
-            "ticker": ticker,
-            "entry_price": entry_price,
-            "exit_price": fill_price,
-            "signal_price": signal_price,
-            "slippage_pct": (fill_price / signal_price - 1) * 100,
-            "pnl_pct": pnl_pct,
-            "profit_amt": profit_amt,
-            "exit_reason": exit_reason,
-        }
-        await asyncio.to_thread(
-            self.supabase.table("paper_history").insert(history_data).execute
-        )
-        await asyncio.to_thread(
-            self.supabase.table("paper_positions").delete().eq("ticker", ticker).execute
-        )
-        await self._sync_watchlist_exit(ticker)
-
-        # KellySizer 캐시 무효화 (청산 후 과거 데이터가 변경되었으므로)
-        if ticker in self._kelly_cache:
-            del self._kelly_cache[ticker]
-
-        return {
-            "fill_price": fill_price,
-            "units": units,
-            "pnl_pct": pnl_pct,
-            "profit_amt": profit_amt,
-        }
+                await self.webhook.send_alert(
+                    title=f"🚨 [정산 불일치 위험] {ticker}",
+                    description=(
+                        f"청산 대금은 이미 계좌에 반영됐지만 이후 기록 단계에서 오류가 발생했습니다: `{close_err}`\n"
+                        f"paper_positions/paper_history/paper_account을 수동으로 확인하세요. "
+                        f"포지션은 재거래 방지를 위해 CLOSING 상태로 유지됩니다."
+                    ),
+                    color=0xFF0000,
+                )
+            else:
+                print(
+                    f"❌ [_close_position 오류 발생] {ticker}: {close_err} — 상태({original_status}) 복구"
+                )
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .update({"status": original_status})
+                    .eq("ticker", ticker)
+                    .execute
+                )
+            raise close_err
 
     REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간
     # PDT Rule은 마진 계좌 $25k 미만에만 적용 — $100k 가상 계좌에서는 불필요

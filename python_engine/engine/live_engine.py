@@ -138,9 +138,13 @@ class LiveTradingManager(PaperTradingManager):
                 if actual_qty <= 0:
                     print(
                         f"⛔ [{ticker}] {side_str} 주문 차단 — Alpaca 실제 잔고 없음 "
-                        f"(요청: {order_qty:.4f}, 실보유: {actual_qty:.4f})"
+                        f"(요청: {order_qty:.4f}, 실보유: {actual_qty:.4f}) → DB 포지션 정리 진행"
                     )
                     self.last_order_fail_reason = "NO_POSITION"
+                    await self._reconcile_phantom_position(
+                        ticker,
+                        Exception(f"Alpaca 실제 잔고 없음 (실보유: {actual_qty:.4f})"),
+                    )
                     return None
 
                 if order_qty > actual_qty:

@@ -11,14 +11,15 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold }: P
   if (currentPrice === null) return null;
 
   // 고점~트레일링스탑 구간에서 현재가가 남긴 여유분 (0% = 스탑 근접, 100% = 방금 고점 경신)
+  const isBreached = currentPrice < tsThreshold;
   const range = highestPrice - tsThreshold;
   const safeRange = range > 0 ? range : 0.0001;
   const healthPct = Math.max(0, Math.min(100, ((currentPrice - tsThreshold) / safeRange) * 100));
 
-  // 현재가 대비 스탑까지 실제 남은 거리(%) — 매도 타이밍을 직관적으로 보여주는 절대 수치
+  // 현재가 대비 스탑까지 실제 남은 거리(%) — 음수면 이미 스탑 하회
   const distanceToStopPct = currentPrice > 0 ? ((currentPrice - tsThreshold) / currentPrice) * 100 : 0;
 
-  const isCritical = healthPct <= 15;
+  const isCritical = healthPct <= 15 || isBreached;
   const isDanger = healthPct <= 30;
 
   let gradient = 'from-emerald-400 to-emerald-300';
@@ -26,7 +27,12 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold }: P
   let label = 'SAFE';
   let labelColor = 'text-slate-500';
 
-  if (isCritical) {
+  if (isBreached) {
+    gradient = 'from-rose-700 to-rose-600';
+    glow = 'rgba(225,29,72,0.9)';
+    label = '스탑이탈';
+    labelColor = 'text-rose-700 font-extrabold animate-pulse';
+  } else if (isCritical) {
     gradient = 'from-rose-600 to-rose-500';
     glow = 'rgba(244,63,94,0.7)';
     label = '청산임박';
@@ -43,14 +49,18 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold }: P
     labelColor = 'text-amber-600';
   }
 
+  const displayText = isBreached
+    ? `하회 ${Math.abs(distanceToStopPct).toFixed(1)}%`
+    : `-${distanceToStopPct.toFixed(1)}%`;
+
   return (
     <div className="w-full flex flex-col gap-1.5 mt-1" title={`Health: ${healthPct.toFixed(1)}% / 스탑까지 ${distanceToStopPct.toFixed(1)}%`}>
       <div className="flex justify-between items-center text-[10px] font-mono font-black px-0.5">
         <span className={clsx('uppercase tracking-widest transition-colors duration-500', labelColor)}>
           {label}
         </span>
-        <span className={clsx('transition-colors duration-500', isDanger ? 'text-rose-600' : 'text-slate-700')}>
-          -{Math.max(0, distanceToStopPct).toFixed(1)}%
+        <span className={clsx('transition-colors duration-500', isBreached ? 'text-rose-700 font-bold' : isDanger ? 'text-rose-600' : 'text-slate-700')}>
+          {displayText}
         </span>
       </div>
       <div className="w-full h-1 bg-slate-200/60 rounded-full relative">

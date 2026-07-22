@@ -19,11 +19,11 @@ import type {
   PortfolioHistoryPoint,
 } from '../types/dashboard';
 
-import type { BrokerPositionRaw, ClosedTradeRaw, BrokerAccountResponse, PennyScanStatusResponse } from '../types/api';
+import type { PaperPositionRaw, ClosedTradeRaw, BrokerAccountResponse, PennyScanStatusResponse } from '../types/api';
 import {
   fetchBrokerStatus,
   fetchBrokerAccount,
-  fetchBrokerPositions,
+  fetchPaperPositions,
   fetchClosedTrades,
   fetchPennyScanStatus,
   fetchPortfolioHistory,
@@ -80,12 +80,12 @@ interface TradingState {
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
-function mapPaperPositions(raw: BrokerPositionRaw[]): PaperPosition[] {
+function mapPaperPositions(raw: PaperPositionRaw[]): PaperPosition[] {
   return raw
     .map((pp) => {
       const entry = Number(pp.entry_price);
       const current = pp.current_price != null ? Number(pp.current_price) : entry;
-      const units = Number(pp.units ?? pp.quantity);
+      const units = Number(pp.units);
       const isPenny = pp.is_penny ?? entry <= PENNY_THRESHOLD;
       const highestPrice = pp.highest_price != null ? Number(pp.highest_price) : Math.max(entry, current);
       const tsThreshold = pp.ts_threshold != null ? Number(pp.ts_threshold) : highestPrice * (isPenny ? 0.90 : 0.95);
@@ -180,14 +180,17 @@ export const useTradingStore = create<TradingState>((set) => ({
   // ── loadDashboardData ──
   loadDashboardData: async () => {
     try {
+      // Promise.all은 6개 요청 중 단 하나만 실패해도 이미 성공한 나머지 결과까지
+      // 통째로 버려 화면이 옛 상태(livePositions 등)에 영구히 고정되는 원인이 됐다.
+      // allSettled로 바꿔 각 데이터를 독립적으로 반영 — 실패한 항목만 기존 값을 유지한다.
       const [
-        paperAccount,
+        paperAccountResult,
         discoveryResult,
-        scanStatus,
-        paperPositions,
-        paperHistory,
-        portfolioHistory,
-      ] = await Promise.all([
+        scanStatusResult,
+        paperPositionsResult,
+        paperHistoryResult,
+        portfolioHistoryResult,
+      ] = await Promise.allSettled([
         fetchBrokerAccount(),
         supabaseClient
           .from('daily_discovery')
@@ -198,34 +201,67 @@ export const useTradingStore = create<TradingState>((set) => ({
           .order('dna_score', { ascending: false })
           .limit(8),
         fetchPennyScanStatus(),
-        fetchBrokerPositions(),
+        fetchPaperPositions(),
         fetchClosedTrades(),
         fetchPortfolioHistory('all', '1D'),
       ]);
 
-      const mappedPositions = mapPaperPositions(paperPositions);
-      const mappedHistory = mapPaperHistory(paperHistory);
-
       const updates: Partial<TradingState> = {
-        discoveryStocks: ((discoveryResult.data || []) as DiscoveryStock[]).filter(
-          (s) => s.dna_score != null && s.price != null,
-        ),
-        livePositions: mappedPositions,
-        liveHistory: mappedHistory,
-        portfolioHistory: portfolioHistory as PortfolioHistoryPoint[],
         lastFetchedTime: new Date().toISOString().substring(11, 19),
         loading: false,
-        connectionError: false,
       };
+      let anyFailed = false;
 
-      if (scanStatus) updates.pennyScanStatus = scanStatus;
-      if (paperAccount && !('error' in paperAccount)) {
-        updates.paperAccount = paperAccount;
+      if (discoveryResult.status === 'fulfilled') {
+        updates.discoveryStocks = ((discoveryResult.value.data || []) as DiscoveryStock[]).filter(
+          (s) => s.dna_score != null && s.price != null,
+        );
       } else {
-        // 계좌 응답이 에러 페이로드를 담고 있으면 이전 값(stale)을 유지하고 배지로만 알린다.
-        updates.connectionError = true;
+        anyFailed = true;
+        console.error('Failed to load daily_discovery:', discoveryResult.reason);
       }
 
+      if (paperPositionsResult.status === 'fulfilled') {
+        updates.livePositions = mapPaperPositions(paperPositionsResult.value);
+      } else {
+        anyFailed = true;
+        console.error('Failed to load paper positions:', paperPositionsResult.reason);
+      }
+
+      if (paperHistoryResult.status === 'fulfilled') {
+        updates.liveHistory = mapPaperHistory(paperHistoryResult.value);
+      } else {
+        anyFailed = true;
+        console.error('Failed to load paper history:', paperHistoryResult.reason);
+      }
+
+      if (portfolioHistoryResult.status === 'fulfilled') {
+        updates.portfolioHistory = portfolioHistoryResult.value as PortfolioHistoryPoint[];
+      } else {
+        anyFailed = true;
+        console.error('Failed to load portfolio history:', portfolioHistoryResult.reason);
+      }
+
+      if (scanStatusResult.status === 'fulfilled' && scanStatusResult.value) {
+        updates.pennyScanStatus = scanStatusResult.value;
+      } else if (scanStatusResult.status === 'rejected') {
+        anyFailed = true;
+        console.error('Failed to load penny scan status:', scanStatusResult.reason);
+      }
+
+      if (
+        paperAccountResult.status === 'fulfilled' &&
+        paperAccountResult.value &&
+        !('error' in paperAccountResult.value)
+      ) {
+        updates.paperAccount = paperAccountResult.value;
+      } else {
+        // 계좌 응답이 에러 페이로드를 담고 있거나 요청 자체가 실패하면
+        // 이전 값(stale)을 유지하고 배지로만 알린다.
+        anyFailed = true;
+      }
+
+      updates.connectionError = anyFailed;
       set(updates);
 
       // Edge Monitor 경보 상태 조회

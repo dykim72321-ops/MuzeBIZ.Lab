@@ -360,15 +360,33 @@ async def position_ts_sweeper():
                 continue
 
             tickers = sorted({p["ticker"] for p in positions})
+            trades = {}
             try:
                 trades = await asyncio.to_thread(
                     client.get_stock_latest_trade,
                     StockLatestTradeRequest(symbol_or_symbols=tickers),
                 )
             except Exception as e:
-                print(f"⚠️ [TS Sweeper] latest trade fetch failed: {e}")
-                await asyncio.sleep(SWEEP_INTERVAL_SEC)
-                continue
+                print(
+                    f"⚠️ [TS Sweeper] Batch latest trade fetch failed ({e}), falling back to individual lookup"
+                )
+                for idx, t in enumerate(tickers):
+                    if idx > 0:
+                        # 배치 실패가 레이트리밋 때문일 수 있으므로, 곧바로 N번 재요청해
+                        # 상황을 악화시키지 않도록 요청 사이에 짧은 텀을 둔다.
+                        await asyncio.sleep(0.2)
+                    try:
+                        tr = await asyncio.to_thread(
+                            client.get_stock_latest_trade,
+                            StockLatestTradeRequest(symbol_or_symbols=t),
+                        )
+                        if tr and t in tr:
+                            trades[t] = tr[t]
+                    except Exception:
+                        pass
+                if not trades:
+                    await asyncio.sleep(SWEEP_INTERVAL_SEC)
+                    continue
 
             now_et = datetime.now(ZoneInfo("America/New_York"))
             is_eod = now_et.time() >= dtime(15, 30)

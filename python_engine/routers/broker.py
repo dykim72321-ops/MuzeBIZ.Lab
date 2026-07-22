@@ -792,6 +792,15 @@ async def manual_paper_sell(
         result = await engine._close_position(pos, signal_price, "Manual Sell")
         if result is None:
             fail_reason = getattr(engine, "last_order_fail_reason", None)
+            if fail_reason == "NO_POSITION" or fail_reason == "PHANTOM_POSITION":
+                return {
+                    "status": "success",
+                    "ticker": ticker,
+                    "exit_price": round(signal_price, 4),
+                    "pnl_pct": 0,
+                    "profit_amt": 0,
+                    "message": f"Alpaca 실계좌 잔고 0주 확인 — DB 포지션({ticker})을 동기화하여 정리했습니다.",
+                }
             if fail_reason == "MARKET_CLOSED":
                 raise HTTPException(
                     status_code=409,
