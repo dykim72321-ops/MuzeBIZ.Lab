@@ -1143,15 +1143,14 @@ class PaperTradingManager:
                     executed_cost = units * fill_price
                     cash_res, _new_cash = await self._apply_cash_delta(-executed_cost)
                     if not cash_res or not cash_res.data:
-                        # 현금 차감 실패 시 방금 확정한 포지션을 롤백
-                        await asyncio.to_thread(
-                            self.supabase.table("paper_positions")
-                            .delete()
-                            .eq("ticker", ticker)
-                            .execute
-                        )
+                        # 실주문은 이미 Alpaca에서 체결됐으므로(_on_order_buy 성공) 여기서
+                        # 포지션 행을 지우면 DB만 롤백되고 실제 보유 주식은 그대로 남아
+                        # 엔진이 추적을 잃는 유령 포지션이 된다(2026-07-22 CHAI/INUV/SLGB/MED
+                        # 사고 원인). 현금 차감만 실패했을 뿐 포지션 확정(HOLD) UPDATE는 이미
+                        # 성공했으므로 행은 그대로 두고 예외만 던져 아래 except에서 알림한다.
                         raise RuntimeError(
-                            f"Cash UPDATE failed for {ticker}, position rolled back"
+                            f"Cash UPDATE failed for {ticker}, position kept as HOLD "
+                            f"(cash reconciliation required)"
                         )
 
                     slip_pct = (fill_price / price - 1) * 100
@@ -1182,6 +1181,43 @@ class PaperTradingManager:
                     return True
                 except Exception as e:
                     print(f"❌ Buy Error: {e}")
+                    # 실주문 체결(_on_order_buy) 이후의 실패이므로 Alpaca에는 이미 실제
+                    # 포지션이 존재한다. 클레임 행을 지우는 대신 실체결 데이터로 강제
+                    # UPDATE를 한 번 더 시도해 최소한 HOLD 상태로 확정시켜 TS 스위퍼가
+                    # 이 포지션을 놓치지 않게 한다 — 그마저 실패하면 행을 보존한 채
+                    # 수동 확인을 요청하는 알림만 보낸다 (2026-07-22 CHAI/INUV/SLGB/MED
+                    # phantom position 사고 재발 방지).
+                    try:
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_positions")
+                            .update(
+                                {
+                                    "status": "HOLD",
+                                    "entry_price": fill_price,
+                                    "entry_slippage": (fill_price / price - 1) * 100,
+                                    "current_price": fill_price,
+                                    "highest_price": fill_price,
+                                    "ts_threshold": ts_threshold,
+                                    "units": units,
+                                }
+                            )
+                            .eq("ticker", ticker)
+                            .execute
+                        )
+                    except Exception as recover_err:
+                        print(
+                            f"❌ [{ticker}] 매수 확정 복구 재시도도 실패: {recover_err}"
+                        )
+                    await self.webhook.send_alert(
+                        title=f"🚨 [정산 불일치 위험] {ticker}",
+                        description=(
+                            f"매수 주문은 Alpaca에 이미 체결됐습니다 ({units:.2f}주 @ "
+                            f"${fill_price:.4f}) — 이후 기록 단계에서 오류: `{e}`\n"
+                            f"paper_positions/paper_account을 수동으로 확인하세요. "
+                            f"포지션 행은 삭제하지 않고 보존했습니다."
+                        ),
+                        color=0xFF0000,
+                    )
                     raise
 
         # --- 2. 기존 포지션 관리 (Trailing Stop & Scale Out) ---
