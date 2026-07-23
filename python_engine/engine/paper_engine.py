@@ -811,11 +811,20 @@ class PaperTradingManager:
                 )
                 cb_history = await asyncio.to_thread(
                     self.supabase.table("paper_history")
-                    .select("pnl_pct,profit_amt")
+                    .select("pnl_pct,profit_amt,exit_reason")
                     .gte("closed_at", today_ny_midnight_utc.isoformat())
                     .execute
                 )
-                cb_rows = cb_history.data or []
+                # phantom position 사고 복구 백필 행은 같은 사건의 실제 청산 행과 나란히
+                # 남아있어 당일 손실을 2배로 잡히게 만든다 (2026-07-23 발견, checklist.py/
+                # strategy.py의 동일 이슈와 같은 원인) — 서킷브레이커 오발동 방지를 위해 제외.
+                cb_rows = [
+                    r
+                    for r in (cb_history.data or [])
+                    if not (r.get("exit_reason") or "").startswith(
+                        "Manual Sell (Backfilled"
+                    )
+                ]
                 if len(cb_rows) > 0:
                     total_pnl = sum(float(r.get("profit_amt") or 0) for r in cb_rows)
                     loss_count = sum(
@@ -865,7 +874,16 @@ class PaperTradingManager:
                     .limit(10)
                     .execute
                 )
-                recent_history_rows = recent_history.data or []
+                # 백필 행 제외(위 서킷브레이커와 동일 사유) — 안 그러면 사고 복구 하루에
+                # 종목별 일일 거래 한도(MAX_DAILY_TRADES_PER_TICKER)가 조기 소진돼 정상
+                # 재진입까지 차단될 수 있다.
+                recent_history_rows = [
+                    r
+                    for r in (recent_history.data or [])
+                    if not (r.get("exit_reason") or "").startswith(
+                        "Manual Sell (Backfilled"
+                    )
+                ]
                 today_rows = []
                 for r in recent_history_rows:
                     closed_at_str = r.get("closed_at")

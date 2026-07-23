@@ -201,7 +201,14 @@ async def get_strategy_stats():
             .order("closed_at", desc=False)
             .execute
         )
-        trades = res.data or []
+        # phantom position 사고 복구 백필 행은 같은 사건의 실제 청산 행과 나란히 남아있어
+        # 동일 거래를 두 번 집계하게 만든다 (checklist.py의 compute_improvement_status()와
+        # 동일 이슈, 2026-07-23 발견) — 승률/PF/Kelly 입력에서 제외한다.
+        trades = [
+            t
+            for t in (res.data or [])
+            if not (t.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+        ]
 
         if not trades:
             return _base_stats(
@@ -306,7 +313,11 @@ async def get_strategy_reports(period: str = "month"):
             .order("closed_at", desc=False)
             .execute
         )
-        all_trades = res.data or []
+        all_trades = [
+            t
+            for t in (res.data or [])
+            if not (t.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+        ]
 
         if not all_trades:
             result = {"period": period, "buckets": [], "message": "거래 내역 없음"}

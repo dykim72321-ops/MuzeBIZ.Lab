@@ -134,7 +134,14 @@ async def compute_improvement_status(supabase) -> dict:
             .execute
         ),
     )
-    trades = hist_res.data or []
+    # phantom position 사고 복구 시 넣은 백필 행은 같은 사건을 겪은 실제 청산 행(예: Trailing
+    # Stop, EOD Force Exit)과 나란히 존재해 동일 거래를 두 번 집계하게 만든다 — 승률/Expectancy
+    # 계산에서 제외한다 (2026-07-23, 검증 트래커가 이 중복으로 REGRESSED를 오판정한 사례 발견).
+    trades = [
+        t
+        for t in (hist_res.data or [])
+        if not (t.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+    ]
     decisions = dec_res.data or []
 
     def _calc_metrics_expectancy(sub_trades: list) -> tuple[float, float, float]:
@@ -502,7 +509,11 @@ async def evaluate_checklist():
         .order("closed_at", desc=False)
         .execute
     )
-    trades = res.data or []
+    trades = [
+        t
+        for t in (res.data or [])
+        if not (t.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+    ]
     stats = _compute_bucket_stats(trades)
     now_utc = datetime.now(timezone.utc)
 
