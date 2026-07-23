@@ -455,6 +455,9 @@ async def run_startup_sequence():
                 api_key=_APCA_API_KEY,
                 api_secret=_APCA_API_SECRET,
                 webhook_manager=app_state.webhook,
+                # 브로커 사이드 Stop-Market 체결(엔진 외부 SELL)을 paper_history/
+                # 현금에 반영하는 external_fill 회계 경로에 필요
+                engine=app_state.live_engine,
             )
         )
     elif app_state.TRADE_MODE == "LIVE":

@@ -24,6 +24,7 @@ MAX_CONCURRENT_POSITIONS = 20  # 동시 보유 최대 종목 수 (실질 도달 
 MAX_CONCENTRATION_PCT = 0.75  # 총 자산 대비 투입 비중 상한 (75%)
 TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%, 손실 포지션 빠른 탈출)
 TS_TRAIL_PCT = 0.95  # 최고가 갱신 시 TS 추적 비율: highest × 95%
+NORMAL_BREAKEVEN_TRIGGER = 1.05  # 일반 종목도 +5% 달성 시 TS 하한을 진입가(본전)로 락인
 SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
 SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
 POS_WEIGHT = 0.15  # paper_positions.weight 기록값
@@ -156,16 +157,22 @@ def _compute_locked_floor(
       포지션) 고정 %를 사용한다 — 라이브 ATR을 여기서 다시 읽지 않는 이유는
       ATR 급변(뉴스 이벤트 등) 시 이미 확보한 방어선이 느슨해지는 것을 막기
       위함이다.
-    - 페니 종목이 +10%(PENNY_BREAKEVEN_TRIGGER) 이상 도달한 이력이 있으면 본전(entry_price)
-      으로 영구 락인된다. highest_price는 호출부에서 이미 max()로 단조 갱신되므로,
-      이 락인 여부를 별도 상태(DB 컬럼/플래그) 없이 highest_price만으로 파생할 수 있다.
+    - 페니 종목은 +10%(PENNY_BREAKEVEN_TRIGGER), 일반 종목은 +5%(NORMAL_BREAKEVEN_TRIGGER)
+      이상 도달한 이력이 있으면 본전(entry_price)으로 영구 락인된다. highest_price는
+      호출부에서 이미 max()로 단조 갱신되므로, 이 락인 여부를 별도 상태(DB 컬럼/플래그)
+      없이 highest_price만으로 파생할 수 있다.
+      (일반 종목은 과거 이 락인이 없어 ATR 트레일링만으로 고점 근처에서 청산돼 수익이
+      거의 0%까지 반납되는 사례가 있었다 — 2026-07-24 추가)
     """
     if entry_stop_pct is not None:
         init_pct = 1.0 - entry_stop_pct
     else:
         init_pct = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
     static_floor = entry_price * init_pct
-    if is_penny and highest_price >= entry_price * PENNY_BREAKEVEN_TRIGGER:
+    breakeven_trigger = (
+        PENNY_BREAKEVEN_TRIGGER if is_penny else NORMAL_BREAKEVEN_TRIGGER
+    )
+    if highest_price >= entry_price * breakeven_trigger:
         return max(static_floor, entry_price)
     return static_floor
 
@@ -448,12 +455,15 @@ class PaperTradingManager:
         price: float,
         _order_kind: str = "MARKET",
         _limit_price: float | None = None,
+        _stop_price: float | None = None,
     ) -> tuple[float, float] | None:
         """매수 실행 훅 — 반환값은 (실제 체결 수량, 실제 체결 단가), 실패 시 None.
         Paper 모드는 시뮬레이션 슬리피지 가격이 곧 체결가이므로 order_kind/limit_price와
         무관하게 입력값을 그대로 반환(1분봉 종가 단위라 봉 내 지정가 체결을 시뮬레이션할
         수 없음). LiveTradingManager는 Alpaca submit_order() 실체결가(filled_avg_price)로
-        오버라이드하고, order_kind="LIMIT"이면 실제 지정가 주문을 제출한다."""
+        오버라이드하고, order_kind="LIMIT"이면 실제 지정가 주문을 제출한다.
+        _stop_price는 LIVE 전용 — 매수 체결 후 브로커 사이드 Stop-Market 주문을
+        등록할 초기 스탑가. Paper 모드는 1분봉 TS 시뮬레이션만 쓰므로 무시한다."""
         return qty, price
 
     async def _on_order_sell(
@@ -486,6 +496,7 @@ class PaperTradingManager:
         pos: dict,
         signal_price: float,
         exit_reason: str,
+        external_fill: tuple[float, float] | None = None,
     ) -> dict | None:
         """
         포지션 전량 청산 공통 경로 — 청산 클레임(원자적 상태 전환) → 슬리피지 적용 →
@@ -497,6 +508,11 @@ class PaperTradingManager:
         잠금)가 두 번째 호출을 조기에 차단해 중복 실주문/이중 기록을 방지한다.
 
         실주문 실패/체결 미확인 시 None 반환 — 포지션은 그대로 유지되며 DB는 기록되지 않는다.
+
+        external_fill=(체결 수량, 체결 단가)가 주어지면 브로커 단에서 이미 체결이
+        끝난 매도(예: Alpaca 사이드 Stop-Market 발동)를 회계에만 반영하는 모드다 —
+        슬리피지 시뮬레이션과 _on_order_sell()(신규 주문 제출)을 건너뛰고, 전달받은
+        실체결 값으로 곧장 현금/이력/포지션 정리를 수행한다.
         """
         ticker = pos["ticker"]
         entry_price = float(pos["entry_price"])
@@ -524,18 +540,26 @@ class PaperTradingManager:
         cash_applied = False
         history_inserted = False
         try:
-            fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
-            executed = await self._on_order_sell(ticker, units, fill_price, exit_reason)
-            if executed is None:
-                # 실주문 실패 — 클레임 해제(원래 상태로 복구)해 재시도 가능하게 유지
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .update({"status": original_status})
-                    .eq("ticker", ticker)
-                    .execute
+            if external_fill is not None:
+                # 브로커 단에서 이미 체결 완료 — 주문 제출 없이 실체결 값만 반영
+                units, fill_price = external_fill
+            else:
+                fill_price = _apply_slippage(
+                    signal_price, is_buy=False, is_penny=is_penny
                 )
-                return None
-            units, fill_price = executed
+                executed = await self._on_order_sell(
+                    ticker, units, fill_price, exit_reason
+                )
+                if executed is None:
+                    # 실주문 실패 — 클레임 해제(원래 상태로 복구)해 재시도 가능하게 유지
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .update({"status": original_status})
+                        .eq("ticker", ticker)
+                        .execute
+                    )
+                    return None
+                units, fill_price = executed
 
             # ── 브로커 하드 스탑(Hard Stop-Loss) 주문 시뮬레이션 (PAPER 전용) ────────
             entry_stop_pct = pos.get("entry_stop_pct")
@@ -1576,8 +1600,16 @@ class PaperTradingManager:
             # 실패 시 클레임 롤백 + DB 기록 차단. order_kind="LIMIT"(눌림목 확인 진입)이면
             # limit_price에 실제 Alpaca 지정가 주문을 제출한다(시장가 폴백은 없음 — 미체결
             # 시 주문이 취소되고 None 반환됨, LiveTradingManager._submit_alpaca_order 참고).
+            # 마지막 인자는 브로커 사이드 Stop-Market 초기 스탑가(LIVE 전용) — 진입 시점
+            # ATR 기반 entry_stop_pct로 계산한 재해 하한선. 1분봉 폴링 TS가 주력이고,
+            # 이 스탑은 봉 공백·서버 다운 중의 갭다운 방어용 최후 방어선이다.
             executed = await self._on_order_buy(
-                ticker, est_units, est_fill_price, order_kind, limit_price
+                ticker,
+                est_units,
+                est_fill_price,
+                order_kind,
+                limit_price,
+                est_fill_price * (1.0 - entry_stop_pct),
             )
             if executed is None:
                 print(f"⚠️ [{ticker}] Live buy order rejected — 클레임 롤백")

@@ -1,6 +1,6 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { TopNav } from './TopNav';
-import { LayoutDashboard, Search } from 'lucide-react';
+import { LayoutDashboard, Search, BarChart3 } from 'lucide-react';
 import clsx from 'clsx';
 import { Toaster } from 'sonner';
 
@@ -25,6 +25,10 @@ export const Layout = () => {
         <NavLink to="/stock/dashboard" className={({ isActive }) => clsx("flex flex-col items-center gap-1 px-3 py-1 rounded-lg transition-colors relative z-10", isActive ? "text-blue-600 bg-blue-50" : "text-blue-500 hover:text-blue-800")}>
           <LayoutDashboard className="w-5 h-5" />
           <span className="text-[10px] font-bold">작전지휘소</span>
+        </NavLink>
+        <NavLink to="/reports" className={({ isActive }) => clsx("flex flex-col items-center gap-1 px-3 py-1 rounded-lg transition-colors relative z-10", isActive ? "text-blue-600 bg-blue-50" : "text-blue-500 hover:text-blue-800")}>
+          <BarChart3 className="w-5 h-5" />
+          <span className="text-[10px] font-bold">성과리포트</span>
         </NavLink>
         <NavLink to="/parts-search" className={({ isActive }) => clsx("flex flex-col items-center gap-1 px-3 py-1 rounded-lg transition-colors relative z-10", isActive ? "text-blue-600 bg-blue-50" : "text-blue-500 hover:text-blue-800")}>
           <Search className="w-5 h-5" />

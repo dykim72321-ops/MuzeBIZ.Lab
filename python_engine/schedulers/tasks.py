@@ -311,6 +311,8 @@ async def position_ts_sweeper():
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
 
+    from engine.paper_engine import PENNY_MAX_PRICE, _compute_locked_floor
+
     # 10초 주기 — 보유 종목 전체를 배치 1요청으로 조회하므로 분당 6요청,
     # Alpaca 200req/min 제한 대비 3% 수준. 청산 지연을 최대 30초 → 10초로 단축.
     SWEEP_INTERVAL_SEC = 10
@@ -608,6 +610,28 @@ async def position_ts_sweeper():
                             )
                         except Exception:
                             pass
+
+                    # 브로커 사이드 재해 스탑 유지 (LIVE 전용) — DAY TIF 만료(오버나이트),
+                    # Scale-Out 매도 전 자동취소, 서버 재시작(추적 초기화)으로 사라진
+                    # Stop-Market을 locked floor(초기 ATR 스탑, 본절 락인 도달 시 진입가)
+                    # 기준으로 재등록한다. ensure_broker_stop은 멱등이라 이미 등록돼
+                    # 있으면 API 호출 없이 즉시 반환한다.
+                    if getattr(engine, "IS_LIVE", False):
+                        try:
+                            entry_p = float(pos["entry_price"])
+                            floor = _compute_locked_floor(
+                                entry_p,
+                                max(float(pos["highest_price"]), price),
+                                entry_p <= PENNY_MAX_PRICE,
+                                pos.get("entry_stop_pct"),
+                            )
+                            await engine.ensure_broker_stop(
+                                ticker, float(pos["units"]), floor
+                            )
+                        except Exception as stop_err:
+                            print(
+                                f"⚠️ [TS Sweeper] {ticker} 브로커 스탑 재등록 실패: {stop_err}"
+                            )
 
                     # EOD 강제청산도 1분봉 경로(on_minute_bar_closed)에만 의존하므로
                     # 같은 종류의 봉 공백 사각지대에 노출된다 — 장 마감 임박 구간에는

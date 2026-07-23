@@ -221,8 +221,8 @@ export const MuzepartSearchPage: React.FC = () => {
               </div>
               
               {/* Skeleton Table */}
-              <div className="dark-glass-panel rounded-xl border border-blue-200/85 shadow-sm overflow-hidden">
-                <table className="w-full text-sm text-left">
+              <div className="dark-glass-panel rounded-xl border border-blue-200/85 shadow-sm overflow-x-auto">
+                <table className="w-full text-sm text-left min-w-[650px]">
                   <thead className="bg-blue-50 border-b border-blue-200/60">
                     <tr>
                       <th className="px-4 py-3"><div className="h-4 bg-blue-200 rounded w-24 animate-pulse"></div></th>
@@ -332,8 +332,8 @@ export const MuzepartSearchPage: React.FC = () => {
 
               {/* Table View */}
               {viewMode === 'table' ? (
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
-                  <table className="w-full text-sm text-left">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-x-auto">
+                  <table className="w-full text-sm text-left min-w-[650px]">
                     <thead className="bg-slate-100/80 border-b border-slate-200">
                       <tr>
                         <th className={`w-[15%] px-5 py-4 text-[11px] font-black text-slate-800 uppercase tracking-widest cursor-pointer hover:bg-slate-200/50 transition-colors ${getSortClass(sortField, 'distributor', sortOrder)}`} onClick={() => handleSort('distributor')}>Distributor</th>
