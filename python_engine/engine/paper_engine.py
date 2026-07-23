@@ -500,6 +500,7 @@ class PaperTradingManager:
             return None
 
         cash_applied = False
+        history_inserted = False
         try:
             fill_price = _apply_slippage(signal_price, is_buy=False, is_penny=is_penny)
             executed = await self._on_order_sell(ticker, units, fill_price, exit_reason)
@@ -538,9 +539,6 @@ class PaperTradingManager:
             pnl_pct = (fill_price / entry_price - 1) * 100
             profit_amt = (fill_price - entry_price) * units
             proceeds = units * fill_price
-
-            await self._apply_cash_delta(proceeds)
-            cash_applied = True
             history_data = {
                 "ticker": ticker,
                 "entry_price": entry_price,
@@ -551,9 +549,13 @@ class PaperTradingManager:
                 "profit_amt": profit_amt,
                 "exit_reason": exit_reason,
             }
+
+            await self._apply_cash_delta(proceeds)
+            cash_applied = True
             await asyncio.to_thread(
                 self.supabase.table("paper_history").insert(history_data).execute
             )
+            history_inserted = True
             await asyncio.to_thread(
                 self.supabase.table("paper_positions")
                 .delete()
@@ -574,24 +576,64 @@ class PaperTradingManager:
             }
         except Exception as close_err:
             if cash_applied:
-                # 현금은 이미 매도 대금으로 반영됐다 — 여기서 status를 원래 상태(HOLD 등)로
-                # 되돌리면 포지션이 다시 정상 관리 대상이 되어, 나중에 실제로 청산될 때
-                # 동일 수량에 대해 현금이 이중으로 반영된다(이중 정산). 이미 회계상
-                # "판매됨" 처리된 포지션을 재거래 가능한 상태로 되살리는 대신 CLOSING으로
-                # 묶어두고 수동 정합 확인을 유도한다.
+                # 현금은 이미 매도 대금으로 반영됐다 — paper_history 기록과 paper_positions
+                # 삭제만 실패한 것이므로 즉시 1회 재시도한다. 재시도까지 실패하면 CLOSING으로
+                # 묶어두고 TS Sweeper의 CLOSING 복구 로직(5분 후)에 위임한다.
                 print(
                     f"🚨 [_close_position 부분 실패] {ticker}: {close_err} — "
-                    f"현금은 이미 반영됨(중복 정산 위험), 포지션을 CLOSING 상태로 고정하고 수동 확인 필요"
+                    f"현금은 이미 반영됨, 후속 기록 즉시 재시도"
                 )
-                await self.webhook.send_alert(
-                    title=f"🚨 [정산 불일치 위험] {ticker}",
-                    description=(
-                        f"청산 대금은 이미 계좌에 반영됐지만 이후 기록 단계에서 오류가 발생했습니다: `{close_err}`\n"
-                        f"paper_positions/paper_history/paper_account을 수동으로 확인하세요. "
-                        f"포지션은 재거래 방지를 위해 CLOSING 상태로 유지됩니다."
-                    ),
-                    color=0xFF0000,
-                )
+                retry_ok = False
+                try:
+                    # paper_history INSERT 재시도 — 최초 시도에서 이미 성공했다면
+                    # (실패 지점이 delete/watchlist-sync였다면) 중복 삽입을 피한다.
+                    if not history_inserted:
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_history")
+                            .insert(history_data)
+                            .execute
+                        )
+                    # paper_positions DELETE 재시도
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .delete()
+                        .eq("ticker", ticker)
+                        .execute
+                    )
+                    try:
+                        await self._sync_watchlist_exit(ticker)
+                    except Exception:
+                        pass  # watchlist 동기화 실패는 치명적이지 않음
+                    if ticker in self._kelly_cache:
+                        del self._kelly_cache[ticker]
+                    retry_ok = True
+                    print(
+                        f"✅ [_close_position 복구 성공] {ticker}: 후속 기록 재시도 완료"
+                    )
+                except Exception as retry_err:
+                    print(
+                        f"❌ [_close_position 복구 재실패] {ticker}: {retry_err} — "
+                        f"CLOSING 상태 유지, TS Sweeper 자동 복구에 위임"
+                    )
+
+                if not retry_ok:
+                    await self.webhook.send_alert(
+                        title=f"🚨 [정산 불일치 위험] {ticker}",
+                        description=(
+                            f"청산 대금은 이미 계좌에 반영됐지만 이후 기록 단계에서 오류가 발생했습니다: `{close_err}`\n"
+                            f"자동 재시도도 실패했습니다. TS Sweeper가 5분 후 자동 복구를 시도합니다.\n"
+                            f"포지션은 재거래 방지를 위해 CLOSING 상태로 유지됩니다."
+                        ),
+                        color=0xFF0000,
+                    )
+                    raise close_err
+                # 재시도 성공 — 정상 결과 반환
+                return {
+                    "fill_price": fill_price,
+                    "units": units,
+                    "pnl_pct": pnl_pct,
+                    "profit_amt": profit_amt,
+                }
             else:
                 print(
                     f"❌ [_close_position 오류 발생] {ticker}: {close_err} — 상태({original_status}) 복구"

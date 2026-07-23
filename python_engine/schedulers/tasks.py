@@ -2,6 +2,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from datetime import time as dtime
 from zoneinfo import ZoneInfo
@@ -336,6 +337,11 @@ async def position_ts_sweeper():
         except Exception as e:
             print(f"⚠️ [TS Sweeper] Alpaca client init error: {e}")
 
+    # CLOSING 고착 복구에 사용 — 마지막 복구 시도 시각을 기억해 매 스윕마다
+    # DB 쓰기를 하지 않도록 한다 (최소 5분 간격).
+    CLOSING_RECOVERY_TIMEOUT_SEC = 5 * 60  # 5분 이상 CLOSING 고착 시 복구
+    _last_closing_recovery: dict[str, float] = {}
+
     while True:
         try:
             engine = app_state.active_engine
@@ -348,6 +354,145 @@ async def position_ts_sweeper():
                 await asyncio.sleep(60)
                 continue
 
+            # ── CLOSING 고착 포지션 자동 복구 ────────────────────────────────
+            # _close_position()의 cash_applied 이후 실패(paper_history INSERT
+            # 또는 DELETE 오류)로 status가 CLOSING에 영구 고정되면, 기존 HOLD/
+            # SCALE_OUT 필터에 잡히지 않아 TS 감시 사각지대가 된다 (CHAI 사례,
+            # 2026-07-22). 5분 이상 CLOSING 상태가 지속되면 후속 기록을 재시도하고
+            # 포지션을 정리한다.
+            try:
+                closing_res = await asyncio.to_thread(
+                    app_state.supabase.table("paper_positions")
+                    .select("*")
+                    .eq("status", "CLOSING")
+                    .execute
+                )
+                for stuck_pos in closing_res.data or []:
+                    stuck_ticker = stuck_pos["ticker"]
+                    # 이미 최근에 복구 시도한 종목은 스킵 (무한 재시도 방지)
+                    last_try = _last_closing_recovery.get(stuck_ticker, 0)
+                    if time.time() - last_try < CLOSING_RECOVERY_TIMEOUT_SEC:
+                        continue
+
+                    # updated_at으로 CLOSING 전환 시점 추정
+                    closing_since: datetime | None = None
+                    updated_at_str = stuck_pos.get("updated_at") or stuck_pos.get(
+                        "created_at"
+                    )
+                    if updated_at_str:
+                        try:
+                            closing_since = datetime.fromisoformat(
+                                updated_at_str.replace("Z", "+00:00")
+                            )
+                            elapsed = (
+                                datetime.now(timezone.utc) - closing_since
+                            ).total_seconds()
+                            if elapsed < CLOSING_RECOVERY_TIMEOUT_SEC:
+                                continue  # 아직 5분 미경과 — 정상 청산 진행 중일 수 있음
+                        except (ValueError, TypeError):
+                            closing_since = None  # 파싱 실패 시 안전하게 복구 진행
+
+                    _last_closing_recovery[stuck_ticker] = time.time()
+
+                    # 실주문(Alpaca)은 이미 체결됐으므로 현금도 이미 반영됐을 가능성이 높다.
+                    # paper_history 기록 + paper_positions 삭제만 재시도한다.
+                    entry_price = float(stuck_pos.get("entry_price") or 0)
+                    units = float(stuck_pos.get("units") or 0)
+                    current_price = float(stuck_pos.get("current_price") or entry_price)
+                    pnl_pct = (
+                        (current_price / entry_price - 1) * 100
+                        if entry_price > 0
+                        else 0
+                    )
+                    profit_amt = (current_price - entry_price) * units
+
+                    recovery_ok = False
+                    try:
+                        # paper_history에 이미 같은 ticker의 최근 기록이 있는지 확인 (이중 기록 방지)
+                        recent_hist = await asyncio.to_thread(
+                            app_state.supabase.table("paper_history")
+                            .select("id")
+                            .eq("ticker", stuck_ticker)
+                            .order("closed_at", desc=True)
+                            .limit(1)
+                            .execute
+                        )
+                        last_closed = None
+                        if recent_hist.data:
+                            last_closed_str = recent_hist.data[0].get("closed_at")
+                            if last_closed_str:
+                                try:
+                                    last_closed = datetime.fromisoformat(
+                                        last_closed_str.replace("Z", "+00:00")
+                                    )
+                                except (ValueError, TypeError):
+                                    pass
+
+                        # 직전 기록이 CLOSING 전환 시점 이후에 남았다면 이미 기록 완료된 것
+                        # → INSERT 스킵 (고정 시간창 대신 실제 전환 시점을 기준으로 비교해,
+                        # 5분보다 오래 걸린 원래 시도의 성공 기록도 놓치지 않는다)
+                        skip_history = last_closed is not None and (
+                            closing_since is None or last_closed >= closing_since
+                        )
+                        if not skip_history:
+                            await asyncio.to_thread(
+                                app_state.supabase.table("paper_history")
+                                .insert(
+                                    {
+                                        "ticker": stuck_ticker,
+                                        "entry_price": entry_price,
+                                        "exit_price": current_price,
+                                        "signal_price": current_price,
+                                        "slippage_pct": 0.0,
+                                        "pnl_pct": pnl_pct,
+                                        "profit_amt": profit_amt,
+                                        "exit_reason": "Trailing Stop (CLOSING Recovery)",
+                                    }
+                                )
+                                .execute
+                            )
+
+                        await asyncio.to_thread(
+                            app_state.supabase.table("paper_positions")
+                            .delete()
+                            .eq("ticker", stuck_ticker)
+                            .execute
+                        )
+                        app_state._held_tickers.discard(stuck_ticker)
+                        try:
+                            await engine._sync_watchlist_exit(stuck_ticker)
+                        except Exception:
+                            pass  # watchlist 동기화 실패는 치명적이지 않음
+                        recovery_ok = True
+                    except Exception as rec_err:
+                        # 현금은 이미 원래 _close_position() 호출에서 반영됐을 가능성이 높다.
+                        # status를 HOLD/SCALE_OUT으로 되돌리면 이후 정상 TS 체크가 다시
+                        # _close_position()을 호출해 현금을 한 번 더 반영(이중 정산)할 수 있으므로
+                        # 절대 되돌리지 않는다 — CLOSING을 유지하고 다음 스윕에서 재시도한다.
+                        print(
+                            f"⚠️ [TS Sweeper] {stuck_ticker} CLOSING 복구 재시도 실패: {rec_err} "
+                            f"— CLOSING 상태 유지, 다음 스윕에서 재시도"
+                        )
+
+                    if recovery_ok:
+                        status_emoji = "✅" if pnl_pct > 0 else "🛑"
+                        print(
+                            f"🔧 [TS Sweeper] {stuck_ticker} CLOSING 고착 복구 완료 — "
+                            f"P&L: {pnl_pct:.2f}%"
+                        )
+                        await engine.webhook.send_alert(
+                            title=f"{status_emoji} [CLOSING 복구] {stuck_ticker}",
+                            description=(
+                                f"CLOSING 상태 고착 포지션을 자동 정리했습니다.\n"
+                                f"추정 청산가: ${current_price:.4f} | 수익률: {pnl_pct:.2f}%\n"
+                                f"사유: CLOSING 상태 5분 초과 — 후속 기록 재시도 완료"
+                            ),
+                            color=0xF39C12,
+                        )
+            except Exception as closing_err:
+                print(f"⚠️ [TS Sweeper] CLOSING 복구 단계 오류: {closing_err}")
+
+            # ── 정상 TS 체크 (HOLD / SCALE_OUT) ──────────────────────────────
             res = await asyncio.to_thread(
                 app_state.supabase.table("paper_positions")
                 .select("*")
