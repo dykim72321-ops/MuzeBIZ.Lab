@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING
 
 from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import OrderSide, OrderStatus, TimeInForce, QueryOrderStatus
-from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
+from alpaca.trading.requests import (
+    GetOrdersRequest,
+    LimitOrderRequest,
+    MarketOrderRequest,
+)
 from alpaca.trading.stream import TradingStream
 
 from engine.paper_engine import PENNY_MAX_PRICE, PaperTradingManager
@@ -77,10 +81,16 @@ class LiveTradingManager(PaperTradingManager):
     # ── Alpaca 주문 공통 헬퍼 ─────────────────────────────────────────────────
 
     async def _submit_alpaca_order(
-        self, ticker: str, side: OrderSide, qty: float, fallback_price: float
+        self,
+        ticker: str,
+        side: OrderSide,
+        qty: float,
+        fallback_price: float,
+        order_kind: str = "MARKET",
+        limit_price: float | None = None,
     ) -> tuple[float, float] | None:
         """
-        Alpaca 시장가 주문 제출 후 체결까지 확인.
+        Alpaca 주문 제출 후 체결까지 확인 (시장가 또는 지정가).
 
         qty는 shares 단위. Alpaca 미지원 소수점 주식은 정수로 내림해 제출한다.
         내림 결과가 0주(예산이 1주 가격에도 못 미침)이면 예산 상한을 초과 체결하는
@@ -89,6 +99,11 @@ class LiveTradingManager(PaperTradingManager):
         반환값: (실제 체결 수량, 실제 체결 단가) 또는 실패/미체결확인/예산초과 시 None.
         체결 단가는 Alpaca가 반환한 filled_avg_price를 우선 사용하고, 값이 없으면
         fallback_price(호출측 슬리피지 추정가)로 대체한다.
+
+        order_kind="LIMIT"(눌림목 확인 매수 전용)이면 시장가 대신 limit_price에 지정가
+        주문을 제출한다. 지정가 주문은 시장가와 달리 체결이 무기한 지연될 수 있으므로,
+        타임아웃 시 시장가처럼 그대로 두지 않고 명시적으로 취소한다(이미 시장가 경로에서
+        미체결 시 취소하는 로직을 재사용 — 아래 공통 폴링 분기 참고).
         """
         side_str = "BUY" if side == OrderSide.BUY else "SELL"
         self.last_order_fail_reason = None
@@ -208,12 +223,27 @@ class LiveTradingManager(PaperTradingManager):
                 except Exception as clear_err:
                     print(f"⚠️ [{ticker}] 기존 미체결 주문 정리 중 에러: {clear_err}")
 
-            req = MarketOrderRequest(
-                symbol=ticker,
-                qty=order_qty,
-                side=side,
-                time_in_force=TimeInForce.DAY,
-            )
+            if order_kind == "LIMIT":
+                if limit_price is None or limit_price <= 0:
+                    print(
+                        f"⛔ [{ticker}] {side_str} 지정가 주문 차단 — limit_price 누락/무효"
+                    )
+                    self.last_order_fail_reason = "MISSING_LIMIT_PRICE"
+                    return None
+                req = LimitOrderRequest(
+                    symbol=ticker,
+                    qty=order_qty,
+                    side=side,
+                    time_in_force=TimeInForce.DAY,
+                    limit_price=round(limit_price, 4),
+                )
+            else:
+                req = MarketOrderRequest(
+                    symbol=ticker,
+                    qty=order_qty,
+                    side=side,
+                    time_in_force=TimeInForce.DAY,
+                )
             order = await asyncio.to_thread(self.alpaca.submit_order, req)
 
             poll_timeout = (
@@ -416,10 +446,23 @@ class LiveTradingManager(PaperTradingManager):
     # ── 훅 오버라이드 ─────────────────────────────────────────────────────────
 
     async def _on_order_buy(
-        self, ticker: str, qty: float, price: float
+        self,
+        ticker: str,
+        qty: float,
+        price: float,
+        order_kind: str = "MARKET",
+        limit_price: float | None = None,
     ) -> tuple[float, float] | None:
-        print(f"🔴 [LIVE] BUY {ticker} {qty:.2f}주 @ ${price:.4f}")
-        return await self._submit_alpaca_order(ticker, OrderSide.BUY, qty, price)
+        if order_kind == "LIMIT":
+            print(
+                f"🔴 [LIVE] BUY(LIMIT) {ticker} {qty:.2f}주 @ ${limit_price:.4f} "
+                f"(fallback ${price:.4f})"
+            )
+        else:
+            print(f"🔴 [LIVE] BUY {ticker} {qty:.2f}주 @ ${price:.4f}")
+        return await self._submit_alpaca_order(
+            ticker, OrderSide.BUY, qty, price, order_kind, limit_price
+        )
 
     async def _on_order_sell(
         self, ticker: str, qty: float, price: float, reason: str

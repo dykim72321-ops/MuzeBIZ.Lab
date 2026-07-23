@@ -2,7 +2,7 @@ from supabase import Client
 from infra.webhook_manager import WebhookManager
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from services.quant_engine import SPIKE_GUARD_PCT_NORMAL, SPIKE_GUARD_PCT_PENNY
@@ -46,6 +46,17 @@ VOLATILITY_MAX_RATIO = (
     0.05  # 일반 종목: ATR/가격 비율이 이보다 크면 단기 과열/휩쏘로 판단해 진입 차단
 )
 PENNY_VOLATILITY_MAX_RATIO = 0.08  # 페니 종목: 원래 변동성이 커서 상한을 완화
+
+# ── 눌림목(Pullback) 2차 대기 지정가 진입 파라미터 (2026-07-23) ──────────────
+# 기존 Spike Guard(급등 스파이크 감지 시 이번 봉만 스킵)는 상태가 없어(stateless) 가격이
+# 식으면 STRONG BUY 신호 자체가 사라져 재평가 기회가 거의 오지 않았다. 이 상수들은
+# pullback_watches 테이블에 감시 상태를 영속시켜, 신호가 사라진 뒤에도 되돌림·반등을
+# 계속 추적해 확인되면 직접 진입시키는 데 쓰인다.
+PULLBACK_RETRACE_MIN_PCT_NORMAL = 0.03  # 일반: 고점 대비 최소 3% 되돌림 확인
+PULLBACK_RETRACE_MIN_PCT_PENNY = 0.05  # 페니: 변동성이 커서 최소 5% 되돌림 요구
+PULLBACK_RETRACE_MAX_PCT = 0.20  # 고점 대비 20% 초과 하락은 추세 붕괴로 간주해 무효화
+PULLBACK_MAX_WAIT_MINUTES = 45  # 이 시간 내 되돌림·반등이 확인되지 않으면 감시 만료
+PULLBACK_MIN_RSI = 40  # 이보다 낮으면 "떨어지는 칼" 매수 방지 — 감시만 유지, 진입 안 함
 
 KELLY_CACHE_TTL_SEC = (
     3600  # Kelly 통계(p/b/raw_kelly) 캐시 유효 시간 — ATR 페널티는 캐시 대상이 아님
@@ -241,6 +252,10 @@ class PaperTradingManager:
         # 참고) — DNA 점수 산출 자체에 영향을 주므로 이 엔진 레벨에서 직접 게이트를 걸지 않는다.
         self.extension_guard_penny_tight_enabled = True
         self.spike_guard_enabled = True
+        # 눌림목 2차 대기 지정가 진입 (2026-07-23) — 개선 검증 트래커(pullback_entry
+        # 항목)가 REGRESSED 연속 판정 시 False로 되돌려 기존 Spike Guard(즉시 차단)
+        # 동작으로 복귀시킬 수 있다.
+        self.pullback_entry_enabled = True
 
     def _get_buy_lock(self, ticker: str) -> asyncio.Lock:
         """티커별 매수 락 — 동일 종목의 신규 진입 처리(실주문 제출·체결 확인 포함)가
@@ -427,11 +442,18 @@ class PaperTradingManager:
             )
 
     async def _on_order_buy(
-        self, _ticker: str, qty: float, price: float
+        self,
+        _ticker: str,
+        qty: float,
+        price: float,
+        _order_kind: str = "MARKET",
+        _limit_price: float | None = None,
     ) -> tuple[float, float] | None:
         """매수 실행 훅 — 반환값은 (실제 체결 수량, 실제 체결 단가), 실패 시 None.
-        Paper 모드는 시뮬레이션 슬리피지 가격이 곧 체결가이므로 입력값을 그대로 반환.
-        LiveTradingManager는 Alpaca submit_order() 실체결가(filled_avg_price)로 오버라이드."""
+        Paper 모드는 시뮬레이션 슬리피지 가격이 곧 체결가이므로 order_kind/limit_price와
+        무관하게 입력값을 그대로 반환(1분봉 종가 단위라 봉 내 지정가 체결을 시뮬레이션할
+        수 없음). LiveTradingManager는 Alpaca submit_order() 실체결가(filled_avg_price)로
+        오버라이드하고, order_kind="LIMIT"이면 실제 지정가 주문을 제출한다."""
         return qty, price
 
     async def _on_order_sell(
@@ -772,6 +794,25 @@ class PaperTradingManager:
         # self.penny_dna_gate: 개선 검증 트래커가 REGRESSED 연속 판정 시 65로 자동 롤백할 수 있음.
         dna_gate = self.penny_dna_gate if is_penny_signal else 75
 
+        # ── 눌림목 감시 확인 ──────────────────────────────────────────────────
+        # 포지션이 없는 티커에 활성 pullback_watches 행이 있으면, 이번 호출의
+        # signal_type/strength와 무관하게(신호가 사라졌어도) 되돌림·반등·무효화·만료를
+        # 매번 평가한다. 감시 중이면 이번 호출은 여기서 끝낸다 — 아직 포지션을 열지
+        # 않았으므로 아래 신규 매수 게이트로 넘어가면 같은 신호가 이중 처리될 수 있다.
+        if not pos and is_armed:
+            watch_resolved = await self._evaluate_pullback_watch(
+                ticker=ticker,
+                price=price,
+                rsi=rsi,
+                signal_type=signal_type,
+                dna_score=dna_score,
+                recommended_weight=recommended_weight,
+                atr=atr,
+                ai_report=ai_report,
+            )
+            if watch_resolved is not None:
+                return watch_resolved
+
         # ── Gate: signal 조건 사전 체크 (ARMED 여부 포함) ────────────────────
         if signal_type == "BUY" and strength == "STRONG" and not pos:
             if not is_armed:
@@ -963,14 +1004,38 @@ class PaperTradingManager:
                     return
 
             # 급등 스파이크 가드: 직전 SPIKE_GUARD_LOOKBACK(5)봉 저점 대비 현재가가 과도하게
-            # 튀었으면 "돌파 확인 봉"을 바로 사는 대신 눌림목(재조정)을 기다린다 — 신호 자체는
-            # 유효하게 유지한 채 이 봉만 스킵하므로, 다음 봉에서 spike_pct가 다시 낮아지면
-            # (즉 가격이 눌리거나 시간이 지나 저점 창이 갱신되면) 자동으로 재평가된다.
+            # 튀었으면 "돌파 확인 봉"을 바로 사는 대신 눌림목(재조정)을 기다린다.
+            # pullback_entry_enabled=True(기본값)이면 눌림목 감시 행을 등록해 신호가 사라진
+            # 뒤에도 되돌림·반등을 계속 추적한다(_register_pullback_watch). 개선 검증
+            # 트래커가 REGRESSED로 자동 롤백하면 False가 되어 예전처럼 이번 봉만 스킵하고
+            # 잊는(stateless) 동작으로 되돌아간다 — 다음 봉에서 STRONG BUY가 재발화해야만
+            # 재평가되므로, 가격이 식으면 실제로는 재평가 기회가 거의 오지 않는다.
             if self.spike_guard_enabled and recent_spike_pct > 0:
                 spike_cap = (
                     SPIKE_GUARD_PCT_PENNY if is_penny_signal else SPIKE_GUARD_PCT_NORMAL
                 )
                 if recent_spike_pct > spike_cap:
+                    if self.pullback_entry_enabled:
+                        await self._register_pullback_watch(
+                            ticker=ticker,
+                            price=price,
+                            is_penny_signal=is_penny_signal,
+                            dna_score=dna_score,
+                            atr=atr,
+                            recommended_weight=recommended_weight,
+                            signal_type=signal_type,
+                            strength=strength,
+                            rsi=rsi,
+                        )
+                        note = (
+                            f"직전 5분 급등폭 {recent_spike_pct*100:.1f}% > 상한 "
+                            f"{spike_cap*100:.1f}% — 눌림목 감시 등록(pullback_watches)"
+                        )
+                    else:
+                        note = (
+                            f"직전 5분 급등폭 {recent_spike_pct*100:.1f}% > 상한 "
+                            f"{spike_cap*100:.1f}% — 눌림목 대기(감시 미등록, 롤백됨)"
+                        )
                     await self._log_decision(
                         ticker=ticker,
                         gate="SPIKE_GUARD",
@@ -979,7 +1044,7 @@ class PaperTradingManager:
                         dna_score=dna_score,
                         rsi=rsi,
                         price=price,
-                        note=f"직전 5분 급등폭 {recent_spike_pct*100:.1f}% > 상한 {spike_cap*100:.1f}% — 눌림목 대기",
+                        note=note,
                     )
                     print(
                         f"🛑 [Spike Guard] {ticker} 직전 5분 급등폭 {recent_spike_pct*100:.1f}% — 신규 진입 차단."
@@ -993,314 +1058,19 @@ class PaperTradingManager:
             and is_armed
             and dna_score >= dna_gate
         ):
-            # 매수 락: 이 티커의 신규 진입(admission control ~ 실주문 제출·체결
-            # 확인)을 직렬화한다. 청산 락(_get_exit_lock)과 분리되어 있으므로,
-            # 아래 실주문 체결 확인 대기(_on_order_buy, LIVE 모드는 최대 5초 폴링)
-            # 중에도 같은 티커의 트레일링 스탑/수동매도(exit 락)는 지연되지 않는다.
-            async with self._get_buy_lock(ticker):
-                # 전역 admission control 락: 포지션 수 상한·재진입 쿨다운·집중도·예산
-                # 산정과 진입 클레임 INSERT까지를 직렬화한다. 서로 다른 티커의 매수
-                # 신호가 동시에 들어와도 이 구간만큼은 한 번에 하나씩 처리되므로,
-                # MAX_CONCURRENT_POSITIONS·MAX_CONCENTRATION_PCT 상한을 여러 코루틴이
-                # 동시에 통과해 초과 진입하는 경합을 막는다. 실주문 제출(_on_order_buy,
-                # 네트워크 I/O)은 락 해제 후 실행해 서로 다른 티커 간 병렬성을 유지한다.
-                async with self._entry_lock:
-                    # 동시 포지션 상한 체크
-                    pos_count_res = await asyncio.to_thread(
-                        self.supabase.table("paper_positions")
-                        .select("ticker", count="exact")
-                        .execute
-                    )
-                    if (pos_count_res.count or 0) >= MAX_CONCURRENT_POSITIONS:
-                        print(
-                            f"⛔ [{ticker}] 동시 포지션 한도 초과 ({MAX_CONCURRENT_POSITIONS}개) — 진입 차단"
-                        )
-                        await self._log_decision(
-                            ticker=ticker,
-                            gate="MAX_POSITIONS",
-                            outcome="BLOCKED",
-                            signal=signal_type,
-                            dna_score=dna_score,
-                            rsi=rsi,
-                            price=price,
-                            note=f"동시 포지션 {pos_count_res.count}개 ≥ 한도 {MAX_CONCURRENT_POSITIONS}개",
-                        )
-                        return
-                    # 재진입 쿨다운 체크 (청산 후 60분 이내 재진입 차단)
-                    # 별도 DB 조회 없이 위 휩쏘 방지 체크에서 이미 가져온 이력을 재사용한다.
-                    if self._is_in_cooldown_from_rows(recent_history_rows):
-                        print(
-                            f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
-                        )
-                        await self._log_decision(
-                            ticker=ticker,
-                            gate="COOLDOWN",
-                            outcome="BLOCKED",
-                            signal=signal_type,
-                            dna_score=dna_score,
-                            rsi=rsi,
-                            price=price,
-                            note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
-                        )
-                        return
-                    # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 80% 초과 시 신규 진입 차단
-                    invested = await self.calculate_invested_capital()
-                    total_equity = acc["cash_available"] + invested
-                    if (
-                        total_equity > 0
-                        and (invested / total_equity) >= MAX_CONCENTRATION_PCT
-                    ):
-                        conc_pct = invested / total_equity * 100
-                        print(
-                            f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
-                        )
-                        await self._log_decision(
-                            ticker=ticker,
-                            gate="CONCENTRATION",
-                            outcome="BLOCKED",
-                            signal=signal_type,
-                            dna_score=dna_score,
-                            rsi=rsi,
-                            price=price,
-                            note=f"투입 비중 {conc_pct:.1f}% ≥ 한도 {MAX_CONCENTRATION_PCT*100:.0f}%",
-                        )
-                        return
-                    # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
-                    # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
-                    if recommended_weight <= 0:
-                        current_time = time.time()
-                        last_updated = self._kelly_cache_updated_at.get(ticker, 0.0)
-
-                        # 1시간(3600초) 이내의 캐시가 있으면 DB 조회(latency)만 생략한다.
-                        # 캐시된 것은 거래 이력 기반 통계(p/b/raw_kelly)뿐이므로, ATR 변동성
-                        # 페널티는 캐시 히트/미스와 무관하게 항상 현재 atr/price로 새로 적용된다.
-                        if (
-                            ticker in self._kelly_cache
-                            and (current_time - last_updated) < KELLY_CACHE_TTL_SEC
-                        ):
-                            stats = self._kelly_cache[ticker]
-                        else:
-                            res = await asyncio.to_thread(
-                                self.supabase.table("paper_history")
-                                .select("ticker,entry_price,pnl_pct,profit_amt")
-                                .eq("ticker", ticker)
-                                .order("closed_at", desc=True)
-                                .limit(50)
-                                .execute
-                            )
-                            paper_history_records = res.data or []
-                            stats = _kelly_sizer.compute_stats(paper_history_records)
-                            self._kelly_cache[ticker] = stats
-                            self._kelly_cache_updated_at[ticker] = current_time
-
-                        safe_atr = atr if atr > 0 else (price * 0.02)
-                        weight, _, _ = _kelly_sizer.apply_volatility_penalty(
-                            stats, current_atr=safe_atr, current_price=price
-                        )
-
-                        effective_fraction = weight if weight is not None else 0.05
-                        print(
-                            f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
-                        )
-                    else:
-                        effective_fraction = min(recommended_weight / 100.0, 0.25)
-                    buy_budget = min(
-                        acc["cash_available"] * effective_fraction,
-                        MAX_BUY_BUDGET,
-                    )
-                    if buy_budget < MIN_BUY_BUDGET:
-                        await self._log_decision(
-                            ticker=ticker,
-                            gate="MIN_BUDGET",
-                            outcome="BLOCKED",
-                            signal=signal_type,
-                            dna_score=dna_score,
-                            rsi=rsi,
-                            price=price,
-                            note=f"매수 예산 ${buy_budget:.2f} < 최소 ${MIN_BUY_BUDGET}",
-                        )
-                        return
-
-                    # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결 (실주문 전 추정치)
-                    est_fill_price = _apply_slippage(
-                        price, is_buy=True, is_penny=is_penny_signal
-                    )
-                    est_units = buy_budget / est_fill_price
-                    # ATR 기반 초기 스탑 폭 — 진입 시점에 1회 계산해 고정한다(_compute_entry_stop_pct
-                    # 참고). atr<=0(데이터 부족)이면 기존 고정 %와 동일한 값으로 폴백된다.
-                    entry_stop_pct = _compute_entry_stop_pct(
-                        est_fill_price, atr, is_penny_signal, self.atr_stop_enabled
-                    )
-
-                    # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문
-                    # 제출 전에 추정치로 먼저 INSERT해 unique violation으로 동시 프로세스의
-                    # 중복 매수(예: 배포 중 신·구 컨테이너 오버랩)를 DB 레벨에서 차단한다.
-                    # asyncio.Lock은 단일 프로세스만 보호하므로 이 클레임이 실질적 방어선이다.
-                    claim_pos = {
-                        "ticker": ticker.upper(),
-                        "status": "ENTERING",
-                        "weight": round(effective_fraction, 4),
-                        "entry_price": est_fill_price,
-                        "signal_price": price,
-                        "entry_slippage": (est_fill_price / price - 1) * 100,
-                        "current_price": est_fill_price,
-                        "highest_price": est_fill_price,
-                        "ts_threshold": est_fill_price * (1.0 - entry_stop_pct),
-                        "entry_stop_pct": entry_stop_pct,
-                        "units": est_units,
-                        "is_scaled_out": False,
-                        "scale_out_bar_count": 0,
-                    }
-                    try:
-                        claim_res = await asyncio.to_thread(
-                            self.supabase.table("paper_positions")
-                            .insert(claim_pos)
-                            .execute
-                        )
-                    except Exception as e:
-                        if "duplicate key" in str(e).lower() or "23505" in str(e):
-                            print(
-                                f"⏳ [{ticker}] 동시 진입 감지 — 다른 프로세스가 이미 클레임함, 스킵"
-                            )
-                            return
-                        raise
-                    if not claim_res.data:
-                        print(f"⚠️ [{ticker}] 진입 클레임 INSERT가 빈 결과 반환 — 스킵")
-                        return
-
-                # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 (체결 수량, 체결 단가) 반환.
-                # 실패 시 클레임 롤백 + DB 기록 차단.
-                executed = await self._on_order_buy(ticker, est_units, est_fill_price)
-                if executed is None:
-                    print(f"⚠️ [{ticker}] Live buy order rejected — 클레임 롤백")
-                    await asyncio.to_thread(
-                        self.supabase.table("paper_positions")
-                        .delete()
-                        .eq("ticker", ticker)
-                        .execute
-                    )
-                    await self._log_decision(
-                        ticker=ticker,
-                        gate="ORDER_REJECTED",
-                        outcome="BLOCKED",
-                        signal=signal_type,
-                        dna_score=dna_score,
-                        rsi=rsi,
-                        price=price,
-                        note="실주문 제출/체결확인 실패 — Alpaca가 거절했거나 제한시간 내 미체결 (Discord 알림 참고)",
-                    )
-                    return
-                units, fill_price = executed
-                ts_threshold = fill_price * (1.0 - entry_stop_pct)
-
-                try:
-                    # 클레임 행을 실체결 결과로 확정 (실거래 체결가·체결 수량 반영)
-                    pos_res = await asyncio.to_thread(
-                        self.supabase.table("paper_positions")
-                        .update(
-                            {
-                                "status": "HOLD",
-                                "entry_price": fill_price,
-                                "entry_slippage": (fill_price / price - 1) * 100,
-                                "current_price": fill_price,
-                                "highest_price": fill_price,
-                                "ts_threshold": ts_threshold,
-                                "units": units,
-                            }
-                        )
-                        .eq("ticker", ticker)
-                        .execute
-                    )
-                    if not pos_res.data:
-                        raise RuntimeError(
-                            f"Position 확정 UPDATE returned no data for {ticker}"
-                        )
-
-                    # 확정 성공 후에만 현금 차감 (원자성 보장)
-                    # 실거래 체결 수량·체결가 기준으로 차감 — LIVE 모드는 정수 주 체결이며
-                    # 실체결가가 추정 슬리피지가와 다를 수 있음 (버그 수정: 이전엔 추정 예산
-                    # 전액을 차감해 장부 현금이 실체결액과 어긋났음)
-                    # _apply_cash_delta가 _cash_lock 안에서 최신 잔액을 다시 읽고 반영하므로,
-                    # 함수 진입 시점에 fetch해 둔 stale acc["cash_available"]는 쓰지 않는다.
-                    executed_cost = units * fill_price
-                    cash_res, _new_cash = await self._apply_cash_delta(-executed_cost)
-                    if not cash_res or not cash_res.data:
-                        # 실주문은 이미 Alpaca에서 체결됐으므로(_on_order_buy 성공) 여기서
-                        # 포지션 행을 지우면 DB만 롤백되고 실제 보유 주식은 그대로 남아
-                        # 엔진이 추적을 잃는 유령 포지션이 된다(2026-07-22 CHAI/INUV/SLGB/MED
-                        # 사고 원인). 현금 차감만 실패했을 뿐 포지션 확정(HOLD) UPDATE는 이미
-                        # 성공했으므로 행은 그대로 두고 예외만 던져 아래 except에서 알림한다.
-                        raise RuntimeError(
-                            f"Cash UPDATE failed for {ticker}, position kept as HOLD "
-                            f"(cash reconciliation required)"
-                        )
-
-                    slip_pct = (fill_price / price - 1) * 100
-                    report_line = f"\n💡 {ai_report}" if ai_report else ""
-                    await self.webhook.send_alert(
-                        title=f"🚀 [PAPER BUY] {ticker}",
-                        description=(
-                            f"시장가: ${price:.4f} → 체결가: ${fill_price:.4f} (슬리피지 {slip_pct:+.2f}%)\n"
-                            f"수량: {units:.2f}주 | DNA: {dna_score:.0f} | 매수금액: ${buy_budget:.2f}\n"
-                            f"손절선: ${ts_threshold:.4f} ({'-15%' if is_penny_signal else '-10%'}) | 비중: {effective_fraction*100:.1f}%{report_line}"
-                        ),
-                        color=0x2ECC71,
-                    )
-                    await self._log_decision(
-                        ticker=ticker,
-                        gate="EXECUTED",
-                        outcome="EXECUTED",
-                        signal="BUY",
-                        dna_score=dna_score,
-                        rsi=rsi,
-                        price=fill_price,
-                        note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}",
-                    )
-                    # 관심종목 자동 등록 (STRONG BUY 매수 → HOLDING)
-                    await self._sync_watchlist_buy(
-                        ticker, fill_price, ts_threshold, dna_score
-                    )
-                    return True
-                except Exception as e:
-                    print(f"❌ Buy Error: {e}")
-                    # 실주문 체결(_on_order_buy) 이후의 실패이므로 Alpaca에는 이미 실제
-                    # 포지션이 존재한다. 클레임 행을 지우는 대신 실체결 데이터로 강제
-                    # UPDATE를 한 번 더 시도해 최소한 HOLD 상태로 확정시켜 TS 스위퍼가
-                    # 이 포지션을 놓치지 않게 한다 — 그마저 실패하면 행을 보존한 채
-                    # 수동 확인을 요청하는 알림만 보낸다 (2026-07-22 CHAI/INUV/SLGB/MED
-                    # phantom position 사고 재발 방지).
-                    try:
-                        await asyncio.to_thread(
-                            self.supabase.table("paper_positions")
-                            .update(
-                                {
-                                    "status": "HOLD",
-                                    "entry_price": fill_price,
-                                    "entry_slippage": (fill_price / price - 1) * 100,
-                                    "current_price": fill_price,
-                                    "highest_price": fill_price,
-                                    "ts_threshold": ts_threshold,
-                                    "units": units,
-                                }
-                            )
-                            .eq("ticker", ticker)
-                            .execute
-                        )
-                    except Exception as recover_err:
-                        print(
-                            f"❌ [{ticker}] 매수 확정 복구 재시도도 실패: {recover_err}"
-                        )
-                    await self.webhook.send_alert(
-                        title=f"🚨 [정산 불일치 위험] {ticker}",
-                        description=(
-                            f"매수 주문은 Alpaca에 이미 체결됐습니다 ({units:.2f}주 @ "
-                            f"${fill_price:.4f}) — 이후 기록 단계에서 오류: `{e}`\n"
-                            f"paper_positions/paper_account을 수동으로 확인하세요. "
-                            f"포지션 행은 삭제하지 않고 보존했습니다."
-                        ),
-                        color=0xFF0000,
-                    )
-                    raise
+            return await self._execute_entry(
+                ticker=ticker,
+                price=price,
+                signal_type=signal_type,
+                rsi=rsi,
+                ai_report=ai_report,
+                dna_score=dna_score,
+                recommended_weight=recommended_weight,
+                atr=atr,
+                is_penny_signal=is_penny_signal,
+                acc=acc,
+                recent_history_rows=recent_history_rows,
+            )
 
         # --- 2. 기존 포지션 관리 (Trailing Stop & Scale Out) ---
         if pos:
@@ -1606,3 +1376,565 @@ class PaperTradingManager:
                         await self._sync_watchlist_stop_loss(ticker, ts_threshold)
 
         return False
+
+    async def _execute_entry(
+        self,
+        ticker: str,
+        price: float,
+        signal_type: str,
+        rsi: float | None,
+        ai_report: str,
+        dna_score: float,
+        recommended_weight: float,
+        atr: float,
+        is_penny_signal: bool,
+        acc: dict,
+        recent_history_rows: list[dict],
+        order_kind: str = "MARKET",
+        limit_price: float | None = None,
+    ) -> bool | None:
+        """신규 진입 admission control(포지션 수 상한·재진입 쿨다운·집중도·예산) + 실주문
+        제출 + 포지션 확정. 호출자가 이미 DNA 게이트·서킷브레이커·쿨다운·변동성 필터를
+        통과시킨 뒤 호출해야 한다 — 즉시매수 경로(_process_signal_locked의 STRONG BUY
+        분기, order_kind="MARKET")와 눌림목 확인 후 진입 경로(_evaluate_pullback_watch,
+        order_kind="LIMIT") 양쪽에서 재사용된다.
+        """
+        # 매수 락: 이 티커의 신규 진입(admission control ~ 실주문 제출·체결
+        # 확인)을 직렬화한다. 청산 락(_get_exit_lock)과 분리되어 있으므로,
+        # 아래 실주문 체결 확인 대기(_on_order_buy, LIVE 모드는 최대 5초 폴링)
+        # 중에도 같은 티커의 트레일링 스탑/수동매도(exit 락)는 지연되지 않는다.
+        async with self._get_buy_lock(ticker):
+            # 전역 admission control 락: 포지션 수 상한·재진입 쿨다운·집중도·예산
+            # 산정과 진입 클레임 INSERT까지를 직렬화한다. 서로 다른 티커의 매수
+            # 신호가 동시에 들어와도 이 구간만큼은 한 번에 하나씩 처리되므로,
+            # MAX_CONCURRENT_POSITIONS·MAX_CONCENTRATION_PCT 상한을 여러 코루틴이
+            # 동시에 통과해 초과 진입하는 경합을 막는다. 실주문 제출(_on_order_buy,
+            # 네트워크 I/O)은 락 해제 후 실행해 서로 다른 티커 간 병렬성을 유지한다.
+            async with self._entry_lock:
+                # 동시 포지션 상한 체크
+                pos_count_res = await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .select("ticker", count="exact")
+                    .execute
+                )
+                if (pos_count_res.count or 0) >= MAX_CONCURRENT_POSITIONS:
+                    print(
+                        f"⛔ [{ticker}] 동시 포지션 한도 초과 ({MAX_CONCURRENT_POSITIONS}개) — 진입 차단"
+                    )
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="MAX_POSITIONS",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note=f"동시 포지션 {pos_count_res.count}개 ≥ 한도 {MAX_CONCURRENT_POSITIONS}개",
+                    )
+                    return None
+                # 재진입 쿨다운 체크 (청산 후 60분 이내 재진입 차단)
+                # 별도 DB 조회 없이 위 휩쏘 방지 체크에서 이미 가져온 이력을 재사용한다.
+                if self._is_in_cooldown_from_rows(recent_history_rows):
+                    print(
+                        f"⏳ [{ticker}] 재진입 쿨다운 중 ({self.REENTRY_COOLDOWN_MINUTES}분) — 진입 차단"
+                    )
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="COOLDOWN",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
+                    )
+                    return None
+                # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 80% 초과 시 신규 진입 차단
+                invested = await self.calculate_invested_capital()
+                total_equity = acc["cash_available"] + invested
+                if (
+                    total_equity > 0
+                    and (invested / total_equity) >= MAX_CONCENTRATION_PCT
+                ):
+                    conc_pct = invested / total_equity * 100
+                    print(
+                        f"⛔ [{ticker}] 집중도 한도 초과 ({conc_pct:.1f}% ≥ {MAX_CONCENTRATION_PCT*100:.0f}%) — 진입 차단"
+                    )
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="CONCENTRATION",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note=f"투입 비중 {conc_pct:.1f}% ≥ 한도 {MAX_CONCENTRATION_PCT*100:.0f}%",
+                    )
+                    return None
+                # recommended_weight: calculate_position_sizing()에서 이미 결합된 비중(%).
+                # 0이면 ATR/켈리 계산 실패 또는 유효 데이터 부족 → 동적 켈리 연산기로 비중 폴백.
+                if recommended_weight <= 0:
+                    current_time = time.time()
+                    last_updated = self._kelly_cache_updated_at.get(ticker, 0.0)
+
+                    # 1시간(3600초) 이내의 캐시가 있으면 DB 조회(latency)만 생략한다.
+                    # 캐시된 것은 거래 이력 기반 통계(p/b/raw_kelly)뿐이므로, ATR 변동성
+                    # 페널티는 캐시 히트/미스와 무관하게 항상 현재 atr/price로 새로 적용된다.
+                    if (
+                        ticker in self._kelly_cache
+                        and (current_time - last_updated) < KELLY_CACHE_TTL_SEC
+                    ):
+                        stats = self._kelly_cache[ticker]
+                    else:
+                        res = await asyncio.to_thread(
+                            self.supabase.table("paper_history")
+                            .select("ticker,entry_price,pnl_pct,profit_amt")
+                            .eq("ticker", ticker)
+                            .order("closed_at", desc=True)
+                            .limit(50)
+                            .execute
+                        )
+                        paper_history_records = res.data or []
+                        stats = _kelly_sizer.compute_stats(paper_history_records)
+                        self._kelly_cache[ticker] = stats
+                        self._kelly_cache_updated_at[ticker] = current_time
+
+                    safe_atr = atr if atr > 0 else (price * 0.02)
+                    weight, _, _ = _kelly_sizer.apply_volatility_penalty(
+                        stats, current_atr=safe_atr, current_price=price
+                    )
+
+                    effective_fraction = weight if weight is not None else 0.05
+                    print(
+                        f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
+                    )
+                else:
+                    effective_fraction = min(recommended_weight / 100.0, 0.25)
+                buy_budget = min(
+                    acc["cash_available"] * effective_fraction,
+                    MAX_BUY_BUDGET,
+                )
+                if buy_budget < MIN_BUY_BUDGET:
+                    await self._log_decision(
+                        ticker=ticker,
+                        gate="MIN_BUDGET",
+                        outcome="BLOCKED",
+                        signal=signal_type,
+                        dna_score=dna_score,
+                        rsi=rsi,
+                        price=price,
+                        note=f"매수 예산 ${buy_budget:.2f} < 최소 ${MIN_BUY_BUDGET}",
+                    )
+                    return None
+
+                # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결 (실주문 전 추정치)
+                est_fill_price = _apply_slippage(
+                    price, is_buy=True, is_penny=is_penny_signal
+                )
+                est_units = buy_budget / est_fill_price
+                # ATR 기반 초기 스탑 폭 — 진입 시점에 1회 계산해 고정한다(_compute_entry_stop_pct
+                # 참고). atr<=0(데이터 부족)이면 기존 고정 %와 동일한 값으로 폴백된다.
+                entry_stop_pct = _compute_entry_stop_pct(
+                    est_fill_price, atr, is_penny_signal, self.atr_stop_enabled
+                )
+
+                # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문
+                # 제출 전에 추정치로 먼저 INSERT해 unique violation으로 동시 프로세스의
+                # 중복 매수(예: 배포 중 신·구 컨테이너 오버랩)를 DB 레벨에서 차단한다.
+                # asyncio.Lock은 단일 프로세스만 보호하므로 이 클레임이 실질적 방어선이다.
+                claim_pos = {
+                    "ticker": ticker.upper(),
+                    "status": "ENTERING",
+                    "weight": round(effective_fraction, 4),
+                    "entry_price": est_fill_price,
+                    "signal_price": price,
+                    "entry_slippage": (est_fill_price / price - 1) * 100,
+                    "current_price": est_fill_price,
+                    "highest_price": est_fill_price,
+                    "ts_threshold": est_fill_price * (1.0 - entry_stop_pct),
+                    "entry_stop_pct": entry_stop_pct,
+                    "units": est_units,
+                    "is_scaled_out": False,
+                    "scale_out_bar_count": 0,
+                }
+                try:
+                    claim_res = await asyncio.to_thread(
+                        self.supabase.table("paper_positions").insert(claim_pos).execute
+                    )
+                except Exception as e:
+                    if "duplicate key" in str(e).lower() or "23505" in str(e):
+                        print(
+                            f"⏳ [{ticker}] 동시 진입 감지 — 다른 프로세스가 이미 클레임함, 스킵"
+                        )
+                        return None
+                    raise
+                if not claim_res.data:
+                    print(f"⚠️ [{ticker}] 진입 클레임 INSERT가 빈 결과 반환 — 스킵")
+                    return None
+
+            # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 (체결 수량, 체결 단가) 반환.
+            # 실패 시 클레임 롤백 + DB 기록 차단. order_kind="LIMIT"(눌림목 확인 진입)이면
+            # limit_price에 실제 Alpaca 지정가 주문을 제출한다(시장가 폴백은 없음 — 미체결
+            # 시 주문이 취소되고 None 반환됨, LiveTradingManager._submit_alpaca_order 참고).
+            executed = await self._on_order_buy(
+                ticker, est_units, est_fill_price, order_kind, limit_price
+            )
+            if executed is None:
+                print(f"⚠️ [{ticker}] Live buy order rejected — 클레임 롤백")
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .delete()
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="ORDER_REJECTED",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=price,
+                    note="실주문 제출/체결확인 실패 — Alpaca가 거절했거나 제한시간 내 미체결 (Discord 알림 참고)",
+                )
+                return None
+            units, fill_price = executed
+            ts_threshold = fill_price * (1.0 - entry_stop_pct)
+
+            try:
+                # 클레임 행을 실체결 결과로 확정 (실거래 체결가·체결 수량 반영)
+                pos_res = await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .update(
+                        {
+                            "status": "HOLD",
+                            "entry_price": fill_price,
+                            "entry_slippage": (fill_price / price - 1) * 100,
+                            "current_price": fill_price,
+                            "highest_price": fill_price,
+                            "ts_threshold": ts_threshold,
+                            "units": units,
+                        }
+                    )
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                if not pos_res.data:
+                    raise RuntimeError(
+                        f"Position 확정 UPDATE returned no data for {ticker}"
+                    )
+
+                # 확정 성공 후에만 현금 차감 (원자성 보장)
+                # 실거래 체결 수량·체결가 기준으로 차감 — LIVE 모드는 정수 주 체결이며
+                # 실체결가가 추정 슬리피지가와 다를 수 있음 (버그 수정: 이전엔 추정 예산
+                # 전액을 차감해 장부 현금이 실체결액과 어긋났음)
+                # _apply_cash_delta가 _cash_lock 안에서 최신 잔액을 다시 읽고 반영하므로,
+                # 함수 진입 시점에 fetch해 둔 stale acc["cash_available"]는 쓰지 않는다.
+                executed_cost = units * fill_price
+                cash_res, _new_cash = await self._apply_cash_delta(-executed_cost)
+                if not cash_res or not cash_res.data:
+                    # 실주문은 이미 Alpaca에서 체결됐으므로(_on_order_buy 성공) 여기서
+                    # 포지션 행을 지우면 DB만 롤백되고 실제 보유 주식은 그대로 남아
+                    # 엔진이 추적을 잃는 유령 포지션이 된다(2026-07-22 CHAI/INUV/SLGB/MED
+                    # 사고 원인). 현금 차감만 실패했을 뿐 포지션 확정(HOLD) UPDATE는 이미
+                    # 성공했으므로 행은 그대로 두고 예외만 던져 아래 except에서 알림한다.
+                    raise RuntimeError(
+                        f"Cash UPDATE failed for {ticker}, position kept as HOLD "
+                        f"(cash reconciliation required)"
+                    )
+
+                slip_pct = (fill_price / price - 1) * 100
+                report_line = f"\n💡 {ai_report}" if ai_report else ""
+                await self.webhook.send_alert(
+                    title=f"🚀 [PAPER BUY] {ticker}",
+                    description=(
+                        f"시장가: ${price:.4f} → 체결가: ${fill_price:.4f} (슬리피지 {slip_pct:+.2f}%)\n"
+                        f"수량: {units:.2f}주 | DNA: {dna_score:.0f} | 매수금액: ${buy_budget:.2f}\n"
+                        f"손절선: ${ts_threshold:.4f} ({'-15%' if is_penny_signal else '-10%'}) | 비중: {effective_fraction*100:.1f}%{report_line}"
+                    ),
+                    color=0x2ECC71,
+                )
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="EXECUTED",
+                    outcome="EXECUTED",
+                    signal="BUY",
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    price=fill_price,
+                    note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}",
+                )
+                # 관심종목 자동 등록 (STRONG BUY 매수 → HOLDING)
+                await self._sync_watchlist_buy(
+                    ticker, fill_price, ts_threshold, dna_score
+                )
+                return True
+            except Exception as e:
+                print(f"❌ Buy Error: {e}")
+                # 실주문 체결(_on_order_buy) 이후의 실패이므로 Alpaca에는 이미 실제
+                # 포지션이 존재한다. 클레임 행을 지우는 대신 실체결 데이터로 강제
+                # UPDATE를 한 번 더 시도해 최소한 HOLD 상태로 확정시켜 TS 스위퍼가
+                # 이 포지션을 놓치지 않게 한다 — 그마저 실패하면 행을 보존한 채
+                # 수동 확인을 요청하는 알림만 보낸다 (2026-07-22 CHAI/INUV/SLGB/MED
+                # phantom position 사고 재발 방지).
+                try:
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .update(
+                            {
+                                "status": "HOLD",
+                                "entry_price": fill_price,
+                                "entry_slippage": (fill_price / price - 1) * 100,
+                                "current_price": fill_price,
+                                "highest_price": fill_price,
+                                "ts_threshold": ts_threshold,
+                                "units": units,
+                            }
+                        )
+                        .eq("ticker", ticker)
+                        .execute
+                    )
+                except Exception as recover_err:
+                    print(f"❌ [{ticker}] 매수 확정 복구 재시도도 실패: {recover_err}")
+                await self.webhook.send_alert(
+                    title=f"🚨 [정산 불일치 위험] {ticker}",
+                    description=(
+                        f"매수 주문은 Alpaca에 이미 체결됐습니다 ({units:.2f}주 @ "
+                        f"${fill_price:.4f}) — 이후 기록 단계에서 오류: `{e}`\n"
+                        f"paper_positions/paper_account을 수동으로 확인하세요. "
+                        f"포지션 행은 삭제하지 않고 보존했습니다."
+                    ),
+                    color=0xFF0000,
+                )
+                raise
+
+    async def _fetch_recent_history_rows(self, ticker: str) -> list[dict]:
+        """티커의 최근 paper_history 10건(백필 행 제외)을 closed_at 내림차순으로 조회.
+
+        신규 진입 게이트(휩쏘 방지/재진입 쿨다운)와 동일한 조회·필터 로직이며,
+        눌림목 확인 후 진입 시에도 재진입 쿨다운을 지켜야 하므로 재사용한다.
+        """
+        recent_history = await asyncio.to_thread(
+            self.supabase.table("paper_history")
+            .select("closed_at,exit_reason,pnl_pct")
+            .eq("ticker", ticker)
+            .order("closed_at", desc=True)
+            .limit(10)
+            .execute
+        )
+        return [
+            r
+            for r in (recent_history.data or [])
+            if not (r.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+        ]
+
+    async def _register_pullback_watch(
+        self,
+        ticker: str,
+        price: float,
+        is_penny_signal: bool,
+        dna_score: float,
+        atr: float,
+        recommended_weight: float,
+        signal_type: str,
+        strength: str,
+        rsi: float | None,
+    ) -> None:
+        """Spike Guard가 차단한 신호를 즉시 잊는 대신, 눌림목(되돌림)·반등을 계속
+        추적하도록 pullback_watches에 감시 행을 등록한다. 같은 티커에 이미 WATCHING
+        행이 있으면(부분 유니크 인덱스) 조용히 건너뛴다 — 이미 감시 중이므로 새로
+        등록할 필요가 없다.
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            payload = {
+                "ticker": ticker.upper(),
+                "is_penny": is_penny_signal,
+                "dna_score": dna_score,
+                "atr": atr,
+                "recommended_weight": recommended_weight,
+                "signal_type": signal_type,
+                "strength": strength,
+                "rsi_at_signal": rsi,
+                "signal_price": price,
+                "peak_price": price,
+                "last_price": price,
+                "status": "WATCHING",
+                "expires_at": (
+                    now + timedelta(minutes=PULLBACK_MAX_WAIT_MINUTES)
+                ).isoformat(),
+            }
+            await asyncio.to_thread(
+                self.supabase.table("pullback_watches").insert(payload).execute
+            )
+            print(f"👁️ [Pullback Watch] {ticker} 감시 등록 @ ${price:.4f}")
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "23505" in str(e):
+                return  # 이미 감시 중 — 정상
+            print(f"⚠️ [Pullback Watch 등록 실패] {ticker}: {e}")
+
+    async def _evaluate_pullback_watch(
+        self,
+        ticker: str,
+        price: float,
+        rsi: float | None,
+        signal_type: str,
+        dna_score: float,
+        recommended_weight: float,
+        atr: float,
+        ai_report: str,
+    ) -> bool | None:
+        """활성 눌림목 감시 행을 평가한다.
+
+        반환값: 감시 행이 없으면 None(호출자가 평소 로직으로 진행), 감시 행이 있으면
+        True(진입 체결 성공)/False(감시 갱신·무효화·만료 — 호출자는 이번 신호 처리를
+        여기서 끝낸다).
+        """
+        try:
+            res = await asyncio.to_thread(
+                self.supabase.table("pullback_watches")
+                .select("*")
+                .eq("ticker", ticker.upper())
+                .eq("status", "WATCHING")
+                .limit(1)
+                .execute
+            )
+        except Exception as e:
+            print(f"⚠️ [Pullback Watch 조회 실패] {ticker}: {e}")
+            return None
+        rows = res.data or []
+        if not rows:
+            return None
+        watch = rows[0]
+
+        now = datetime.now(timezone.utc)
+        expires_at = datetime.fromisoformat(watch["expires_at"].replace("Z", "+00:00"))
+        peak_price = max(float(watch["peak_price"]), price)
+        last_price = float(watch["last_price"])
+        is_penny_signal = bool(watch["is_penny"])
+        retrace_min = (
+            PULLBACK_RETRACE_MIN_PCT_PENNY
+            if is_penny_signal
+            else PULLBACK_RETRACE_MIN_PCT_NORMAL
+        )
+        retrace_pct = (peak_price - price) / peak_price if peak_price > 0 else 0.0
+
+        if now > expires_at:
+            await asyncio.to_thread(
+                self.supabase.table("pullback_watches")
+                .update({"status": "EXPIRED", "resolved_at": now.isoformat()})
+                .eq("id", watch["id"])
+                .execute
+            )
+            await self._log_decision(
+                ticker=ticker,
+                gate="PULLBACK_EXPIRED",
+                outcome="BLOCKED",
+                signal=signal_type,
+                dna_score=dna_score,
+                rsi=rsi,
+                price=price,
+                note=f"눌림목 감시 {PULLBACK_MAX_WAIT_MINUTES}분 경과 — 만료",
+            )
+            print(f"⌛ [Pullback Watch] {ticker} 만료 — 감시 종료")
+            return False
+
+        if retrace_pct > PULLBACK_RETRACE_MAX_PCT:
+            await asyncio.to_thread(
+                self.supabase.table("pullback_watches")
+                .update({"status": "INVALIDATED", "resolved_at": now.isoformat()})
+                .eq("id", watch["id"])
+                .execute
+            )
+            await self._log_decision(
+                ticker=ticker,
+                gate="PULLBACK_INVALIDATED",
+                outcome="BLOCKED",
+                signal=signal_type,
+                dna_score=dna_score,
+                rsi=rsi,
+                price=price,
+                note=f"고점 대비 하락폭 {retrace_pct*100:.1f}% > 상한 {PULLBACK_RETRACE_MAX_PCT*100:.0f}% — 추세 붕괴로 무효화",
+            )
+            print(
+                f"🚫 [Pullback Watch] {ticker} 무효화 — 하락폭 {retrace_pct*100:.1f}%"
+            )
+            return False
+
+        reclaim_confirmed = (
+            retrace_pct >= retrace_min
+            and price > last_price
+            and (rsi is None or rsi >= PULLBACK_MIN_RSI)
+        )
+        if not reclaim_confirmed:
+            await asyncio.to_thread(
+                self.supabase.table("pullback_watches")
+                .update({"peak_price": peak_price, "last_price": price})
+                .eq("id", watch["id"])
+                .execute
+            )
+            return False
+
+        # 되돌림 + 반등 확인 — 감시를 FILLED로 마킹하고 진입 시도.
+        # 재진입 쿨다운은 감시 등록 시점이 아니라 지금 다시 확인해야 한다(그 사이
+        # 다른 사유로 청산 이력이 새로 쌓였을 수 있음).
+        recent_history_rows = await self._fetch_recent_history_rows(ticker)
+        if self._is_in_cooldown_from_rows(recent_history_rows):
+            await asyncio.to_thread(
+                self.supabase.table("pullback_watches")
+                .update({"status": "INVALIDATED", "resolved_at": now.isoformat()})
+                .eq("id", watch["id"])
+                .execute
+            )
+            await self._log_decision(
+                ticker=ticker,
+                gate="PULLBACK_COOLDOWN",
+                outcome="BLOCKED",
+                signal=signal_type,
+                dna_score=dna_score,
+                rsi=rsi,
+                price=price,
+                note="되돌림·반등 확인됐으나 재진입 쿨다운 중 — 무효화",
+            )
+            return False
+
+        acc = await self.get_account()
+        is_penny_now = price <= PENNY_MAX_PRICE
+        executed = await self._execute_entry(
+            ticker=ticker,
+            price=price,
+            signal_type=signal_type,
+            rsi=rsi,
+            ai_report=ai_report,
+            dna_score=dna_score if dna_score > 0 else float(watch["dna_score"]),
+            recommended_weight=(
+                recommended_weight
+                if recommended_weight > 0
+                else float(watch["recommended_weight"])
+            ),
+            atr=atr if atr > 0 else float(watch["atr"]),
+            is_penny_signal=is_penny_now,
+            acc=acc,
+            recent_history_rows=recent_history_rows,
+            # 되돌림·반등이 확인된 현재가를 지정가로 제출 — LIVE 모드는 이 가격에
+            # 실제 Alpaca 지정가 주문을 걸고(paper 모드는 봉 종가 단위라 이 가격에
+            # 즉시 체결한 것으로 근사), 시장가 추격 매수보다 불리한 체결을 방지한다.
+            order_kind="LIMIT",
+            limit_price=price,
+        )
+        await asyncio.to_thread(
+            self.supabase.table("pullback_watches")
+            .update(
+                {
+                    "status": "FILLED" if executed else "WATCHING",
+                    "peak_price": peak_price,
+                    "last_price": price,
+                    "resolved_at": now.isoformat() if executed else None,
+                }
+            )
+            .eq("id", watch["id"])
+            .execute
+        )
+        if executed:
+            print(f"✅ [Pullback Watch] {ticker} 되돌림·반등 확인 — 진입 실행")
+        return bool(executed)

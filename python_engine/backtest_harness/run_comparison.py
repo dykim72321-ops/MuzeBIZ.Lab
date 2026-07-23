@@ -42,6 +42,10 @@ from engine.paper_engine import (
     SCALE_OUT_TS_PCT,
     CHANDELIER_K_NORMAL,
     CHANDELIER_K_PENNY,
+    PULLBACK_RETRACE_MIN_PCT_NORMAL,
+    PULLBACK_RETRACE_MIN_PCT_PENNY,
+    PULLBACK_RETRACE_MAX_PCT,
+    PULLBACK_MIN_RSI,
     _apply_slippage,
     update_reversible_trailing_stop,  # NEW
 )
@@ -57,6 +61,9 @@ from old_quant_engine import (
 )
 
 KELLY_FRACTION_OLD = 0.15  # 삭제된 옛 상수 (9e52902 이전 고정값)
+PULLBACK_MAX_WAIT_DAYS = (
+    3  # 일봉 하네스는 "분" 대신 "거래일"로 만료를 판단 (라이브 45분에 대응)
+)
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -276,10 +283,13 @@ class Portfolio:
         stop: str = None,
         scale_out_enabled: bool = True,
         entry_stop_tight_pct: float | None = None,
+        entry: str = "MARKET",
     ):
         self.variant = variant  # "OLD" | "NEW"
         self.sizing = sizing or variant  # "OLD" | "NEW"
         self.stop = stop or variant  # "OLD" | "NEW"
+        # "MARKET"(기존 즉시매수) | "PULLBACK"(눌림목 2차 대기 지정가 진입 실험)
+        self.entry = entry
         # ── Phase 2 사전검증용 실험 스위치 (기본값은 라이브 동작과 동일) ──────────
         self.scale_out_enabled = scale_out_enabled
         # None이면 기존 고정 초기 스탑(TS_INIT_PCT/PENNY_TS_INIT_PCT) 사용.
@@ -290,6 +300,8 @@ class Portfolio:
         self.positions = {}  # ticker -> dict
         self.closed_trades = []  # for NEW dynamic kelly rolling history
         self.equity_curve = []
+        # entry="PULLBACK" 전용: ticker -> {"peak", "last_close", "days"}
+        self.pending_watches = {}
 
     def invested(self):
         return sum(p["units"] * p["current_price"] for p in self.positions.values())
@@ -307,6 +319,69 @@ class Portfolio:
         if total_equity > 0 and (invested / total_equity) >= MAX_CONCENTRATION_PCT:
             return
 
+        if self.entry == "PULLBACK":
+            # 즉시매수 대신 감시만 등록 — 실제 진입은 process_watches()에서
+            # 되돌림·반등이 확인된 날 _open_position()을 통해 실행된다.
+            if ticker not in self.pending_watches:
+                close = float(row["Close"])
+                self.pending_watches[ticker] = {
+                    "peak": close,
+                    "last_close": close,
+                    "days": 0,
+                }
+            return
+
+        self._open_position(ticker, row, date)
+
+    def process_watches(self, ticker, row, date):
+        """entry="PULLBACK" 전용 — 활성 감시를 매일 평가해 되돌림·반등 확인 시 진입,
+        추세 붕괴/만료 시 감시를 취소한다. 일봉 하네스라 "분" 대신 "거래일"로 만료를
+        판단한다(PULLBACK_MAX_WAIT_DAYS)."""
+        watch = self.pending_watches.get(ticker)
+        if watch is None or ticker in self.positions:
+            return
+        close = float(row["Close"])
+        rsi = float(row["RSI"])
+        is_penny = close <= PENNY_MAX_PRICE
+
+        watch["days"] += 1
+        watch["peak"] = max(watch["peak"], close)
+        retrace_min = (
+            PULLBACK_RETRACE_MIN_PCT_PENNY
+            if is_penny
+            else PULLBACK_RETRACE_MIN_PCT_NORMAL
+        )
+        retrace_pct = (
+            (watch["peak"] - close) / watch["peak"] if watch["peak"] > 0 else 0.0
+        )
+
+        if (
+            watch["days"] > PULLBACK_MAX_WAIT_DAYS
+            or retrace_pct > PULLBACK_RETRACE_MAX_PCT
+        ):
+            del self.pending_watches[ticker]
+            return
+
+        reclaim_confirmed = (
+            retrace_pct >= retrace_min
+            and close > watch["last_close"]
+            and rsi >= PULLBACK_MIN_RSI
+        )
+        watch["last_close"] = close
+        if not reclaim_confirmed:
+            return
+
+        if len(self.positions) >= MAX_CONCURRENT_POSITIONS:
+            return
+        total_equity = self.total_equity()
+        invested = self.invested()
+        if total_equity > 0 and (invested / total_equity) >= MAX_CONCENTRATION_PCT:
+            return
+
+        del self.pending_watches[ticker]
+        self._open_position(ticker, row, date)
+
+    def _open_position(self, ticker, row, date):
         price = float(row["Close"])
         is_penny = price <= PENNY_MAX_PRICE
         atr = float(row["ATR"])
@@ -457,6 +532,7 @@ def run_variant(
     stop: str = None,
     scale_out_enabled: bool = True,
     entry_stop_tight_pct: float | None = None,
+    entry: str = "MARKET",
 ):
     pf = Portfolio(
         variant,
@@ -464,6 +540,7 @@ def run_variant(
         stop=stop,
         scale_out_enabled=scale_out_enabled,
         entry_stop_tight_pct=entry_stop_tight_pct,
+        entry=entry,
     )
     all_dates = sorted(set().union(*[set(d.index) for d in dfs.values()]))
     for date in all_dates:
@@ -473,6 +550,14 @@ def run_variant(
             row = d.loc[date]
             if ticker in pf.positions:
                 pf.update_and_check_exit(ticker, row)
+        if pf.entry == "PULLBACK":
+            # Strong_Buy 신호 유무와 무관하게 활성 감시를 매일 평가해야 한다 —
+            # 신호가 사라진 뒤에도 되돌림·반등을 추적하는 것이 이 실험의 핵심.
+            for ticker in list(pf.pending_watches.keys()):
+                d = dfs.get(ticker)
+                if d is None or date not in d.index:
+                    continue
+                pf.process_watches(ticker, d.loc[date], date)
         for ticker, d in dfs.items():
             if date not in d.index:
                 continue
@@ -571,15 +656,19 @@ def main():
     # 신호(Strong_Buy)는 OLD/NEW 동일하므로 new_dfs 하나로 sizing/stop 조합만 바꿔가며
     # 어느 컴포넌트가 성과 차이를 만드는지 분해한다.
     combos = [
-        ("OLD (기존 전체)", old_dfs, "OLD", "OLD", "OLD"),
-        ("NEW 켈리만 (스탑=OLD)", new_dfs, "NEW", "NEW", "OLD"),
-        ("NEW 스탑만 (켈리=OLD)", new_dfs, "NEW", "OLD", "NEW"),
-        ("NEW (기존 전체)", new_dfs, "NEW", "NEW", "NEW"),
+        ("OLD (기존 전체)", old_dfs, "OLD", "OLD", "OLD", "MARKET"),
+        ("NEW 켈리만 (스탑=OLD)", new_dfs, "NEW", "NEW", "OLD", "MARKET"),
+        ("NEW 스탑만 (켈리=OLD)", new_dfs, "NEW", "OLD", "NEW", "MARKET"),
+        ("NEW (기존 전체)", new_dfs, "NEW", "NEW", "NEW", "MARKET"),
+        # 1·3단계 사전검증: 즉시매수를 눌림목(되돌림·반등 확인) 진입으로 교체했을 때
+        # 승률/PF가 개선되는지 확인 — 개선되지 않으면 pullback_entry_enabled=True로
+        # 배포하지 않고 재검토한다.
+        ("NEW + 눌림목 진입", new_dfs, "NEW", "NEW", "NEW", "PULLBACK"),
     ]
     results = {}
-    for label, dfs, variant, sizing, stop in combos:
+    for label, dfs, variant, sizing, stop, entry in combos:
         print(f"▶ 시뮬레이션: {label}")
-        pf = run_variant(dfs, variant, sizing=sizing, stop=stop)
+        pf = run_variant(dfs, variant, sizing=sizing, stop=stop, entry=entry)
         results[label] = compute_metrics(pf)
 
     print("\n" + "=" * 92)

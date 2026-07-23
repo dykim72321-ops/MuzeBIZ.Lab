@@ -288,7 +288,7 @@ async def run_startup_sequence():
                     .select(
                         "penny_dna_gate,atr_stop_enabled,max_daily_trades_per_ticker,"
                         "reentry_cooldown_minutes,extension_guard_penny_tight_enabled,"
-                        "spike_guard_enabled"
+                        "spike_guard_enabled,pullback_entry_enabled"
                     )
                     .eq("id", 1)
                     .single()
@@ -312,13 +312,16 @@ async def run_startup_sequence():
                         ]
                     if row.get("spike_guard_enabled") is not None:
                         e.spike_guard_enabled = row["spike_guard_enabled"]
+                    if row.get("pullback_entry_enabled") is not None:
+                        e.pullback_entry_enabled = row["pullback_entry_enabled"]
                 print(
                     f"📡 [Startup] Runtime rollback params restored: "
                     f"penny_dna_gate={row.get('penny_dna_gate')}, atr_stop_enabled={row.get('atr_stop_enabled')}, "
                     f"max_daily_trades_per_ticker={row.get('max_daily_trades_per_ticker')}, "
                     f"reentry_cooldown_minutes={row.get('reentry_cooldown_minutes')}, "
                     f"extension_guard_penny_tight_enabled={row.get('extension_guard_penny_tight_enabled')}, "
-                    f"spike_guard_enabled={row.get('spike_guard_enabled')}"
+                    f"spike_guard_enabled={row.get('spike_guard_enabled')}, "
+                    f"pullback_entry_enabled={row.get('pullback_entry_enabled')}"
                 )
             except Exception as e:
                 print(f"⚠️ [Startup] Could not restore rollback runtime params: {e}")

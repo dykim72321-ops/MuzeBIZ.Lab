@@ -32,6 +32,7 @@ IMPROVEMENT_ADOPTED = {
     "atr_stop": "2026-07-18",  # ATR 기반 초기 트레일링 스탑 (entry_stop_pct)
     "forward_return_logger": "2026-07-18",  # 신호 30m/60m forward return 자동 기록
     "extension_guard_tighten": "2026-07-20",  # Is_Extended 임계값 강화(페니 타이트화) + 스캔/실시간 정합
+    "pullback_entry": "2026-07-23",  # 급등 스파이크 즉시매수 대신 눌림목(되돌림·반등) 대기 후 진입
 }
 # 2026-07-18 수익률 전수분석(198건)에서 산출된 개선 전 기준선 — 효과 비교용
 BASELINE_TS_WIN_RATE = 8.8  # Trailing Stop 청산 승률 (개선 전)
@@ -44,6 +45,7 @@ TARGET_FWD_SAMPLES = 100  # forward return 수집 목표 건수
 TARGET_TS_EXITS = 30  # ATR 스탑 효과 판정에 필요한 TS 청산 수
 TARGET_PENNY_TRADES = 20  # 페니 게이트 효과 판정에 필요한 페니 거래 수
 TARGET_EXTENSION_TRADES = 30  # 확장도 가드 효과 판정에 필요한 신규 진입 수
+TARGET_PULLBACK_TRADES = 20  # 눌림목 진입 효과 판정에 필요한 신규 진입 수
 WHIPSAW_OBSERVE_DAYS = 14  # whipsaw 재발 감시 기간 (일)
 
 IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items()}
@@ -58,6 +60,7 @@ ROLLBACK_ACTIONABLE_ITEMS = {
     "penny_gate_80",
     "whipsaw_fix",
     "extension_guard_tighten",
+    "pullback_entry",
 }
 # flip-flop 방지: 같은 상태(REGRESSED)가 이만큼 연속 확인돼야 실제 조치를 실행한다.
 # evaluate_improvement_rollback()은 24시간 주기로 호출되므로 사실상 "이틀 연속" 의미.
@@ -425,6 +428,58 @@ async def compute_improvement_status(supabase) -> dict:
         }
     )
 
+    # ── 6. 눌림목(Pullback) 2차 대기 지정가 진입 ─────────────────────────────
+    # 급등 스파이크로 Spike Guard가 차단한 신호를 즉시 잊는 대신 눌림목 감시(
+    # pullback_watches)로 추적해 되돌림·반등 확인 후 진입시킨다(paper_engine.py
+    # _evaluate_pullback_watch). 도입 후 전체 신규 진입 대비 승률·Expectancy를
+    # 기존 전체 승률 기준선(BASELINE_OVERALL_WIN_RATE)과 비교해 검증한다 —
+    # extension_guard_tighten과 동일하게 "도입일 이후 신규 진입 전체"를 모집단으로 삼는다.
+    pullback_adopted = IMPROVEMENT_ADOPTED["pullback_entry"]
+    pullback_trades = [
+        t for t in trades if t["closed_at"] >= IMPROVEMENT_CUTOFFS["pullback_entry"]
+    ]
+    n_pullback = len(pullback_trades)
+    pos_wr_pullback, exp_pullback, sortino_pullback = _calc_metrics_expectancy(
+        pullback_trades
+    )
+
+    metrics = [
+        {
+            "label": "도입 후 신규 진입",
+            "value": f"{n_pullback} / {TARGET_PULLBACK_TRADES}건",
+        }
+    ]
+    if n_pullback > 0:
+        metrics.append(
+            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_pullback:.1f}%"}
+        )
+        metrics.append(
+            {"label": "거래당 기대값 ($E)", "value": f"{exp_pullback:+.2f}$"}
+        )
+        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_pullback:.2f}"})
+    metrics.append(
+        {"label": "개선 전 전체 승률(기준선)", "value": f"{BASELINE_OVERALL_WIN_RATE}%"}
+    )
+
+    pullback_status = _verify_status(
+        n_pullback,
+        TARGET_PULLBACK_TRADES,
+        pos_wr_pullback,
+        BASELINE_OVERALL_WIN_RATE,
+        expectancy=exp_pullback if n_pullback >= 5 else None,
+    )
+    items.append(
+        {
+            "key": "pullback_entry",
+            "label": "눌림목 2차 대기 지정가 진입",
+            "adopted_at": pullback_adopted,
+            "status": pullback_status,
+            "progress_pct": min(round(n_pullback / TARGET_PULLBACK_TRADES * 100), 100),
+            "metrics": metrics,
+            "note": "급등 즉시매수 대신 되돌림·반등 확인 후 진입이 승률 및 Expectancy($E>0) 손실 방지를 달성하는지 검증 중",
+        }
+    )
+
     # ── 자동 롤백 이력 병합 ──────────────────────────────────────────────────
     # evaluate_improvement_rollback()이 이미 조치를 실행한 항목은 대시보드에서
     # "자동 롤백 적용됨" 배지로 보이도록 최신 조치 로그를 items에 붙인다.
@@ -710,6 +765,10 @@ def _apply_rollback_action(key: str, engines: list) -> str:
             e.extension_guard_penny_tight_enabled = False
             e.spike_guard_enabled = False
         return "페니 확장도 임계값을 일반 종목과 동일하게 완화 + 급등 스파이크 가드 비활성화로 롤백"
+    if key == "pullback_entry":
+        for e in engines:
+            e.pullback_entry_enabled = False
+        return "눌림목 감시(pullback_watches) 비활성화 → Spike Guard 즉시 차단(stateless)으로 롤백"
     return "알 수 없는 항목 — 조치 없음"
 
 
@@ -727,6 +786,7 @@ async def _persist_rollback_settings(supabase, key: str) -> None:
             "extension_guard_penny_tight_enabled": False,
             "spike_guard_enabled": False,
         },
+        "pullback_entry": {"pullback_entry_enabled": False},
     }
     fields = field_map.get(key)
     if not fields:
