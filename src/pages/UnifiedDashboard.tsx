@@ -494,31 +494,40 @@ export default function UnifiedDashboard() {
                     {liveHistory.slice(0, 30).map((trade: PaperHistory, idx: number) => {
                       const isWin = Number(trade.profit_amt) >= 0;
                       return (
-                        <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                        <div
+                          key={idx}
+                          className={clsx(
+                            "p-3 rounded-xl border-l-4 flex justify-between items-center shadow-sm bg-white",
+                            isWin ? "border-l-emerald-500 border-y border-r border-emerald-100" : "border-l-rose-500 border-y border-r border-rose-100"
+                          )}
+                        >
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-black text-black">{trade.ticker}</span>
+                            <div className="text-xs font-bold text-slate-600 font-mono">
+                              {trade.created_at ? new Date(trade.created_at).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }) : '-'}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-base font-black text-slate-900 tracking-tight">{trade.ticker}</span>
                               {trade.exit_reason && (
-                                <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                   {trade.exit_reason}
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 mt-1.5 text-[10px] font-mono text-slate-500">
+                            <div className="flex items-center gap-2 mt-1.5 text-xs font-mono font-semibold text-slate-600">
                               <span title="Entry Price">E: ${trade.entry_price < 1 ? Number(trade.entry_price).toFixed(4) : Number(trade.entry_price).toFixed(2)}</span>
-                              <span>→</span>
+                              <span className="text-slate-400">→</span>
                               <span title="Exit Price">X: ${trade.exit_price < 1 ? Number(trade.exit_price).toFixed(4) : Number(trade.exit_price).toFixed(2)}</span>
                             </div>
                           </div>
-                          <div className="text-right flex flex-col items-end">
-                            <span className={clsx("font-mono text-sm font-extrabold", isWin ? "text-emerald-600" : "text-rose-600")}>
+                          <div className="text-right flex flex-col items-end gap-1">
+                            <span className={clsx("font-mono text-base font-black", isWin ? "text-emerald-600" : "text-rose-600")}>
                               {isWin ? '+' : '-'}${Math.abs(Number(trade.profit_amt)).toFixed(2)}
                             </span>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-[9px] font-medium text-slate-400 font-mono">
-                                {trade.created_at ? new Date(trade.created_at).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }) : '-'}
-                              </span>
-                              <span className={clsx("font-mono text-[10px] font-bold", isWin ? "text-emerald-600" : "text-rose-600")}>
+                            <div className="flex items-center gap-1.5">
+                              <span className={clsx(
+                                "font-mono text-xs font-extrabold px-1.5 py-0.5 rounded",
+                                isWin ? "text-emerald-700 bg-emerald-50" : "text-rose-700 bg-rose-50"
+                              )}>
                                 {isWin ? '+' : ''}{Number(trade.pnl_pct).toFixed(2)}%
                               </span>
                             </div>

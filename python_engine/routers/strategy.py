@@ -41,55 +41,105 @@ def _base_stats(is_simulated: bool, message: str, badge: str) -> dict:
     }
 
 
+def _group_trades_to_positions(trades: list) -> list[dict]:
+    """
+    paper_history 행을 포지션 단위(ticker+entry_price)로 그룹핑하여
+    Scale-Out 50% 분할 매도가 발생해도 1개의 라운드트립 포지션으로 집계한다.
+    KellySizer 수식 엔진과 100% 동일한 포지션 승률(p) 및 통계를 제공한다.
+    """
+    grouped: dict[str, dict[str, float]] = {}
+    for t in trades:
+        ticker = t.get("ticker", "unknown")
+        entry_price = float(t.get("entry_price") or 0.0)
+        profit_amt = float(t.get("profit_amt") or 0.0)
+
+        key = f"{ticker}_{round(entry_price, 4)}"
+        bucket = grouped.setdefault(key, {"total_pnl": 0.0})
+        bucket["total_pnl"] += profit_amt
+
+    return [{"profit_amt": b["total_pnl"]} for b in grouped.values()]
+
+
 def _compute_bucket_stats(
     trades: list, starting_equity: float = INITIAL_CAPITAL
 ) -> dict:
-    """거래 리스트 → win_rate/profit_factor/mdd/avg_pnl 등 통계 dict. 빈 리스트도 안전 처리."""
+    """거래 리스트 → win_rate/profit_factor/mdd/avg_pnl/expectancy/sortino_ratio 등 퀀트 통계 dict."""
     total_trades = len(trades)
     if total_trades == 0:
         return {
-            "win_rate": 0,
-            "profit_factor": 0,
-            "mdd": 0,
-            "avg_pnl": 0,
+            "win_rate": 0.0,
+            "pos_win_rate": 0.0,
+            "profit_factor": 0.0,
+            "mdd": 0.0,
+            "period_mdd": 0.0,
+            "avg_pnl": 0.0,
+            "expectancy": 0.0,
+            "sortino_ratio": 0.0,
             "total_trades": 0,
+            "pos_total_trades": 0,
             "gross_profit": 0.0,
             "gross_loss": 0.0,
         }
 
     win_count = 0
+    loss_count = 0
     gross_profit = 0.0
     gross_loss = 0.0
     profit_arr = np.empty(total_trades, dtype=np.float64)
 
     for i, t in enumerate(trades):
-        pnl = float(t.get("pnl_pct") or 0)
         amt = float(t.get("profit_amt") or 0)
         profit_arr[i] = amt
         if amt > 0:
             win_count += 1
             gross_profit += amt
         elif amt < 0:
+            loss_count += 1
             gross_loss -= amt
 
+    # 1. 체결 기준 승률 (Execution Level)
     win_rate = round(win_count / total_trades * 100, 1)
 
-    # avg_pnl should be average dollar amount to match the UI which displays '$'
+    # 2. 퀀트 포지션 라운드트립 기준 승률 (Position Level — Kelly Sizer 정합)
+    grouped_positions = _group_trades_to_positions(trades)
+    pos_total_trades = len(grouped_positions)
+    pos_win_count = sum(1 for p in grouped_positions if p["profit_amt"] > 0)
+    pos_win_rate = (
+        round(pos_win_count / pos_total_trades * 100, 1)
+        if pos_total_trades > 0
+        else 0.0
+    )
+
+    # 3. 평균 달러 손익 (Avg PnL)
     net_profit = gross_profit - gross_loss
     avg_pnl = round(net_profit / total_trades, 2)
 
+    # 4. Profit Factor
     profit_factor = (
         round(gross_profit / gross_loss, 2)
         if gross_loss > 0
         else (_MAX_PROFIT_FACTOR if gross_profit > 0 else 0.0)
     )
 
-    # MDD는 거래별 pnl_pct를 그대로 복리(cumprod)하면 안 된다 — 각 거래는
-    # 계좌 전체가 아니라 실제 투입 금액(최대 $5,000, 계좌의 일부)에 대한
-    # 수익률이고, 여러 종목이 동시에 병렬 보유되므로 시간순으로 이어붙여
-    # 복리 계산하면 드로다운이 극단적으로 과장된다(예: -90%대).
-    # 대신 실제 달러 손익(profit_amt)을 starting_equity 기준
-    # 계좌 자산곡선에 순차 누적해 진짜 계좌 단위 MDD를 계산한다.
+    # 5. 거래당 기대값 수식 ($E = p * avg_win - (1-p) * avg_loss)
+    avg_win = (gross_profit / win_count) if win_count > 0 else 0.0
+    avg_loss = (gross_loss / loss_count) if loss_count > 0 else 0.0
+    prob_win = win_count / total_trades
+    expectancy = round((prob_win * avg_win) - ((1.0 - prob_win) * avg_loss), 2)
+
+    # 6. Sortino Ratio (손실 변동성만 평가)
+    loss_amts = profit_arr[profit_arr < 0]
+    if len(loss_amts) > 0:
+        downside_std = float(np.std(loss_amts))
+        sortino_ratio = (
+            round(avg_pnl / downside_std, 2)
+            if downside_std > 0
+            else (_MAX_PROFIT_FACTOR if avg_pnl > 0 else 0.0)
+        )
+    else:
+        sortino_ratio = _MAX_PROFIT_FACTOR if avg_pnl > 0 else 0.0
+
+    # 7. 계좌 단위 MDD & 해당 기간 Local Period MDD
     equity_curve = np.concatenate(
         ([starting_equity], starting_equity + np.cumsum(profit_arr))
     )
@@ -103,12 +153,32 @@ def _compute_bucket_stats(
 
     mdd = round(float(np.min(drawdowns)), 2)
 
+    # Period Local MDD (버킷 기간 시작 자본금 대비 해당 버킷 내부 낙폭)
+    local_start_equity = starting_equity
+    local_equity_curve = np.concatenate(
+        ([local_start_equity], local_start_equity + np.cumsum(profit_arr))
+    )
+    local_running_max = np.maximum.accumulate(local_equity_curve)
+    local_drawdowns = np.zeros_like(local_equity_curve)
+    local_mask = local_running_max > 0
+    local_drawdowns[local_mask] = (
+        (local_equity_curve[local_mask] - local_running_max[local_mask])
+        / local_running_max[local_mask]
+        * 100.0
+    )
+    period_mdd = round(float(np.min(local_drawdowns)), 2)
+
     return {
         "win_rate": win_rate,
+        "pos_win_rate": pos_win_rate,
         "profit_factor": profit_factor,
         "mdd": mdd,
+        "period_mdd": period_mdd,
         "avg_pnl": avg_pnl,
+        "expectancy": expectancy,
+        "sortino_ratio": sortino_ratio,
         "total_trades": total_trades,
+        "pos_total_trades": pos_total_trades,
         "gross_profit": round(gross_profit, 2),
         "gross_loss": round(gross_loss, 2),
     }

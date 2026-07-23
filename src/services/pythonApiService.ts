@@ -85,10 +85,15 @@ export interface StrategyStats {
 export interface StrategyReportBucket {
   period_label: string;
   win_rate: number;
+  pos_win_rate?: number;
   profit_factor: number;
   mdd: number;
+  period_mdd?: number;
   avg_pnl: number;
+  expectancy?: number;
+  sortino_ratio?: number;
   total_trades: number;
+  pos_total_trades?: number;
   gross_profit: number;
   gross_loss: number;
 }

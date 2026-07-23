@@ -31,7 +31,7 @@ export function TensionGauge({ score, rvol, isPenny }: TensionGaugeProps) {
   let gradient = 'from-blue-500 to-cyan-400';
   let glow = 'rgba(6,182,212,0.4)';
   let label = '관찰중';
-  let labelColor = 'text-slate-500';
+  let labelColor = 'text-blue-600';
 
   if (ready) {
     gradient = 'from-rose-500 to-rose-400';
@@ -48,10 +48,10 @@ export function TensionGauge({ score, rvol, isPenny }: TensionGaugeProps) {
 
   return (
     <div className="w-full flex flex-col gap-1 items-end" title={`DNA ${score.toFixed(1)} / RVOL ${rvol != null ? rvol.toFixed(1) + 'x' : '-'}`}>
-      <span className={clsx('text-[9px] font-mono font-black uppercase tracking-widest transition-colors duration-500', labelColor)}>
+      <span className={clsx('text-xs font-mono font-black uppercase tracking-widest transition-colors duration-500', labelColor)}>
         {label}
       </span>
-      <div className="w-full h-1 bg-slate-200/60 rounded-full relative">
+      <div className="w-full h-1.5 bg-slate-200/70 rounded-full relative">
         <motion.div
           initial={{ width: 0 }}
           animate={{

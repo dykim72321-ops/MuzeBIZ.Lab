@@ -8,6 +8,7 @@ import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 from fastapi import APIRouter, HTTPException, Security, status
 
 from api.deps import get_api_key
@@ -63,7 +64,16 @@ ROLLBACK_ACTIONABLE_ITEMS = {
 CONSECUTIVE_REGRESSED_THRESHOLD = 2
 
 
-def _verify_status(n: int, target: int, metric: float, baseline: float) -> str:
+def _verify_status(
+    n: int, target: int, metric: float, baseline: float, expectancy: float | None = None
+) -> str:
+    """
+    승률(metric) 및 거래당 기대값(expectancy $E$)을 결합한 퀀트 엄밀 검증 수식.
+    n < target: 표본 수집 단계 (ON_TRACK or COLLECTING)
+    expectancy <= 0: 승률이 무관하게 1회 거래당 기댓값이 손실(<= $0)이면 손실 방지 킬스위치에 의해 즉시 REGRESSED
+    """
+    if n >= 5 and expectancy is not None and expectancy <= 0:
+        return "REGRESSED"
     if n < target:
         return "ON_TRACK" if n >= 5 and metric > baseline else "COLLECTING"
     return "VERIFIED" if metric > baseline else "REGRESSED"
@@ -100,13 +110,7 @@ async def get_improvement_status(api_key: str = Security(get_api_key)):
 
 async def compute_improvement_status(supabase) -> dict:
     """4대 개선 항목(Forward Return 로거 / ATR 초기 스탑 / 페니 게이트 80 /
-    Whipsaw 수정)의 검증 진행 현황을 실데이터로 자동 분석해 반환.
-
-    상태 의미:
-      COLLECTING — 판정에 필요한 최소 표본 미달 (데이터 축적 중)
-      ON_TRACK   — 표본 축적 중이지만 현재까지 지표가 기준선보다 개선됨
-      VERIFIED   — 목표 표본 도달 + 지표가 기준선 대비 개선 확인
-      REGRESSED  — 지표가 기준선보다 악화 (재검토 필요)
+    Whipsaw 수정 / 확장도 가드)의 검증 진행 현황을 퀀트 정밀 지표(포지션 승률, Expectancy E)로 자동 분석.
     """
     now_utc = datetime.now(timezone.utc)
 
@@ -114,7 +118,7 @@ async def compute_improvement_status(supabase) -> dict:
     hist_res, dec_res = await asyncio.gather(
         asyncio.to_thread(
             supabase.table("paper_history")
-            .select("ticker,entry_price,pnl_pct,exit_reason,closed_at")
+            .select("ticker,entry_price,pnl_pct,profit_amt,exit_reason,closed_at")
             .gte("closed_at", IMPROVEMENT_CUTOFFS["whipsaw_fix"])
             .order("closed_at", desc=False)
             .execute
@@ -133,14 +137,60 @@ async def compute_improvement_status(supabase) -> dict:
     trades = hist_res.data or []
     decisions = dec_res.data or []
 
+    def _calc_metrics_expectancy(sub_trades: list) -> tuple[float, float, float]:
+        """sub_trades 리스트에서 포지션 승률(pos_wr), Expectancy($E), Sortino Ratio 산출"""
+        if not sub_trades:
+            return 0.0, 0.0, 0.0
+
+        # 포지션 그룹핑 (Scale-Out 이중 렌더링 방지)
+        grouped = {}
+        total_profit = 0.0
+        total_loss = 0.0
+        wins = 0
+        losses = 0
+        loss_amts = []
+
+        for t in sub_trades:
+            ticker = t.get("ticker", "unknown")
+            entry_price = float(t.get("entry_price") or 0.0)
+            profit = float(t.get("profit_amt") or 0.0)
+
+            key = f"{ticker}_{round(entry_price, 4)}"
+            bucket = grouped.setdefault(key, {"total_pnl": 0.0})
+            bucket["total_pnl"] += profit
+
+            if profit > 0:
+                wins += 1
+                total_profit += profit
+            elif profit < 0:
+                losses += 1
+                total_loss += abs(profit)
+                loss_amts.append(abs(profit))
+
+        pos_trades = len(grouped)
+        pos_wins = sum(1 for b in grouped.values() if b["total_pnl"] > 0)
+        pos_wr = (pos_wins / pos_trades * 100.0) if pos_trades > 0 else 0.0
+
+        n_all = len(sub_trades)
+        prob_win = wins / n_all if n_all > 0 else 0.0
+        avg_w = total_profit / wins if wins > 0 else 0.0
+        avg_l = total_loss / losses if losses > 0 else 0.0
+        expectancy = (prob_win * avg_w) - ((1.0 - prob_win) * avg_l)
+
+        net_pnl = total_profit - total_loss
+        avg_pnl = net_pnl / n_all if n_all > 0 else 0.0
+        downside_std = float(np.std(loss_amts)) if loss_amts else 0.0
+        sortino = (
+            (avg_pnl / downside_std)
+            if downside_std > 0
+            else (99.0 if avg_pnl > 0 else 0.0)
+        )
+
+        return round(pos_wr, 1), round(expectancy, 2), round(sortino, 2)
+
     items = []
 
     # ── 1. Forward Return 로거 ───────────────────────────────────────────────
-    # 아래 DNA≥80/<80 2구간 미니 분석은 대시보드용 요약이다. DNA_Score 5구간 세분화,
-    # RSI/RVOL 상관계수(Pearson/Spearman), EXECUTED vs BLOCKED 비교 등 더 깊은
-    # 오프라인 분석은 scripts/run_feature_significance.py 참고 — 그 스크립트의
-    # "0. checklist.py 대시보드 미니 분석과 대사" 섹션이 아래 계산식을 그대로
-    # 재현해 두 숫자가 어긋나지 않는지 매 실행마다 자동으로 검증한다.
     fwd_adopted = IMPROVEMENT_ADOPTED["forward_return_logger"]
     fwd_rows = [
         d for d in decisions if d["ts"] >= IMPROVEMENT_CUTOFFS["forward_return_logger"]
@@ -157,7 +207,6 @@ async def compute_improvement_status(supabase) -> dict:
     ]
     note = "신호 발생 30분/60분 후 실제 수익률을 자동 축적 중"
     if n_collected >= 10:
-        # 표본이 어느 정도 쌓이면 DNA≥80 신호의 실제 예측력 미리보기 제공
         high = [
             d["forward_return_30m"]
             for d in collected
@@ -198,18 +247,25 @@ async def compute_improvement_status(supabase) -> dict:
         and t["closed_at"] >= IMPROVEMENT_CUTOFFS["atr_stop"]
     ]
     n_ts = len(ts_exits_after)
-    ts_wins = sum(1 for t in ts_exits_after if (t.get("pnl_pct") or 0) > 0)
-    ts_win_rate = (ts_wins / n_ts * 100) if n_ts else 0.0
+    pos_wr_ts, exp_ts, sortino_ts = _calc_metrics_expectancy(ts_exits_after)
 
     metrics = [{"label": "도입 후 TS 청산", "value": f"{n_ts} / {TARGET_TS_EXITS}건"}]
     if n_ts > 0:
-        metrics.append({"label": "도입 후 TS 승률", "value": f"{ts_win_rate:.1f}%"})
+        metrics.append(
+            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_ts:.1f}%"}
+        )
+        metrics.append({"label": "거래당 기대값 ($E)", "value": f"{exp_ts:+.2f}$"})
+        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_ts:.2f}"})
     metrics.append(
         {"label": "개선 전 TS 승률(기준선)", "value": f"{BASELINE_TS_WIN_RATE}%"}
     )
 
     atr_status = _verify_status(
-        n_ts, TARGET_TS_EXITS, ts_win_rate, BASELINE_TS_WIN_RATE
+        n_ts,
+        TARGET_TS_EXITS,
+        pos_wr_ts,
+        BASELINE_TS_WIN_RATE,
+        expectancy=exp_ts if n_ts >= 5 else None,
     )
     items.append(
         {
@@ -219,7 +275,7 @@ async def compute_improvement_status(supabase) -> dict:
             "status": atr_status,
             "progress_pct": min(round(n_ts / TARGET_TS_EXITS * 100), 100),
             "metrics": metrics,
-            "note": "변동성 맞춤 스탑이 TS 청산 승률(기준 8.8%)을 올리는지 검증 중",
+            "note": "변동성 맞춤 스탑이 TS 청산 승률 및 Expectancy($E>0) 손실 방지를 달성하는지 검증 중",
         }
     )
 
@@ -230,11 +286,9 @@ async def compute_improvement_status(supabase) -> dict:
         for t in trades
         if (t.get("entry_price") or 0) <= 1.0
         and t["closed_at"] >= IMPROVEMENT_CUTOFFS["penny_gate_80"]
-        and t["exit_reason"] != "Scale-Out 50%"
     ]
     n_penny = len(penny_trades)
-    penny_wins = sum(1 for t in penny_trades if (t.get("pnl_pct") or 0) > 0)
-    penny_win_rate = (penny_wins / n_penny * 100) if n_penny else 0.0
+    pos_wr_penny, exp_penny, sortino_penny = _calc_metrics_expectancy(penny_trades)
     blocked_penny = sum(
         1
         for d in decisions
@@ -246,8 +300,10 @@ async def compute_improvement_status(supabase) -> dict:
     ]
     if n_penny > 0:
         metrics.append(
-            {"label": "도입 후 페니 승률", "value": f"{penny_win_rate:.1f}%"}
+            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_penny:.1f}%"}
         )
+        metrics.append({"label": "거래당 기대값 ($E)", "value": f"{exp_penny:+.2f}$"})
+        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_penny:.2f}"})
     metrics.append(
         {"label": "게이트 차단된 저품질 신호", "value": f"{blocked_penny}건"}
     )
@@ -256,7 +312,11 @@ async def compute_improvement_status(supabase) -> dict:
     )
 
     penny_status = _verify_status(
-        n_penny, TARGET_PENNY_TRADES, penny_win_rate, BASELINE_PENNY_WIN_RATE
+        n_penny,
+        TARGET_PENNY_TRADES,
+        pos_wr_penny,
+        BASELINE_PENNY_WIN_RATE,
+        expectancy=exp_penny if n_penny >= 5 else None,
     )
     items.append(
         {
@@ -266,7 +326,7 @@ async def compute_improvement_status(supabase) -> dict:
             "status": penny_status,
             "progress_pct": min(round(n_penny / TARGET_PENNY_TRADES * 100), 100),
             "metrics": metrics,
-            "note": "DNA 65~79 저품질 페니 신호 차단이 승률(기준 13.5%)을 올리는지 검증 중",
+            "note": "DNA 65~79 저품질 페니 신호 차단이 승률 및 Expectancy($E>0) 손실 방지를 달성하는지 검증 중",
         }
     )
 
@@ -319,11 +379,9 @@ async def compute_improvement_status(supabase) -> dict:
         t
         for t in trades
         if t["closed_at"] >= IMPROVEMENT_CUTOFFS["extension_guard_tighten"]
-        and t["exit_reason"] != "Scale-Out 50%"
     ]
     n_ext = len(ext_trades)
-    ext_wins = sum(1 for t in ext_trades if (t.get("pnl_pct") or 0) > 0)
-    ext_win_rate = (ext_wins / n_ext * 100) if n_ext else 0.0
+    pos_wr_ext, exp_ext, sortino_ext = _calc_metrics_expectancy(ext_trades)
 
     metrics = [
         {
@@ -332,13 +390,21 @@ async def compute_improvement_status(supabase) -> dict:
         }
     ]
     if n_ext > 0:
-        metrics.append({"label": "도입 후 전체 승률", "value": f"{ext_win_rate:.1f}%"})
+        metrics.append(
+            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_ext:.1f}%"}
+        )
+        metrics.append({"label": "거래당 기대값 ($E)", "value": f"{exp_ext:+.2f}$"})
+        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_ext:.2f}"})
     metrics.append(
         {"label": "개선 전 전체 승률(기준선)", "value": f"{BASELINE_OVERALL_WIN_RATE}%"}
     )
 
     ext_status = _verify_status(
-        n_ext, TARGET_EXTENSION_TRADES, ext_win_rate, BASELINE_OVERALL_WIN_RATE
+        n_ext,
+        TARGET_EXTENSION_TRADES,
+        pos_wr_ext,
+        BASELINE_OVERALL_WIN_RATE,
+        expectancy=exp_ext if n_ext >= 5 else None,
     )
     items.append(
         {
@@ -348,8 +414,7 @@ async def compute_improvement_status(supabase) -> dict:
             "status": ext_status,
             "progress_pct": min(round(n_ext / TARGET_EXTENSION_TRADES * 100), 100),
             "metrics": metrics,
-            "note": "고점(과열·직전 급등 구간) 매수 비중을 줄여 전체 승률(기준 19.2%)을 올리는지 "
-            "검증 중 — REGRESSED 2회 연속 확정 시 두 가드 모두 비활성화(자동 롤백)",
+            "note": "고점 매수 비중을 줄여 포지션 승률 및 Expectancy($E>0) 손실 방지를 달성하는지 검증 중",
         }
     )
 

@@ -267,11 +267,14 @@ export default function ReportsPage() {
 
               {/* Data Table */}
               <div className="sfdc-card overflow-hidden flex flex-col">
-                <div className="p-8 pb-4">
+                <div className="p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <h2 className="text-sm font-black text-slate-900 flex items-center gap-2 uppercase tracking-widest">
                     <CalendarDays className="w-4 h-4 text-slate-400" />
-                    기간별 성과 상세
+                    기간별 퀀트 성과 상세 (Quant Precise Metrics)
                   </h2>
+                  <span className="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-100 px-3 py-1 rounded-full uppercase tracking-wider">
+                    Kelly Formula & Risk-Adjusted Matched
+                  </span>
                 </div>
                 <div className="overflow-x-auto px-8 pb-8">
                   <table className="w-full text-left border-collapse">
@@ -281,17 +284,35 @@ export default function ReportsPage() {
                         <th className="py-4 px-2 lg:px-3 text-right">순이익</th>
                         <th className="py-4 px-2 lg:px-3 text-right">총수익</th>
                         <th className="py-4 px-2 lg:px-3 text-right">총손실</th>
-                        <th className="py-4 px-2 lg:px-3 text-right">승률</th>
-                        <th className="py-4 px-2 lg:px-3 text-right">총 거래</th>
+                        <th className="py-4 px-2 lg:px-3 text-right" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률)">
+                          체결승률(포지션)
+                        </th>
+                        <th className="py-4 px-2 lg:px-3 text-right" title="체결 건수 (괄호: 포지션 라운드트립 수)">
+                          총거래(포지션)
+                        </th>
                         <th className="py-4 px-2 lg:px-3 text-right">평균 PnL</th>
-                        <th className="py-4 px-2 lg:px-3 text-right">Profit Factor</th>
-                        <th className="py-4 px-2 lg:px-3 text-right">MDD</th>
+                        <th className="py-4 px-2 lg:px-3 text-right text-indigo-600 font-black" title="1회 거래당 퀀트 기대값 (Expectancy E = p*W - (1-p)*L)">
+                          기대값($E)
+                        </th>
+                        <th className="py-4 px-2 lg:px-3 text-right text-indigo-600 font-black" title="손실 변동성만 반영한 Sortino Ratio">
+                          Sortino
+                        </th>
+                        <th className="py-4 px-2 lg:px-3 text-right">PF</th>
+                        <th className="py-4 px-2 lg:px-3 text-right" title="기간 내 Local Peak 대비 MDD (괄호: 계좌 전체 MDD)">
+                          기간(계좌) MDD
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                       {reportData.map((row, idx) => {
                         // 자바스크립트 부동소수점 오류 방지 (예: -0.00 표시 방지)
                         const netProfit = Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
+                        const posWinRate = row.pos_win_rate ?? row.win_rate;
+                        const posTrades = row.pos_total_trades ?? row.total_trades;
+                        const expectancy = row.expectancy ?? 0.0;
+                        const sortino = row.sortino_ratio ?? 0.0;
+                        const periodMdd = row.period_mdd ?? row.mdd;
+
                         return (
                           <tr key={idx} className="group hover:bg-slate-50/50 transition-all duration-300 whitespace-nowrap">
                             <td className="py-3 px-2 lg:px-3">
@@ -317,15 +338,32 @@ export default function ReportsPage() {
                               <span className={clsx(row.win_rate >= 50 ? "text-slate-800" : "text-rose-600")}>
                                 {row.win_rate.toFixed(1)}%
                               </span>
+                              <span className="text-[11px] text-indigo-500 font-bold ml-1">
+                                ({posWinRate.toFixed(1)}%)
+                              </span>
                             </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-500">{row.total_trades}</td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-500">
+                              {row.total_trades} <span className="text-[11px] text-slate-400 font-normal">({posTrades}건)</span>
+                            </td>
                             <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold">
                               <span className={clsx(row.avg_pnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
                                 {row.avg_pnl >= 0 ? '+' : '-'}${Math.abs(row.avg_pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                             </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-800">{row.profit_factor.toFixed(2)}</td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-rose-600">{row.mdd.toFixed(1)}%</td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-bold">
+                              <span className={clsx(expectancy > 0 ? "text-indigo-600" : expectancy < 0 ? "text-rose-600" : "text-slate-400")}>
+                                {expectancy >= 0 ? '+' : '-'}${Math.abs(expectancy).toFixed(2)}
+                              </span>
+                            </td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-bold text-indigo-600">
+                              {sortino >= 99.0 ? '99.0+' : sortino.toFixed(2)}
+                            </td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-800">
+                              {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
+                            </td>
+                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-rose-600">
+                              {periodMdd.toFixed(1)}% <span className="text-[11px] text-slate-400 font-normal">({row.mdd.toFixed(1)}%)</span>
+                            </td>
                           </tr>
                         );
                       })}

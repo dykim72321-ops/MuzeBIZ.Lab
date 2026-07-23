@@ -25,7 +25,7 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold }: P
   let gradient = 'from-emerald-400 to-emerald-300';
   let glow = 'rgba(16,185,129,0.4)';
   let label = 'SAFE';
-  let labelColor = 'text-slate-500';
+  let labelColor = 'text-emerald-600';
 
   if (isBreached) {
     gradient = 'from-rose-700 to-rose-600';
@@ -55,15 +55,15 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold }: P
 
   return (
     <div className="w-full flex flex-col gap-1.5 mt-1" title={`Health: ${healthPct.toFixed(1)}% / 스탑까지 ${distanceToStopPct.toFixed(1)}%`}>
-      <div className="flex justify-between items-center text-[10px] font-mono font-black px-0.5">
+      <div className="flex justify-between items-center text-xs font-mono font-black px-0.5">
         <span className={clsx('uppercase tracking-widest transition-colors duration-500', labelColor)}>
           {label}
         </span>
-        <span className={clsx('transition-colors duration-500', isBreached ? 'text-rose-700 font-bold' : isDanger ? 'text-rose-600' : 'text-slate-700')}>
+        <span className={clsx('transition-colors duration-500', isBreached ? 'text-rose-700 font-black' : isDanger ? 'text-rose-600 font-black' : 'text-slate-700')}>
           {displayText}
         </span>
       </div>
-      <div className="w-full h-1 bg-slate-200/60 rounded-full relative">
+      <div className="w-full h-1.5 bg-slate-200/70 rounded-full relative">
         <motion.div
           initial={{ width: 0 }}
           animate={{
