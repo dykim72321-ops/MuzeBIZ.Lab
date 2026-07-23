@@ -638,12 +638,34 @@ class PaperTradingManager:
                 print(
                     f"❌ [_close_position 오류 발생] {ticker}: {close_err} — 상태({original_status}) 복구"
                 )
-                await asyncio.to_thread(
-                    self.supabase.table("paper_positions")
-                    .update({"status": original_status})
-                    .eq("ticker", ticker)
-                    .execute
-                )
+                # 현금 미반영 상태이므로 실주문도 제출되지 않았을 가능성이 높다. 되돌리기
+                # 자체가 실패하면 CLOSING에 영구 고착(CHAI 2026-07-22 사고)되므로 1회 재시도한다.
+                # 재시도도 실패하면 CLOSING을 유지 — TS Sweeper가 Alpaca 실제 포지션을 대조해
+                # 안전하게 처리한다(브로커에 물량이 남아있으면 클레임 해제, 없으면 DB만 정리).
+                try:
+                    await asyncio.to_thread(
+                        self.supabase.table("paper_positions")
+                        .update({"status": original_status})
+                        .eq("ticker", ticker)
+                        .execute
+                    )
+                except Exception as revert_err:
+                    print(
+                        f"🚨 [_close_position 되돌리기 실패] {ticker}: {revert_err} — "
+                        f"CLOSING 상태 유지, TS Sweeper 자동 복구에 위임"
+                    )
+                    try:
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_positions")
+                            .update({"status": original_status})
+                            .eq("ticker", ticker)
+                            .execute
+                        )
+                    except Exception as revert_retry_err:
+                        print(
+                            f"🚨 [_close_position 되돌리기 재시도 실패] {ticker}: {revert_retry_err} "
+                            f"— CLOSING 고착, Sweeper 위임"
+                        )
             raise close_err
 
     REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간

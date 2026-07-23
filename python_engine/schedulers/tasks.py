@@ -394,6 +394,53 @@ async def position_ts_sweeper():
 
                     _last_closing_recovery[stuck_ticker] = time.time()
 
+                    # CLOSING이 곧 "현금 반영됨"을 의미하지 않는다 — 청산 클레임은 실주문
+                    # 제출보다 먼저 걸리므로, 주문 제출 자체가 실패(또는 실패 후 되돌리기마저
+                    # 실패)한 채로 CLOSING에 고착될 수 있다 (CHAI 2026-07-22 사고: Alpaca에
+                    # 매도 주문이 전혀 제출되지 않은 채 24시간+ 고착). Alpaca 실제 포지션을
+                    # 조회해 진짜로 체결됐는지부터 확인한다.
+                    broker_still_holds = None
+                    trading_client = app_state.trading_client
+                    if trading_client is not None:
+                        try:
+                            await asyncio.to_thread(
+                                trading_client.get_open_position, stuck_ticker
+                            )
+                            broker_still_holds = True
+                        except Exception:
+                            # Alpaca가 "포지션 없음"(404)을 포함해 어떤 예외를 던지든,
+                            # 포지션이 없다는 뜻으로 간주 — 실제 청산이 이미 완료된 것.
+                            broker_still_holds = False
+
+                    if broker_still_holds:
+                        # 아직 브로커에 실제 물량이 남아있다 — DB 기록을 조작(fabricate)해
+                        # 청산된 것처럼 만들면 실제 리스크를 추적 불가능하게 만든다. 대신
+                        # 클레임을 풀어 다음 정상 TS 체크가 실제 매도 주문을 재시도하게 한다.
+                        try:
+                            await asyncio.to_thread(
+                                app_state.supabase.table("paper_positions")
+                                .update(
+                                    {
+                                        "status": (
+                                            "SCALE_OUT"
+                                            if stuck_pos.get("is_scaled_out")
+                                            else "HOLD"
+                                        )
+                                    }
+                                )
+                                .eq("ticker", stuck_ticker)
+                                .execute
+                            )
+                            print(
+                                f"🔧 [TS Sweeper] {stuck_ticker} CLOSING 고착 — Alpaca에 실물량 "
+                                f"확인됨(주문 미제출로 추정), 클레임 해제해 재청산 유도"
+                            )
+                        except Exception as unlock_err:
+                            print(
+                                f"⚠️ [TS Sweeper] {stuck_ticker} CLOSING 클레임 해제 실패: {unlock_err}"
+                            )
+                        continue  # 이 티커는 DB 기록 재구성 없이 다음 정상 TS 체크에 위임
+
                     # 실주문(Alpaca)은 이미 체결됐으므로 현금도 이미 반영됐을 가능성이 높다.
                     # paper_history 기록 + paper_positions 삭제만 재시도한다.
                     entry_price = float(stuck_pos.get("entry_price") or 0)
