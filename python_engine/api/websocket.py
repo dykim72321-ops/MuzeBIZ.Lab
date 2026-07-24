@@ -12,3 +12,6 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         app_state.manager.disconnect(websocket)
+    except Exception as e:
+        print(f"⚠️ [WebSocket] Unexpected disconnect: {e}")
+        app_state.manager.disconnect(websocket)
