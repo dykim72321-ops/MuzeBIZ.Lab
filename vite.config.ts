@@ -31,7 +31,7 @@ export default defineConfig({
             if (err.message.includes('ECONNRESET')) return;
             console.log('proxy error', err);
           });
-          proxy.on('proxyReqWs', (proxyReq, req, socket, options, head) => {
+          proxy.on('proxyReqWs', (_proxyReq, _req, socket, _options, _head) => {
             socket.on('error', (err) => {
               if (err.message.includes('ECONNRESET')) return;
               console.error('ws proxy socket error:', err);
