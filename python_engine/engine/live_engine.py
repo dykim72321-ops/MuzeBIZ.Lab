@@ -40,7 +40,11 @@ FILL_POLL_TIMEOUT_SEC = 5.0
 PENNY_FILL_POLL_TIMEOUT_SEC = 12.0
 FILL_POLL_INTERVAL_SEC = 0.5
 
-_FILLED_STATUSES = {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}
+# PARTIALLY_FILLED는 종결 상태가 아니다 — 부분체결 시점의 filled_qty를 최종
+# 수량으로 기록하면 이후 마저 체결된 잔여 물량이 DB 어디에도 안 잡히는 유령
+# 보유가 된다 (2026-07-24 GSUN 사고: 8,606주 체결 중 부분체결 5,992주만 기록,
+# 잔여 2,614주가 TS 감시 없이 방치되어 -49.9%까지 하락).
+_FILLED_STATUSES = {OrderStatus.FILLED}
 _DEAD_STATUSES = {
     OrderStatus.CANCELED,
     OrderStatus.EXPIRED,
@@ -112,6 +116,7 @@ class LiveTradingManager(PaperTradingManager):
         fallback_price: float,
         order_kind: str = "MARKET",
         limit_price: float | None = None,
+        close_all: bool = False,
     ) -> tuple[float, float] | None:
         """
         Alpaca 주문 제출 후 체결까지 확인 (시장가 또는 지정가).
@@ -128,6 +133,13 @@ class LiveTradingManager(PaperTradingManager):
         주문을 제출한다. 지정가 주문은 시장가와 달리 체결이 무기한 지연될 수 있으므로,
         타임아웃 시 시장가처럼 그대로 두지 않고 명시적으로 취소한다(이미 시장가 경로에서
         미체결 시 취소하는 로직을 재사용 — 아래 공통 폴링 분기 참고).
+
+        체결 확인은 FILLED(전량 체결)만 종결로 인정한다. 타임아웃 시점에 부분체결
+        상태면 잔여분을 취소하고 취소 확정 후의 실제 filled_qty만 반환한다 — 부분체결
+        수량을 기록하지 않으면 이후 마저 체결된 물량이 유령 보유가 된다(GSUN 2026-07-24).
+
+        close_all=True(전량 청산 매도 전용)이면 Alpaca 실보유가 요청 수량보다 많을 때
+        실보유 전체로 수량을 올려 잡아, 과거 미추적 부분체결 잔여분까지 함께 청산한다.
         """
         side_str = "BUY" if side == OrderSide.BUY else "SELL"
         self.last_order_fail_reason = None
@@ -190,6 +202,15 @@ class LiveTradingManager(PaperTradingManager):
                     print(
                         f"⚠️ [{ticker}] {side_str} 주문 수량 보정 — DB 수량({order_qty:.4f})이 "
                         f"Alpaca 실보유({actual_qty:.4f})보다 많아 보정됨"
+                    )
+                    order_qty = actual_qty
+                elif close_all and actual_qty > order_qty:
+                    # 전량 청산인데 실보유가 DB 수량보다 많다 — 과거 부분체결 미추적
+                    # 등으로 생긴 잔여 물량까지 이번 청산에서 함께 쓸어낸다. 그렇지
+                    # 않으면 DB 행 삭제 후 초과분이 TS 감시 없이 영구 방치된다.
+                    print(
+                        f"⚠️ [{ticker}] {side_str} 전량 청산 수량 보정 — Alpaca 실보유"
+                        f"({actual_qty:.4f})가 DB 수량({order_qty:.4f})보다 많아 전량 매도"
                     )
                     order_qty = actual_qty
 
@@ -287,42 +308,65 @@ class LiveTradingManager(PaperTradingManager):
                 elapsed += FILL_POLL_INTERVAL_SEC
                 order = await asyncio.to_thread(self.alpaca.get_order_by_id, order.id)
 
-            if order.status in _DEAD_STATUSES:
-                print(
-                    f"❌ [LIVE ORDER {order.status}] {ticker} {side_str} order_id={order.id}"
-                )
-                self.last_order_fail_reason = "REJECTED"
-                await self.webhook.send_alert(
-                    title=f"🚨 [LIVE ORDER {str(order.status).upper()}] {ticker}",
-                    description=f"주문이 체결되지 않았습니다 (order_id: `{order.id}`)",
-                    color=0xFF0000,
-                )
-                return None
-
             if order.status not in _FILLED_STATUSES:
-                # 타임아웃 내 체결 미확인 — 실거래 상태와 DB가 어긋날 수 있으므로
-                # 안전하게 실패로 취급해 DB 기록을 차단하고, 미체결 주문이 나중에
-                # 조용히 체결되어 로컬 DB에 안 잡히는 유령 실보유가 되지 않도록 취소한다.
-                print(
-                    f"⚠️ [LIVE ORDER UNCONFIRMED] {ticker} {side_str} "
-                    f"order_id={order.id} status={order.status} — 취소 시도"
-                )
-                self.last_order_fail_reason = "UNCONFIRMED"
-                try:
-                    await asyncio.to_thread(self.alpaca.cancel_order_by_id, order.id)
-                except Exception as cancel_err:
+                # 타임아웃(부분체결 포함) 또는 사망 상태 — 잔여 미체결분이 나중에
+                # 조용히 체결되어 DB에 안 잡히는 유령 실보유가 되지 않도록 먼저
+                # 취소한다. 취소 확정 후 재조회한 filled_qty가 곧 이 주문의 최종
+                # 체결 수량이다 — 0이면 실패, 0보다 크면 부분체결로 기록한다.
+                if order.status not in _DEAD_STATUSES:
+                    try:
+                        await asyncio.to_thread(
+                            self.alpaca.cancel_order_by_id, order.id
+                        )
+                    except Exception as cancel_err:
+                        print(
+                            f"⚠️ [LIVE ORDER 취소 실패] {ticker} order_id={order.id}: {cancel_err}"
+                        )
+                    # 취소 직전 추가 체결이 반영될 수 있으므로 종결 상태 확인까지
+                    # 짧게 폴링한 뒤의 filled_qty를 최종값으로 사용한다.
+                    cancel_elapsed = 0.0
+                    while (
+                        order.status not in _DEAD_STATUSES
+                        and order.status not in _FILLED_STATUSES
+                        and cancel_elapsed < 3.0
+                    ):
+                        await asyncio.sleep(FILL_POLL_INTERVAL_SEC)
+                        cancel_elapsed += FILL_POLL_INTERVAL_SEC
+                        order = await asyncio.to_thread(
+                            self.alpaca.get_order_by_id, order.id
+                        )
+
+                partial_qty = float(order.filled_qty or 0)
+                if partial_qty <= 0:
                     print(
-                        f"⚠️ [LIVE ORDER 취소 실패] {ticker} order_id={order.id}: {cancel_err}"
+                        f"❌ [LIVE ORDER {order.status}] {ticker} {side_str} "
+                        f"order_id={order.id} — 체결 0주"
                     )
+                    self.last_order_fail_reason = (
+                        "REJECTED" if order.status in _DEAD_STATUSES else "UNCONFIRMED"
+                    )
+                    await self.webhook.send_alert(
+                        title=f"🚨 [LIVE ORDER {str(order.status).upper()}] {ticker}",
+                        description=(
+                            f"주문이 체결되지 않았습니다 (order_id: `{order.id}`) — "
+                            f"잔여 주문은 취소 처리했습니다."
+                        ),
+                        color=0xFF0000,
+                    )
+                    return None
+                print(
+                    f"⚠️ [LIVE ORDER PARTIAL] {ticker} {side_str} "
+                    f"{partial_qty:.2f}/{order_qty:.2f}주만 체결 — 잔여분 취소, "
+                    f"실체결 수량만 기록 (order_id={order.id})"
+                )
                 await self.webhook.send_alert(
-                    title=f"⚠️ [LIVE ORDER 체결 미확인] {ticker}",
+                    title=f"⚠️ [부분체결] {ticker} {side_str}",
                     description=(
-                        f"{poll_timeout:.0f}초 내 체결 확인 실패해 주문 취소를 시도했습니다 "
-                        f"(order_id: `{order.id}`) — Alpaca에서 실제 상태를 반드시 확인하세요."
+                        f"{order_qty:.2f}주 중 {partial_qty:.2f}주만 체결되어 잔여분을 "
+                        f"취소했습니다 (order_id: `{order.id}`). DB에는 실체결 수량만 기록됩니다."
                     ),
                     color=0xE67E22,
                 )
-                return None
 
             filled_qty = float(order.filled_qty or order_qty)
             raw_fill_price = getattr(order, "filled_avg_price", None)
@@ -599,7 +643,11 @@ class LiveTradingManager(PaperTradingManager):
         self, ticker: str, qty: float, price: float, reason: str
     ) -> tuple[float, float] | None:
         print(f"🔴 [LIVE] SELL {ticker} {qty:.2f}주 @ ${price:.4f} ({reason})")
-        return await self._submit_alpaca_order(ticker, OrderSide.SELL, qty, price)
+        # Scale-Out(50% 부분매도)만 요청 수량 그대로 제출 — 나머지 사유(Trailing
+        # Stop/Time-Decay/EOD/수동/비상)는 전량 청산이므로 실보유 전체를 쓸어낸다.
+        return await self._submit_alpaca_order(
+            ticker, OrderSide.SELL, qty, price, close_all=(reason != "Scale-Out")
+        )
 
 
 # ── Trade Update 스트림 ───────────────────────────────────────────────────────
