@@ -66,8 +66,8 @@ export default function ReportsPage() {
     ? [...reportData]
         .sort((a, b) => a.period_label.localeCompare(b.period_label))
         .map(item => {
-          const netProfit = Math.round((item.gross_profit - item.gross_loss) * 100) / 100;
-          cumulative = Math.round((cumulative + netProfit) * 100) / 100;
+          const netProfit = item.alpaca_net_profit ?? Math.round((item.gross_profit - item.gross_loss) * 100) / 100;
+          cumulative = item.alpaca_cumulative ?? Math.round((cumulative + (item.alpaca_net_profit ?? Math.round((item.gross_profit - item.gross_loss) * 100) / 100)) * 100) / 100;
           return {
             period: item.period_label,
             winRate: item.win_rate,
@@ -266,105 +266,99 @@ export default function ReportsPage() {
               </div>
 
               {/* Data Table */}
-              <div className="sfdc-card overflow-hidden flex flex-col">
-                <div className="p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <h2 className="text-sm font-black text-slate-900 flex items-center gap-2 uppercase tracking-widest">
-                    <CalendarDays className="w-4 h-4 text-slate-400" />
-                    기간별 퀀트 성과 상세 (Quant Precise Metrics)
-                  </h2>
-                  <span className="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-100 px-3 py-1 rounded-full uppercase tracking-wider">
-                    Kelly Formula & Risk-Adjusted Matched
-                  </span>
+              <div className="sfdc-card overflow-hidden flex flex-col bg-white border border-slate-200/80 rounded-2xl shadow-sm">
+                {/* Header Section */}
+                <div className="p-5 px-6 md:px-8 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-50/40">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100/80 flex-shrink-0">
+                      <CalendarDays className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-2 uppercase">
+                        기간별 퀀트 성과 상세
+                      </h2>
+                      <p className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">QUANT PRECISE METRICS</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold bg-blue-50/80 text-blue-700 border border-blue-200/60 shadow-2xs" title="순이익 및 MDD는 Alpaca 계좌 실제 변동을 반영합니다">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                      ALPACA ACCOUNT HISTORY (PNL/MDD)
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold bg-indigo-50/80 text-indigo-700 border border-indigo-200/60 shadow-2xs">
+                      KELLY FORMULA & RISK-ADJUSTED MATCHED
+                    </span>
+                  </div>
                 </div>
 
-                {/* Desktop / Tablet View (≥ 768px) — 100% Unchanged original table */}
-                <div className="hidden md:block overflow-x-auto px-8 pb-8">
+                {/* Desktop / Tablet View (≥ 768px) */}
+                <div className="hidden md:block overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="text-[10px] font-black font-mono text-slate-400 uppercase tracking-widest whitespace-nowrap">
-                        <th className="py-4 px-2 lg:px-3">기간</th>
-                        <th className="py-4 px-2 lg:px-3 text-right">순이익</th>
-                        <th className="py-4 px-2 lg:px-3 text-right">총수익</th>
-                        <th className="py-4 px-2 lg:px-3 text-right">총손실</th>
-                        <th className="py-4 px-2 lg:px-3 text-right" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률)">
+                      <tr className="text-xs font-bold font-mono text-slate-500 uppercase tracking-wider border-b border-slate-200/80 bg-slate-50/80 whitespace-nowrap">
+                        <th className="py-3.5 px-6 w-[20%] text-left">기간</th>
+                        <th className="py-3.5 px-6 text-right w-[22%]">순이익</th>
+                        <th className="py-3.5 px-6 text-right w-[24%]" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률)">
                           체결승률(포지션)
                         </th>
-                        <th className="py-4 px-2 lg:px-3 text-right" title="체결 건수 (괄호: 포지션 라운드트립 수)">
-                          총거래(포지션)
-                        </th>
-                        <th className="py-4 px-2 lg:px-3 text-right">평균 PnL</th>
-                        <th className="py-4 px-2 lg:px-3 text-right text-indigo-600 font-black" title="1회 거래당 퀀트 기대값 (Expectancy E = p*W - (1-p)*L)">
-                          기대값($E)
-                        </th>
-                        <th className="py-4 px-2 lg:px-3 text-right text-indigo-600 font-black" title="손실 변동성만 반영한 Sortino Ratio">
-                          Sortino
-                        </th>
-                        <th className="py-4 px-2 lg:px-3 text-right">PF</th>
-                        <th className="py-4 px-2 lg:px-3 text-right" title="기간 내 Local Peak 대비 MDD (괄호: 계좌 전체 MDD)">
+                        <th className="py-3.5 px-6 text-right w-[14%]">PF</th>
+                        <th className="py-3.5 px-6 text-right w-[20%]" title="기간 내 Local Peak 대비 MDD (괄호: 계좌 전체 MDD)">
                           기간(계좌) MDD
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50">
+                    <tbody className="divide-y divide-slate-100">
                       {reportData.map((row, idx) => {
-                        // 자바스크립트 부동소수점 오류 방지 (예: -0.00 표시 방지)
-                        const netProfit = Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
+                        const netProfit = row.alpaca_net_profit ?? Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
                         const posWinRate = row.pos_win_rate ?? row.win_rate;
-                        const posTrades = row.pos_total_trades ?? row.total_trades;
-                        const expectancy = row.expectancy ?? 0.0;
-                        const sortino = row.sortino_ratio ?? 0.0;
-                        const periodMdd = row.period_mdd ?? row.mdd;
+                        const periodMdd = row.alpaca_period_mdd ?? row.period_mdd ?? row.mdd;
+                        const globalMdd = row.alpaca_mdd ?? row.mdd;
 
                         return (
-                          <tr key={idx} className="group hover:bg-slate-50/50 transition-all duration-300 whitespace-nowrap">
-                            <td className="py-3 px-2 lg:px-3">
-                              <div className="text-sm font-bold text-slate-800 tracking-tight">
+                          <tr key={idx} className="group odd:bg-white even:bg-slate-50/40 hover:bg-indigo-50/20 transition-colors duration-150 whitespace-nowrap">
+                            {/* 1. 기간 (Period) */}
+                            <td className="py-4 px-6 text-left">
+                              <span className="text-sm font-bold font-mono text-slate-800 tracking-tight">
                                 {row.period_label}
-                              </div>
+                              </span>
                             </td>
-                            <td className="py-3 px-2 lg:px-3 text-right">
+
+                            {/* 2. 순이익 (Net Profit) */}
+                            <td className="py-4 px-6 text-right">
                               <span className={clsx(
-                                "text-base font-bold tracking-tight",
+                                "text-base font-black font-mono tracking-tight",
                                 netProfit >= 0 ? "text-emerald-600" : "text-rose-600"
                               )}>
                                 {netProfit >= 0 ? '+' : '-'}${Math.abs(netProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                             </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-400 group-hover:text-emerald-500 transition-colors">
-                              +${row.gross_profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-400 group-hover:text-rose-500 transition-colors">
-                              -${row.gross_loss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold">
-                              <span className={clsx(row.win_rate >= 50 ? "text-slate-800" : "text-rose-600")}>
+
+                            {/* 3. 체결승률(포지션) (Win Rate) */}
+                            <td className="py-4 px-6 text-right font-mono">
+                              <span className={clsx("text-sm font-bold", row.win_rate >= 50 ? "text-slate-900" : "text-rose-600")}>
                                 {row.win_rate.toFixed(1)}%
                               </span>
-                              <span className="text-[11px] text-indigo-500 font-bold ml-1">
+                              <span className="text-xs font-semibold text-indigo-600 ml-1.5">
                                 ({posWinRate.toFixed(1)}%)
                               </span>
                             </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-500">
-                              {row.total_trades} <span className="text-[11px] text-slate-400 font-normal">({posTrades}건)</span>
-                            </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold">
-                              <span className={clsx(row.avg_pnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                                {row.avg_pnl >= 0 ? '+' : '-'}${Math.abs(row.avg_pnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+
+                            {/* 4. PF (Profit Factor) */}
+                            <td className="py-4 px-6 text-right font-mono">
+                              <span className={clsx("text-sm font-bold", row.profit_factor >= 1.0 ? "text-slate-900" : "text-slate-600")}>
+                                {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
                               </span>
                             </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-bold">
-                              <span className={clsx(expectancy > 0 ? "text-indigo-600" : expectancy < 0 ? "text-rose-600" : "text-slate-400")}>
-                                {expectancy >= 0 ? '+' : '-'}${Math.abs(expectancy).toFixed(2)}
+
+                            {/* 5. 기간(계좌) MDD */}
+                            <td className="py-4 px-6 text-right font-mono">
+                              <span className="text-sm font-bold text-rose-600">
+                                {periodMdd.toFixed(1)}%
                               </span>
-                            </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-bold text-indigo-600">
-                              {sortino >= 99.0 ? '99.0+' : sortino.toFixed(2)}
-                            </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-slate-800">
-                              {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
-                            </td>
-                            <td className="py-3 px-2 lg:px-3 text-right font-mono text-sm font-semibold text-rose-600">
-                              {periodMdd.toFixed(1)}% <span className="text-[11px] text-slate-400 font-normal">({row.mdd.toFixed(1)}%)</span>
+                              <span className="text-xs font-normal text-slate-400 ml-1.5">
+                                ({globalMdd.toFixed(1)}%)
+                              </span>
                             </td>
                           </tr>
                         );
@@ -373,54 +367,36 @@ export default function ReportsPage() {
                   </table>
                 </div>
 
-                {/* Mobile View (< 768px) — Touch-friendly Card List */}
-                <div className="block md:hidden px-6 pb-6 space-y-3">
+                {/* Mobile View (< 768px) */}
+                <div className="block md:hidden p-4 space-y-3">
                   {reportData.map((row, idx) => {
-                    const netProfit = Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
+                    const netProfit = row.alpaca_net_profit ?? Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
                     const posWinRate = row.pos_win_rate ?? row.win_rate;
-                    const posTrades = row.pos_total_trades ?? row.total_trades;
-                    const expectancy = row.expectancy ?? 0.0;
-                    const sortino = row.sortino_ratio ?? 0.0;
-                    const periodMdd = row.period_mdd ?? row.mdd;
+                    const periodMdd = row.alpaca_period_mdd ?? row.period_mdd ?? row.mdd;
+                    const globalMdd = row.alpaca_mdd ?? row.mdd;
 
                     return (
-                      <div key={idx} className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-3">
-                        <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                          <span className="font-bold text-slate-900 text-sm">{row.period_label}</span>
-                          <span className={clsx("text-base font-black tracking-tight", netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                      <div key={idx} className="p-4 bg-slate-50/70 border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
+                        <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/60">
+                          <span className="px-2.5 py-1 rounded bg-slate-200/70 font-bold font-mono text-slate-800 text-xs border border-slate-300/60">{row.period_label}</span>
+                          <span className={clsx("text-base font-extrabold font-mono tracking-tight", netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
                             {netProfit >= 0 ? '+' : '-'}${Math.abs(netProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2.5 text-xs">
+                        <div className="grid grid-cols-3 gap-2 text-xs">
                           <div>
-                            <span className="block text-[10px] font-bold text-slate-400 uppercase">체결승률(포지션)</span>
-                            <span className="font-mono font-semibold text-slate-800">{row.win_rate.toFixed(1)}% <span className="text-[10px] text-indigo-500 font-bold">({posWinRate.toFixed(1)}%)</span></span>
+                            <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">체결승률(포지션)</span>
+                            <span className="font-mono font-semibold text-slate-800">{row.win_rate.toFixed(1)}% <span className="text-[10px] text-indigo-600 font-bold">({posWinRate.toFixed(1)}%)</span></span>
                           </div>
                           <div>
-                            <span className="block text-[10px] font-bold text-slate-400 uppercase">총거래(포지션)</span>
-                            <span className="font-mono font-semibold text-slate-700">{row.total_trades}건 <span className="text-[10px] text-slate-400">({posTrades}건)</span></span>
-                          </div>
-                          <div>
-                            <span className="block text-[10px] font-bold text-indigo-500 uppercase">기대값 ($E)</span>
-                            <span className={clsx("font-mono font-black", expectancy >= 0 ? "text-indigo-600" : "text-rose-600")}>
-                              {expectancy >= 0 ? '+' : '-'}${Math.abs(expectancy).toFixed(2)}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="block text-[10px] font-bold text-indigo-500 uppercase">Sortino / PF</span>
+                            <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">PF</span>
                             <span className="font-mono font-semibold text-slate-800">
-                              {sortino >= 99.0 ? '99.0+' : sortino.toFixed(2)} / {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
+                              {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
                             </span>
                           </div>
                           <div>
-                            <span className="block text-[10px] font-bold text-slate-400 uppercase">평균 PnL</span>
-                            <span className={clsx("font-mono font-semibold", row.avg_pnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                              {row.avg_pnl >= 0 ? '+' : '-'}${Math.abs(row.avg_pnl).toFixed(2)}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="block text-[10px] font-bold text-rose-500 uppercase">MDD</span>
-                            <span className="font-mono font-semibold text-rose-600">{periodMdd.toFixed(1)}% <span className="text-[10px] text-slate-400">({row.mdd.toFixed(1)}%)</span></span>
+                            <span className="block text-[10px] font-bold text-rose-500 uppercase mb-0.5">MDD</span>
+                            <span className="font-mono font-semibold text-rose-600">{periodMdd.toFixed(1)}% <span className="text-[10px] text-slate-400">({globalMdd.toFixed(1)}%)</span></span>
                           </div>
                         </div>
                       </div>

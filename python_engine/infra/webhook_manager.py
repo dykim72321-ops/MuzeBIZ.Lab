@@ -46,6 +46,8 @@ class WebhookManager:
                     )
 
         target_url = self.dev_webhook_url if use_dev else self.webhook_url
+        if use_dev and not target_url:
+            target_url = self.webhook_url
 
         if not target_url:
             if not self.has_warned:

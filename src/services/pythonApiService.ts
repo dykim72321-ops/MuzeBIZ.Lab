@@ -96,6 +96,10 @@ export interface StrategyReportBucket {
   pos_total_trades?: number;
   gross_profit: number;
   gross_loss: number;
+  alpaca_net_profit?: number;
+  alpaca_cumulative?: number;
+  alpaca_mdd?: number;
+  alpaca_period_mdd?: number;
 }
 
 export interface StrategyReportsResponse {

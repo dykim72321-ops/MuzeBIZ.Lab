@@ -347,6 +347,61 @@ async def get_strategy_reports(period: str = "month"):
             else:
                 trades.append(t)
 
+        # ---------------------------------------------------------------------
+        # Alpaca History Fetch & Pre-compute before cutoff
+        # ---------------------------------------------------------------------
+        trading_client = app_state.trading_client
+        alpaca_points = []
+        base_value = INITIAL_CAPITAL
+        
+        if trading_client:
+            from alpaca.trading.requests import GetPortfolioHistoryRequest
+            try:
+                hist_req = GetPortfolioHistoryRequest(period="all", timeframe="1D")
+                alpaca_history = await asyncio.to_thread(
+                    trading_client.get_portfolio_history, hist_req
+                )
+                if alpaca_history.base_value:
+                    base_value = float(alpaca_history.base_value)
+                for i in range(len(alpaca_history.timestamp or [])):
+                    t_val = alpaca_history.timestamp[i]
+                    eq_val = alpaca_history.equity[i]
+                    if eq_val is None:
+                        continue
+                    ts = t_val if t_val < 1e11 else t_val / 1000.0
+                    dt_utc = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    dt_ny = dt_utc.astimezone(ny_tz)
+                    alpaca_points.append({"dt": dt_ny, "equity": float(eq_val)})
+            except Exception as e:
+                print(f"⚠️ Alpaca history fetch failed: {e}")
+
+        prev_equity = base_value
+        alpaca_global_max = base_value
+        alpaca_global_mdd = 0.0
+        alpaca_buckets = {}
+        
+        for pt in alpaca_points:
+            dt = pt["dt"]
+            if dt < cutoff_dt:
+                eq = pt["equity"]
+                prev_equity = eq
+                if eq > alpaca_global_max:
+                    alpaca_global_max = eq
+                elif alpaca_global_max > 0:
+                    dd = (eq - alpaca_global_max) / alpaca_global_max * 100.0
+                    if dd < alpaca_global_mdd:
+                        alpaca_global_mdd = dd
+            else:
+                if period == "day":
+                    label = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+                elif period == "week":
+                    iso_year, iso_week, _ = dt.isocalendar()
+                    label = f"{iso_year}-W{iso_week:02d}"
+                else:
+                    label = f"{dt.year:04d}-{dt.month:02d}"
+                alpaca_buckets.setdefault(label, []).append(pt["equity"])
+        # ---------------------------------------------------------------------
+
         buckets: dict[str, list] = {}
         min_dt = None
 
@@ -399,9 +454,43 @@ async def get_strategy_reports(period: str = "month"):
         for label in sorted(buckets.keys()):
             bucket_trades = buckets[label]
             stats = _compute_bucket_stats(bucket_trades, starting_equity=global_equity)
+            
+            # Alpaca Metrics calculation
+            eq_list = alpaca_buckets.get(label, [])
+            if eq_list:
+                last_equity = eq_list[-1]
+                alpaca_net_profit = last_equity - prev_equity
+                alpaca_cumulative = last_equity - base_value
+                
+                import numpy as np
+                curve = np.array([prev_equity] + eq_list)
+                running_max = np.maximum.accumulate(curve)
+                drawdowns = np.zeros_like(curve)
+                mask = running_max > 0
+                drawdowns[mask] = (curve[mask] - running_max[mask]) / running_max[mask] * 100.0
+                alpaca_period_mdd = float(np.min(drawdowns))
+                
+                for eq in eq_list:
+                    if eq > alpaca_global_max:
+                        alpaca_global_max = eq
+                    elif alpaca_global_max > 0:
+                        dd = (eq - alpaca_global_max) / alpaca_global_max * 100.0
+                        if dd < alpaca_global_mdd:
+                            alpaca_global_mdd = dd
+                            
+                prev_equity = last_equity
+            else:
+                alpaca_net_profit = 0.0
+                alpaca_cumulative = prev_equity - base_value
+                alpaca_period_mdd = 0.0
+
             bucket_list.append(
                 {
                     "period_label": label,
+                    "alpaca_net_profit": round(alpaca_net_profit, 2),
+                    "alpaca_cumulative": round(alpaca_cumulative, 2),
+                    "alpaca_period_mdd": round(alpaca_period_mdd, 2),
+                    "alpaca_mdd": round(alpaca_global_mdd, 2),
                     **stats,
                 }
             )
