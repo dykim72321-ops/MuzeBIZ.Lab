@@ -715,8 +715,16 @@ async def get_paper_history(limit: int = 30, api_key: str = Security(get_api_key
             .limit(limit)
             .execute
         )
+        # phantom position 사고 복구용 소급 기록 행은 실제 매매 판단 결과가 아니므로
+        # 승률/리스크 지표 집계에서 제외한다 — routers/strategy.py·routers/checklist.py와
+        # 동일 컨벤션 (2026-07-27: 이 엔드포인트만 누락되어 있던 것을 발견해 정합화).
+        filtered_data = [
+            item
+            for item in res.data
+            if not (item.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+        ]
         history = []
-        for item in res.data:
+        for item in filtered_data:
             pnl_pct = item.get("pnl_pct", 0)
             history.append(
                 {

@@ -87,7 +87,9 @@ def _dedup_signal_episodes(rows: list[dict], gap_minutes: int = 15) -> list[dict
         last_kept_dt: datetime | None = None
         for r in ticker_rows:
             ts_dt = datetime.fromisoformat(r["ts"].replace("Z", "+00:00"))
-            if last_kept_dt is None or (ts_dt - last_kept_dt) > timedelta(minutes=gap_minutes):
+            if last_kept_dt is None or (ts_dt - last_kept_dt) > timedelta(
+                minutes=gap_minutes
+            ):
                 kept.append(r)
                 last_kept_dt = ts_dt
     return kept
@@ -173,10 +175,17 @@ async def compute_improvement_status(supabase) -> dict:
     ]
     decisions = dec_res.data or []
 
-    def _calc_metrics_expectancy(sub_trades: list) -> tuple[float, float, float]:
-        """sub_trades 리스트에서 포지션 승률(pos_wr), Expectancy($E), Sortino Ratio 산출"""
+    def _calc_metrics_expectancy(sub_trades: list) -> tuple[float, float, float, int]:
+        """sub_trades 리스트에서 포지션 승률(pos_wr), Expectancy($E), Sortino Ratio,
+        포지션(라운드트립) 수를 산출.
+
+        네 번째 반환값(pos_trades)은 목표 진행률(n_ts/n_penny/n_ext/n_pullback)에도
+        써야 한다 — len(sub_trades)(원본 청산 행 수)를 그대로 쓰면 Scale-Out 이중
+        렌더링뿐 아니라, 부분체결 유령 보유 사고 복구로 같은 진입가의 청산이 두
+        행으로 쪼개진 잔재(SLGB/MED/CHAI, 2026-07-25 사고)까지 서로 다른 거래로
+        오집계돼 pos_wr 계산과 다른 기준의 n이 나온다 (2026-07-27)."""
         if not sub_trades:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0
 
         # 포지션 그룹핑 (Scale-Out 이중 렌더링 방지)
         grouped = {}
@@ -222,7 +231,7 @@ async def compute_improvement_status(supabase) -> dict:
             else (99.0 if avg_pnl > 0 else 0.0)
         )
 
-        return round(pos_wr, 1), round(expectancy, 2), round(sortino, 2)
+        return round(pos_wr, 1), round(expectancy, 2), round(sortino, 2), pos_trades
 
     items = []
 
@@ -239,7 +248,10 @@ async def compute_improvement_status(supabase) -> dict:
     ]
     n_collected = len(collected)
     metrics = [
-        {"label": "수집 표본(독립 사건)", "value": f"{n_collected} / {TARGET_FWD_SAMPLES}건"},
+        {
+            "label": "수집 표본(독립 사건)",
+            "value": f"{n_collected} / {TARGET_FWD_SAMPLES}건",
+        },
         {"label": "대기 중 신호", "value": f"{len(fwd_rows) - n_collected}건"},
         {
             "label": "원본 로그 행수(중복 포함)",
@@ -287,10 +299,13 @@ async def compute_improvement_status(supabase) -> dict:
         if t["exit_reason"] == "Trailing Stop"
         and t["closed_at"] >= IMPROVEMENT_CUTOFFS["atr_stop"]
     ]
-    n_ts = len(ts_exits_after)
-    pos_wr_ts, exp_ts, sortino_ts = _calc_metrics_expectancy(ts_exits_after)
+    pos_wr_ts, exp_ts, sortino_ts, n_ts = _calc_metrics_expectancy(ts_exits_after)
 
-    metrics = [{"label": "도입 후 TS 청산", "value": f"{n_ts} / {TARGET_TS_EXITS}건"}]
+    metrics = [
+        {"label": "도입 후 TS 청산(포지션)", "value": f"{n_ts} / {TARGET_TS_EXITS}건"}
+    ]
+    if len(ts_exits_after) != n_ts:
+        metrics.append({"label": "원본 청산 행수", "value": f"{len(ts_exits_after)}건"})
     if n_ts > 0:
         metrics.append(
             {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_ts:.1f}%"}
@@ -328,8 +343,9 @@ async def compute_improvement_status(supabase) -> dict:
         if (t.get("entry_price") or 0) <= 1.0
         and t["closed_at"] >= IMPROVEMENT_CUTOFFS["penny_gate_80"]
     ]
-    n_penny = len(penny_trades)
-    pos_wr_penny, exp_penny, sortino_penny = _calc_metrics_expectancy(penny_trades)
+    pos_wr_penny, exp_penny, sortino_penny, n_penny = _calc_metrics_expectancy(
+        penny_trades
+    )
     blocked_penny = sum(
         1
         for d in decisions
@@ -337,8 +353,13 @@ async def compute_improvement_status(supabase) -> dict:
     )
 
     metrics = [
-        {"label": "도입 후 페니 거래", "value": f"{n_penny} / {TARGET_PENNY_TRADES}건"}
+        {
+            "label": "도입 후 페니 거래(포지션)",
+            "value": f"{n_penny} / {TARGET_PENNY_TRADES}건",
+        }
     ]
+    if len(penny_trades) != n_penny:
+        metrics.append({"label": "원본 청산 행수", "value": f"{len(penny_trades)}건"})
     if n_penny > 0:
         metrics.append(
             {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_penny:.1f}%"}
@@ -421,15 +442,16 @@ async def compute_improvement_status(supabase) -> dict:
         for t in trades
         if t["closed_at"] >= IMPROVEMENT_CUTOFFS["extension_guard_tighten"]
     ]
-    n_ext = len(ext_trades)
-    pos_wr_ext, exp_ext, sortino_ext = _calc_metrics_expectancy(ext_trades)
+    pos_wr_ext, exp_ext, sortino_ext, n_ext = _calc_metrics_expectancy(ext_trades)
 
     metrics = [
         {
-            "label": "도입 후 신규 진입",
+            "label": "도입 후 신규 진입(포지션)",
             "value": f"{n_ext} / {TARGET_EXTENSION_TRADES}건",
         }
     ]
+    if len(ext_trades) != n_ext:
+        metrics.append({"label": "원본 청산 행수", "value": f"{len(ext_trades)}건"})
     if n_ext > 0:
         metrics.append(
             {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_ext:.1f}%"}
@@ -469,17 +491,20 @@ async def compute_improvement_status(supabase) -> dict:
     pullback_trades = [
         t for t in trades if t["closed_at"] >= IMPROVEMENT_CUTOFFS["pullback_entry"]
     ]
-    n_pullback = len(pullback_trades)
-    pos_wr_pullback, exp_pullback, sortino_pullback = _calc_metrics_expectancy(
-        pullback_trades
+    pos_wr_pullback, exp_pullback, sortino_pullback, n_pullback = (
+        _calc_metrics_expectancy(pullback_trades)
     )
 
     metrics = [
         {
-            "label": "도입 후 신규 진입",
+            "label": "도입 후 신규 진입(포지션)",
             "value": f"{n_pullback} / {TARGET_PULLBACK_TRADES}건",
         }
     ]
+    if len(pullback_trades) != n_pullback:
+        metrics.append(
+            {"label": "원본 청산 행수", "value": f"{len(pullback_trades)}건"}
+        )
     if n_pullback > 0:
         metrics.append(
             {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_pullback:.1f}%"}

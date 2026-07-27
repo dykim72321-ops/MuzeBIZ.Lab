@@ -353,9 +353,10 @@ async def get_strategy_reports(period: str = "month"):
         trading_client = app_state.trading_client
         alpaca_points = []
         base_value = INITIAL_CAPITAL
-        
+
         if trading_client:
             from alpaca.trading.requests import GetPortfolioHistoryRequest
+
             try:
                 hist_req = GetPortfolioHistoryRequest(period="all", timeframe="1D")
                 alpaca_history = await asyncio.to_thread(
@@ -379,7 +380,7 @@ async def get_strategy_reports(period: str = "month"):
         alpaca_global_max = base_value
         alpaca_global_mdd = 0.0
         alpaca_buckets = {}
-        
+
         for pt in alpaca_points:
             dt = pt["dt"]
             if dt < cutoff_dt:
@@ -454,22 +455,25 @@ async def get_strategy_reports(period: str = "month"):
         for label in sorted(buckets.keys()):
             bucket_trades = buckets[label]
             stats = _compute_bucket_stats(bucket_trades, starting_equity=global_equity)
-            
+
             # Alpaca Metrics calculation
             eq_list = alpaca_buckets.get(label, [])
             if eq_list:
                 last_equity = eq_list[-1]
                 alpaca_net_profit = last_equity - prev_equity
                 alpaca_cumulative = last_equity - base_value
-                
+
                 import numpy as np
+
                 curve = np.array([prev_equity] + eq_list)
                 running_max = np.maximum.accumulate(curve)
                 drawdowns = np.zeros_like(curve)
                 mask = running_max > 0
-                drawdowns[mask] = (curve[mask] - running_max[mask]) / running_max[mask] * 100.0
+                drawdowns[mask] = (
+                    (curve[mask] - running_max[mask]) / running_max[mask] * 100.0
+                )
                 alpaca_period_mdd = float(np.min(drawdowns))
-                
+
                 for eq in eq_list:
                     if eq > alpaca_global_max:
                         alpaca_global_max = eq
@@ -477,7 +481,7 @@ async def get_strategy_reports(period: str = "month"):
                         dd = (eq - alpaca_global_max) / alpaca_global_max * 100.0
                         if dd < alpaca_global_mdd:
                             alpaca_global_mdd = dd
-                            
+
                 prev_equity = last_equity
             else:
                 alpaca_net_profit = 0.0
