@@ -67,6 +67,32 @@ ROLLBACK_ACTIONABLE_ITEMS = {
 CONSECUTIVE_REGRESSED_THRESHOLD = 2
 
 
+def _dedup_signal_episodes(rows: list[dict], gap_minutes: int = 15) -> list[dict]:
+    """같은 종목이 짧은 간격으로 반복 기록된 행을 하나의 시장 사건(episode)으로 묶어
+    가장 이른 행 하나만 남긴다.
+
+    예: 종목이 급락하며 COOLDOWN_ACTIVE 게이트에 10분 간격으로 계속 걸리면
+    engine_decisions에 같은 사건이 수십 행 쌓인다 — forward_return_30m도 거의
+    동일한 가격 궤적을 반영하므로 서로 독립 표본이 아니다. 이걸 그대로 세면
+    "표본 100건 달성" 같은 진행률·평균값이 실제 독립 신호 수보다 부풀려진다
+    (2026-07-27: GSUN 크래시 1건이 10행으로 중복 집계돼 forward_return_logger
+    항목이 VERIFIED로 오판정된 사례에서 발견)."""
+    by_ticker: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_ticker[r["ticker"]].append(r)
+
+    kept: list[dict] = []
+    for ticker_rows in by_ticker.values():
+        ticker_rows.sort(key=lambda r: r["ts"])
+        last_kept_dt: datetime | None = None
+        for r in ticker_rows:
+            ts_dt = datetime.fromisoformat(r["ts"].replace("Z", "+00:00"))
+            if last_kept_dt is None or (ts_dt - last_kept_dt) > timedelta(minutes=gap_minutes):
+                kept.append(r)
+                last_kept_dt = ts_dt
+    return kept
+
+
 def _verify_status(
     n: int, target: int, metric: float, baseline: float, expectancy: float | None = None
 ) -> str:
@@ -129,7 +155,7 @@ async def compute_improvement_status(supabase) -> dict:
         asyncio.to_thread(
             supabase.table("engine_decisions")
             .select(
-                "gate,outcome,dna_score,price,note,forward_return_30m,forward_30m_checked,ts"
+                "ticker,gate,outcome,dna_score,price,note,forward_return_30m,forward_30m_checked,ts"
             )
             .gte("ts", IMPROVEMENT_CUTOFFS["penny_gate_80"])
             .order("ts", desc=False)
@@ -202,9 +228,10 @@ async def compute_improvement_status(supabase) -> dict:
 
     # ── 1. Forward Return 로거 ───────────────────────────────────────────────
     fwd_adopted = IMPROVEMENT_ADOPTED["forward_return_logger"]
-    fwd_rows = [
+    fwd_rows_raw = [
         d for d in decisions if d["ts"] >= IMPROVEMENT_CUTOFFS["forward_return_logger"]
     ]
+    fwd_rows = _dedup_signal_episodes(fwd_rows_raw)
     collected = [
         d
         for d in fwd_rows
@@ -212,8 +239,12 @@ async def compute_improvement_status(supabase) -> dict:
     ]
     n_collected = len(collected)
     metrics = [
-        {"label": "수집 표본", "value": f"{n_collected} / {TARGET_FWD_SAMPLES}건"},
+        {"label": "수집 표본(독립 사건)", "value": f"{n_collected} / {TARGET_FWD_SAMPLES}건"},
         {"label": "대기 중 신호", "value": f"{len(fwd_rows) - n_collected}건"},
+        {
+            "label": "원본 로그 행수(중복 포함)",
+            "value": f"{len(fwd_rows_raw)}건",
+        },
     ]
     note = "신호 발생 30분/60분 후 실제 수익률을 자동 축적 중"
     if n_collected >= 10:
