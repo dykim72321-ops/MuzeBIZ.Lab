@@ -9,18 +9,8 @@ _nyse_calendar = mcal.get_calendar("NYSE")
 _holiday_cache: dict = {}
 
 
-def is_market_hours(ref_dt=None) -> bool:
-    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00 및 휴장일 체크). DST 자동 처리.
-
-    ref_dt: 바 타임스탬프(tz-aware). None이면 현재 벽시계로 판단.
-            warm_up 재생 등 과거 바를 처리할 때 반드시 바 시간을 전달해야
-            장외 시간 기준이 바 시간이 아닌 현재 시각으로 판단되는 버그를 방지한다.
-    """
-    if ref_dt is not None:
-        now_et = ref_dt.astimezone(ZoneInfo("America/New_York"))
-    else:
-        now_et = datetime.now(ZoneInfo("America/New_York"))
-
+def _is_trading_day(now_et: datetime) -> bool:
+    """평일이면서 NYSE 휴장일이 아닌 날인지 (요일·캘린더만 체크, 시간대는 무관)."""
     if now_et.weekday() >= 5:
         return False
 
@@ -33,11 +23,48 @@ def is_market_hours(ref_dt=None) -> bool:
             print(f"⚠️ [Calendar] Failed to fetch schedule for {date_str}: {e}")
             _holiday_cache[date_str] = True
 
-    if not _holiday_cache[date_str]:
+    return _holiday_cache[date_str]
+
+
+def is_market_hours(ref_dt=None) -> bool:
+    """US 시장 개장 여부 (ET 기준 평일 09:30~16:00 및 휴장일 체크). DST 자동 처리.
+
+    ref_dt: 바 타임스탬프(tz-aware). None이면 현재 벽시계로 판단.
+            warm_up 재생 등 과거 바를 처리할 때 반드시 바 시간을 전달해야
+            장외 시간 기준이 바 시간이 아닌 현재 시각으로 판단되는 버그를 방지한다.
+    """
+    if ref_dt is not None:
+        now_et = ref_dt.astimezone(ZoneInfo("America/New_York"))
+    else:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+
+    if not _is_trading_day(now_et):
         return False
 
     open_min = 9 * 60 + 30
     close_min = 16 * 60
+    cur_min = now_et.hour * 60 + now_et.minute
+    return open_min <= cur_min < close_min
+
+
+def is_extended_market_hours(ref_dt=None) -> bool:
+    """프리마켓·애프터마켓 포함 확장 거래시간 여부 (ET 기준 평일 04:00~20:00).
+
+    보유 포지션의 트레일링 스탑 안전망(position_ts_sweeper)처럼 정규장 외
+    시간에도 급락 감시가 필요한 용도로 사용한다. 정규장(is_market_hours)보다
+    넓은 창이지만, 심야(20:00~04:00 ET)는 Alpaca 체결 데이터 자체가 희박해
+    여전히 커버하지 않는다.
+    """
+    if ref_dt is not None:
+        now_et = ref_dt.astimezone(ZoneInfo("America/New_York"))
+    else:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+
+    if not _is_trading_day(now_et):
+        return False
+
+    open_min = 4 * 60
+    close_min = 20 * 60
     cur_min = now_et.hour * 60 + now_et.minute
     return open_min <= cur_min < close_min
 

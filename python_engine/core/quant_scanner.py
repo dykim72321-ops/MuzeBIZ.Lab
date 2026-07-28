@@ -22,9 +22,15 @@ from services.quant_engine import (
 from utils.utils import is_market_hours
 from market.alpaca_stream import start_alpaca_stream, _stop_current_stream
 
-# ── Quant Scan 상수 ($100 이하 일반 주식 퀀트 스캔) ──────────────────────────
-# Paper Engine 자체의 페니 파라미터(PENNY_*)는 paper_engine.py에 유지됨
-SCAN_MAX_PRICE = 100.0
+# ── Quant Scan 상수 ($1 초과 ~ $50 이하 종목만 스캔) ──────────────────────────
+# 2026-07-28: $1 이하 페니는 낙폭이 지나치게 커서(GSUN·SLGB·INUV·CHAI 등 사고
+# 이력이 페니에 집중) 관심종목 스캐닝·자동등록 대상에서 완전히 제외. $50 초과도
+# 함께 제외해 스캔 대상을 장기 보유 모드(engine/paper_engine.py LONG_TERM_*)가
+# 커버하는 범위와 정확히 일치시킨다. Paper Engine 자체의 페니 파라미터(PENNY_*)는
+# 이 변경 이전에 매수된 레거시 포지션의 청산 로직 유지를 위해 paper_engine.py에
+# 그대로 남아있다 — 새 페니 진입 자체가 더 이상 발생하지 않을 뿐이다.
+SCAN_MIN_PRICE = 1.0  # 이 값 이하는 스캔 제외 (페니)
+SCAN_MAX_PRICE = 50.0  # 이 값 초과는 스캔 제외
 SCAN_DATA_LOOKBACK = "2mo"
 SCAN_TOP_N = 10
 
@@ -59,7 +65,7 @@ async def run_quant_scan_internal(
     max_price: float = SCAN_MAX_PRICE, top_n: int = SCAN_TOP_N
 ) -> dict:
     """
-    퀀트 스캔 핵심 로직 ($100 이하 일반 주식) — HTTP 엔드포인트와 자동 스케줄러 양쪽에서 호출.
+    퀀트 스캔 핵심 로직 ($1 초과 ~ $50 이하 종목) — HTTP 엔드포인트와 자동 스케줄러 양쪽에서 호출.
     완료 시 app_state.last_penny_scan_at, app_state.penny_scan_results_cache 갱신.
     """
     import re as _re
@@ -174,7 +180,10 @@ async def run_quant_scan_internal(
                         continue
                     price = float(bar.close)
                     volume = float(bar.volume)
-                    if 0.01 < price <= max_price and (price * volume) > 200000:
+                    if (
+                        SCAN_MIN_PRICE < price <= max_price
+                        and (price * volume) > 200000
+                    ):
                         candidates.append((sym, price * volume))
 
             candidates_by_ticker = {t: v for t, v in candidates}
@@ -229,14 +238,16 @@ async def run_quant_scan_internal(
                     tk = yf.Ticker(sym)
                     info = await asyncio.to_thread(lambda t=tk: t.fast_info)
                     price = getattr(info, "last_price", None)
-                    if price and 0.01 < price <= max_price:
+                    if price and SCAN_MIN_PRICE < price <= max_price:
                         scan_tickers.append(sym)
                 except Exception:
                     continue
     except Exception as e:
         print(f"❌ [Scan] Universe collection error: {e}")
 
-    print(f"📡 [Scan] Found {len(scan_tickers)} stocks under ${max_price}")
+    print(
+        f"📡 [Scan] Found {len(scan_tickers)} stocks in (${SCAN_MIN_PRICE}, ${max_price}]"
+    )
 
     if supabase and scan_tickers:
         try:

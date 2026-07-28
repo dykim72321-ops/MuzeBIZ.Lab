@@ -13,7 +13,7 @@ from app.state import app_state
 from routers import checklist
 from core.quant_scanner import run_quant_scan_internal, SCAN_INTERVAL_SECONDS
 from market.alpaca_stream import start_alpaca_stream, _stop_current_stream
-from utils.utils import is_market_hours
+from utils.utils import is_extended_market_hours, is_market_hours
 
 
 async def mtf_cache_scheduler():
@@ -307,6 +307,12 @@ async def position_ts_sweeper():
     TS 상향(트레일링)·Scale-Out·Time-Decay·EOD는 여전히 1분봉 경로
     (process_signal) 담당이므로 여기서는 ts_threshold/highest_price를 건드리지
     않는다. ARM 해제 상태에서도 실행된다 (TS 청산은 손실 확대 방지 우선 원칙).
+
+    정규장(is_market_hours)이 아닌 확장 거래시간(is_extended_market_hours,
+    04:00~20:00 ET)을 게이트로 사용한다 — 1분봉 스트림은 정규장에만 도는데
+    이 스위퍼까지 정규장 전용이면 프리마켓/애프터마켓 갭다운을 감시할 경로가
+    전혀 없어진다 (GSUN 2026-07-28 사고: TS $0.3958 대비 현재가 $0.1828까지
+    프리마켓에서 무방비로 폭락, 09:30 정규장 재개까지 청산 시도 자체가 없었음).
     """
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
@@ -351,7 +357,7 @@ async def position_ts_sweeper():
                 client is None
                 or not app_state.supabase
                 or engine is None
-                or not is_market_hours()
+                or not is_extended_market_hours()
             ):
                 await asyncio.sleep(60)
                 continue
@@ -583,7 +589,10 @@ async def position_ts_sweeper():
                     continue
 
             now_et = datetime.now(ZoneInfo("America/New_York"))
-            is_eod = now_et.time() >= dtime(15, 30)
+            # 게이트가 확장 거래시간(04:00~20:00 ET)까지 넓어졌다고 EOD 강제청산까지
+            # 따라 넓어지면 안 된다 — 원래 의도(정규장 마감 직전 리스크 헷지)를
+            # 벗어나 애프터마켓 저유동성 가격에 강제 체결되는 부작용을 막는다.
+            is_eod = dtime(15, 30) <= now_et.time() < dtime(16, 0)
 
             for pos in positions:
                 # 종목 하나의 처리 중 예외(예: 필드 누락·네트워크 오류)가 나머지

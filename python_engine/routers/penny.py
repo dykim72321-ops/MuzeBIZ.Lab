@@ -2,7 +2,7 @@
 routers/penny.py — /api/penny/* 엔드포인트
 
 퀀트 스캔 내부 로직(run_quant_scan_internal)은 core/quant_scanner.py에 정의되어 있으며
-이 라우터는 HTTP 엔드포인트만 담당한다. ($100 이하 일반주식 스캔)
+이 라우터는 HTTP 엔드포인트만 담당한다. ($1 초과 ~ $50 이하 종목 스캔)
 """
 
 from datetime import datetime
@@ -13,12 +13,18 @@ from pydantic import BaseModel
 
 from api.deps import get_api_key
 from app.state import app_state
-from core.quant_scanner import run_quant_scan_internal, SCAN_INTERVAL_SECONDS
+from core.quant_scanner import (
+    run_quant_scan_internal,
+    SCAN_INTERVAL_SECONDS,
+    SCAN_MAX_PRICE,
+)
 
 router = APIRouter(prefix="/api/quant", tags=["quant-scan"])
 
 # ── 상수 ────────────────────────────────────────────────────────────────────
-SCAN_MAX_PRICE = 100.0
+# SCAN_MAX_PRICE는 core/quant_scanner.py에서 가져온다 — 예전엔 이 파일에 별도로
+# 100.0을 하드코딩해 core 쪽 상수가 바뀌어도 요청 기본값이 따라가지 못하는
+# 불일치가 있었다 (2026-07-28 발견·수정).
 SCAN_TOP_N = 5
 
 
@@ -32,7 +38,7 @@ async def quant_scan(
     req: PennyScanRequest = Body(PennyScanRequest()),
     _api_key: str = Security(get_api_key),
 ):
-    """수동 퀀트 스캔 트리거 ($100 이하 일반주식 — 내부 로직은 run_quant_scan_internal 사용)"""
+    """수동 퀀트 스캔 트리거 ($1 초과 ~ $50 이하 종목 — 내부 로직은 run_quant_scan_internal 사용)"""
     return await run_quant_scan_internal(max_price=req.max_price, top_n=req.top_n)
 
 

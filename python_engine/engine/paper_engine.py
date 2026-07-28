@@ -39,6 +39,14 @@ PENNY_SCALE_OUT_PROFIT = 0.10  # 1차 매도 수익률 기준 (+10% OR RSI>65)
 PENNY_TIGHT_TS_PCT = 0.95  # Scale-Out 후 잔여 물량 TS: highest × 95% (-5%)
 SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 유예
 
+# ── 장기 보유 모드 (진입가 $1 초과 ~ $50 이하 전용, 2026-07-28) ──────────────
+# 사용자 요청: $1 이하 페니는 낙폭이 너무 커서 제외하고, $1~$50 구간은 상승
+# 추세를 최대한 길게 태운다 — Scale-Out/Time-Decay/EOD 강제청산 없이 최고가
+# 대비 -5% 트레일링 스탑만 자동 방어선으로 둔다. 익절(수익 실현)은 자동화하지
+# 않고 사용자가 기존 수동 매도(청산) 버튼으로 직접 결정한다.
+LONG_TERM_MAX_PRICE = 50.0
+LONG_TERM_TS_TRAIL_PCT = 0.95  # 최고가 추종 TS: highest × 95% (-5%). 진입 시점(highest=entry)에도 동일 폭 적용
+
 # ── 오버트레이딩(Whipsaw) 방지 파라미터 ──────────────────────────────────────
 MAX_DAILY_TRADES_PER_TICKER = (
     2  # 종목당 하루 신규 진입(라운드트립) 최대 횟수 — Scale-Out 부분청산은 제외
@@ -120,7 +128,11 @@ ENTRY_STOP_ATR_CLAMP_HIGH = 1.5  # 고정 % 대비 최대 폭 배수
 
 
 def _compute_entry_stop_pct(
-    entry_price: float, atr: float, is_penny: bool, atr_stop_enabled: bool = True
+    entry_price: float,
+    atr: float,
+    is_penny: bool,
+    atr_stop_enabled: bool = True,
+    is_long_term: bool = False,
 ) -> float:
     """진입 시점 ATR로 초기 스탑 거리(0~1, 예: 0.12 = -12%)를 계산.
 
@@ -131,7 +143,13 @@ def _compute_entry_stop_pct(
 
     atr_stop_enabled=False면 개선 검증 트래커의 자동 롤백으로 ATR 기반 스탑이
     비활성화된 상태 — 항상 고정 %만 반환한다 (checklist.evaluate_improvement_rollback 참고).
+
+    is_long_term=True(진입가 $1~$50)면 ATR·클램프와 무관하게 항상 고정 -5%를
+    반환한다 — 이후 매 봉 트레일링 폭(LONG_TERM_TS_TRAIL_PCT)과 진입 시점부터
+    동일해야 "최고가 대비 -5%" 규칙이 일관되게 유지된다.
     """
+    if is_long_term:
+        return 1.0 - LONG_TERM_TS_TRAIL_PCT
     fixed_pct = 1.0 - (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
     if not atr_stop_enabled or atr <= 0 or entry_price <= 0:
         return fixed_pct
@@ -1108,6 +1126,7 @@ class PaperTradingManager:
                 is_scaled_out = pos["is_scaled_out"]
                 ts_threshold = pos["ts_threshold"]
                 is_penny = entry_price <= PENNY_MAX_PRICE
+                is_long_term = PENNY_MAX_PRICE < entry_price <= LONG_TERM_MAX_PRICE
                 entry_stop_pct = pos.get(
                     "entry_stop_pct"
                 )  # 레거시 포지션은 None → 고정 % 폴백
@@ -1115,6 +1134,10 @@ class PaperTradingManager:
                 # A-0. EOD 강제 청산 최우선 처리 (Scale-Out보다 앞에 위치 — 동시 발동 시 EOD 우선)
                 # 수익 포지션(현재가 > 진입가)은 익일 홀딩 — 승자를 일찍 자르지 않음
                 if signal_type == "SELL" and strength == "EOD_FORCE":
+                    if is_long_term:
+                        # 장기 보유 모드 — EOD 강제청산 대상에서 제외 (오버나이트/
+                        # 장기 홀딩이 의도된 동작. 하락 방어는 TS(-5% 트레일링)가 전담)
+                        return
                     unrealized_pnl_pct = (price / entry_price - 1) * 100
                     if (
                         unrealized_pnl_pct > 5.0
@@ -1149,7 +1172,9 @@ class PaperTradingManager:
                 # A-1. Time-Decay Exit
                 # 조건: Scale-Out 미완료 & 진입 후 일정 시간 경과 & ±2% 횡보 구간
                 # Scale-Out 완료 포지션은 이미 수익 확보 단계이므로 TS가 단독 관리 — Time-Decay 스킵
-                if not is_scaled_out and pos.get("created_at"):
+                # 장기 보유 모드는 방향성 상실을 이유로 슬롯을 반납하지 않는다 — 사용자가
+                # 직접 청산을 결정할 때까지 보유가 기본값
+                if not is_scaled_out and not is_long_term and pos.get("created_at"):
                     try:
                         now_utc = datetime.now(timezone.utc)
                         created_at_dt = datetime.fromisoformat(
@@ -1209,15 +1234,21 @@ class PaperTradingManager:
                 # 이전에는 atr<=0 분기에서만 페니 본전 락인(PENNY_BREAKEVEN_TRIGGER)을 체크했는데,
                 # 실전에서는 atr>0이 상시 공급되므로 그 분기가 사실상 죽은 코드였다 — 통합으로 해결.
                 if not is_scaled_out:
-                    effective_atr = atr if atr > 0 else (entry_price * 0.02)
-                    ts_threshold = update_reversible_trailing_stop(
-                        entry_price,
-                        highest_price,
-                        effective_atr,
-                        smoothed_er,
-                        is_penny,
-                        entry_stop_pct,
-                    )
+                    if is_long_term:
+                        # 장기 보유 모드: ATR/ER 무관, 최고가 대비 고정 -5% 트레일링만
+                        # 사용한다. highest_price가 이미 단조 증가이므로 이 값 자체가
+                        # 항상 비가역(monotonic)이다.
+                        ts_threshold = highest_price * LONG_TERM_TS_TRAIL_PCT
+                    else:
+                        effective_atr = atr if atr > 0 else (entry_price * 0.02)
+                        ts_threshold = update_reversible_trailing_stop(
+                            entry_price,
+                            highest_price,
+                            effective_atr,
+                            smoothed_er,
+                            is_penny,
+                            entry_stop_pct,
+                        )
                 else:
                     # Scale-Out 후 물량: 이익 보전을 위해 TS_TRAIL_PCT로 타이트하게 조이거나 본절 유지
                     if atr > 0:
@@ -1249,6 +1280,7 @@ class PaperTradingManager:
                 if (
                     scale_trigger
                     and not is_scaled_out
+                    and not is_long_term
                     and is_armed
                     and (price * (1.0 - sell_slip) > entry_price)
                 ):
@@ -1556,10 +1588,21 @@ class PaperTradingManager:
                     price, is_buy=True, is_penny=is_penny_signal
                 )
                 est_units = buy_budget / est_fill_price
+                # 장기 보유 모드 판정: 진입가가 페니 상한($1)을 넘고 $50 이하인 경우.
+                # is_penny_signal은 price(신호가) 기준이지만 실제 체결가(est_fill_price)로
+                # 재판정한다 — 슬리피지로 체결가가 경계를 넘나드는 극단적 케이스까지
+                # entry_stop_pct 계산과 동일 기준을 쓰기 위함.
+                is_long_term_signal = (
+                    PENNY_MAX_PRICE < est_fill_price <= LONG_TERM_MAX_PRICE
+                )
                 # ATR 기반 초기 스탑 폭 — 진입 시점에 1회 계산해 고정한다(_compute_entry_stop_pct
                 # 참고). atr<=0(데이터 부족)이면 기존 고정 %와 동일한 값으로 폴백된다.
                 entry_stop_pct = _compute_entry_stop_pct(
-                    est_fill_price, atr, is_penny_signal, self.atr_stop_enabled
+                    est_fill_price,
+                    atr,
+                    is_penny_signal,
+                    self.atr_stop_enabled,
+                    is_long_term_signal,
                 )
 
                 # 원자적 진입 클레임: paper_positions.ticker는 UNIQUE 제약이므로, 실주문
@@ -1677,12 +1720,17 @@ class PaperTradingManager:
 
                 slip_pct = (fill_price / price - 1) * 100
                 report_line = f"\n💡 {ai_report}" if ai_report else ""
+                stop_desc = (
+                    "-5% (장기보유, 최고가 트레일링)"
+                    if is_long_term_signal
+                    else ("-15%" if is_penny_signal else "-10%")
+                )
                 await self.webhook.send_alert(
                     title=f"🚀 [PAPER BUY] {ticker}",
                     description=(
                         f"시장가: ${price:.4f} → 체결가: ${fill_price:.4f} (슬리피지 {slip_pct:+.2f}%)\n"
                         f"수량: {units:.2f}주 | DNA: {dna_score:.0f} | 매수금액: ${buy_budget:.2f}\n"
-                        f"손절선: ${ts_threshold:.4f} ({'-15%' if is_penny_signal else '-10%'}) | 비중: {effective_fraction*100:.1f}%{report_line}"
+                        f"손절선: ${ts_threshold:.4f} ({stop_desc}) | 비중: {effective_fraction*100:.1f}%{report_line}"
                     ),
                     color=0x2ECC71,
                 )

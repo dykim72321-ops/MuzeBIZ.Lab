@@ -8,7 +8,7 @@ main.py — FastAPI 앱 조립 + 핵심 Pulse Engine 로직
   - ConnectionManager / TickerDataState 정의
   - is_market_hours() / calculate_advanced_signals() / calculate_dna_score() 등 공유 유틸
   - run_pulse_engine() — 1분봉 신호 엔진 (WebSocket + DB + Discord 연동)
-  - run_quant_scan_internal() — 퀀트 스캔 핵심 로직 ($100 이하 일반주식)
+  - run_quant_scan_internal() — 퀀트 스캔 핵심 로직 ($1 초과 ~ $50 이하 종목)
   - on_minute_bar_closed() — Alpaca 1분봉 콜백
   - start_alpaca_stream() / start_rest_polling() — 스트리밍 데몬
   - startup_event() / run_startup_sequence() — 앱 시작 시퀀스
@@ -328,7 +328,10 @@ async def run_startup_sequence():
 
     # 0b. 페이퍼 트레이딩 계좌 초기화
     if app_state.paper_engine:
-        await app_state.paper_engine.initialize_account()
+        try:
+            await app_state.paper_engine.initialize_account()
+        except Exception as e:
+            print(f"⚠️ [Startup] Could not initialize paper account: {e}")
 
     # 0c. 기존 HOLD 포지션을 _held_tickers에 로드
     if supabase:

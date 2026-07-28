@@ -77,11 +77,14 @@ supabase functions deploy
            - Discord ✅/🛑 알림
 ```
 
-### Penny Lab 파이프라인 ($1 이하 전용)
+### Penny Lab 파이프라인 ($1 초과 ~ $50 이하, 2026-07-28부로 스캔 범위 변경 — 하위 "장기 보유 모드 도입" 참고)
+
+**2026-07-28: $1 이하 페니 종목은 스캐닝·watchlist 자동등록 대상에서 완전히 제외됨.** 원인: GSUN/SLGB/INUV/CHAI 등 최악의 손실 사고가 페니 종목에 집중됐던 이력(하위 "과거 수정된 버그" 다수 참고) — 이제 신규 페니 진입 자체가 발생하지 않는다. `PENNY_MAX_PRICE`/`PENNY_TS_*` 등 `paper_engine.py`의 페니 파라미터는 이 변경 이전에 매수된 레거시 포지션의 청산 로직 유지 목적으로만 코드에 남아있다. $50 초과 종목도 함께 스캔 대상에서 제외됨(엔드포인트 이름 `/api/penny/scan`·테이블명 `penny_universe_pool` 등은 레거시 명칭 그대로 유지, 실제 스캔 범위와 무관).
 
 ```
 [1] POST /api/penny/scan
     - Alpaca 스크리너(most-actives/movers)로 당일 모멘텀 후보 조회 + 전체 유니버스(~10,150개) 배치 스냅샷(11요청)으로 가격·달러볼륨 필터 (2026-07-17: 무작위 500개 샘플링 방식 폐기 — 이하 "과거 수정된 버그" 참고)
+    - 가격 필터: `SCAN_MIN_PRICE`($1) 초과 ~ `SCAN_MAX_PRICE`($50) 이하만 통과 (2026-07-28, `core/quant_scanner.py`)
     - yfinance 2개월 일봉 → RSI/MACD/ADX/RVOL → DNA 점수
         │
         ▼
@@ -91,8 +94,8 @@ supabase functions deploy
         │
         ▼
 [3] STRONG BUY 신호 → paper_engine.process_signal()
-    - 진입가 ≤ $1이면 페니 파라미터 자동 전환 (is_penny = entry_price ≤ 1.0)
-    - 초기 TS: -15% (일반: -10%)
+    - 진입가가 $1 초과 ~ $50 이하이면 장기 보유 파라미터 자동 전환 (is_long_term, 하위 "장기 보유 모드 도입" 참고)
+    - 초기 TS: -5% (장기 보유 모드 고정값)
     - MomentumValidator 인터셉터: RVOL < 1.5 또는 현재가 < 15분봉 20 EMA → 차단
         │
         ▼
@@ -189,14 +192,14 @@ FastAPI 앱 생성·라우터 include·시작/종료 시퀀스(`startup_event`/`
 |---|---|---|
 | **Edge Function 스캐너** | `supabase/functions/run-quant-scanner/index.ts` | 수동 또는 스케줄 |
 | **Pulse Engine 스캐너** | `python_engine/core/pulse.py → run_pulse_engine()` | Alpaca 1분봉 실시간 |
-| **Penny 스캐너** | `python_engine/core/quant_scanner.py → run_quant_scan_internal()` | 자동(30분, `SCAN_INTERVAL_SECONDS`) + 수동(POST /api/penny/scan) |
+| **Penny 스캐너** (레거시 명칭, 실제로는 $1~$50 스캐너) | `python_engine/core/quant_scanner.py → run_quant_scan_internal()` | 자동(30분, `SCAN_INTERVAL_SECONDS`) + 수동(POST /api/penny/scan) |
 
 ### DNA 점수 기준
 
 ```
-Tier-1 (STRONG BUY) → DNA ≥ 80          일반 종목
-Tier-2 (BUY)        → DNA ≥ 75 + RVOL > 1.5  일반 종목
-Tier-Penny (STRONG BUY) → DNA ≥ 65      페니 종목 ($1 이하)
+Tier-1 (STRONG BUY) → DNA ≥ 80          $1~$50 종목
+Tier-2 (BUY)        → DNA ≥ 75 + RVOL > 1.5  $1~$50 종목
+Tier-Penny (STRONG BUY) → DNA ≥ 65      (2026-07-28부로 신규 스캔 대상 아님 — 레거시 포지션 청산 로직에만 잔존)
 HOLD 시그널  → DNA 60
 SELL 시그널  → DNA 40
 ```
@@ -256,6 +259,15 @@ PENNY_TIGHT_TS_PCT     = 0.95  # Scale-Out 후 잔여 물량 TS -5%
 
 `is_penny` 판정: `entry_price <= PENNY_MAX_PRICE` — **현재가 기준이 아닌 진입가 기준**이므로 보유 중 주가가 $1 이상으로 오르더라도 페니 파라미터 유지.
 
+### 장기 보유 모드 전용 상수 (`paper_engine.py` 상단, 2026-07-28)
+
+```python
+LONG_TERM_MAX_PRICE    = 50.0  # 진입가가 PENNY_MAX_PRICE($1) 초과 ~ 이 값 이하이면 장기 보유 파라미터 자동 전환
+LONG_TERM_TS_TRAIL_PCT = 0.95  # 최고가 추종 TS -5% (진입 시점부터 동일 폭 — ATR/브레이크이븐락인 없음)
+```
+
+`is_long_term` 판정: `PENNY_MAX_PRICE < entry_price <= LONG_TERM_MAX_PRICE` (진입가 기준, 페니와 동일하게 파생 컬럼 없이 매 호출 시 계산). 진입은 기존 DNA 게이트(일반 75)로 완전 자동, 매도는 최고가 대비 -5% 트레일링 스탑 단 하나만 자동이고 그 외 자동 청산(Scale-Out/Time-Decay/EOD 강제청산)은 전부 스킵 — 사용자가 기존 수동 매도(청산) 버튼으로 익절 시점을 직접 결정하는 것이 의도된 설계. 새 매수 버튼은 없음(기존 자동매수 그대로). **2026-07-28부로 스캐너(`core/quant_scanner.py`)가 $1 이하 페니·$50 초과 종목을 아예 스캔·watchlist 등록 대상에서 제외**하므로, 신규 진입은 사실상 전부 이 장기 보유 모드로만 발생한다 — 페니/일반(구 ATR 트레일링) 경로는 그 이전에 이미 매수된 레거시 포지션이 청산될 때까지만 코드에 남아있는 하위호환 경로다.
+
 ### Scale-Out 조건 (`process_signal()`)
 
 ```python
@@ -270,11 +282,11 @@ scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SC
 
 매 1분봉 데이터가 들어올 때마다 다음 순서로 검증한다:
 1. **신규 진입**: 현재 포지션이 없고, 보유 중인 종목 수가 20개(MAX_CONCURRENT_POSITIONS) 미만이며, 투입 자본이 계좌의 75%(MAX_CONCENTRATION_PCT) 미만일 때 진입. 페니 주식은 DNA≥65, 일반 주식은 DNA≥75 필요 (quant_engine.py의 tier_penny/tier2 기준과 정합). 포지션 수·집중도·예산 산정·진입 클레임 INSERT는 `_entry_lock`으로 직렬화되어 서로 다른 티커의 동시 신호가 상한을 초과해 진입하는 경합을 막는다.
-2. **Time-Decay Exit**: Scale-Out 미완료 포지션 한정. 일반 60분·페니 90분 경과 & 수익률 ±2% 이내(횡보)면 청산. 오버나이트 홀딩은 당일 09:30 ET 기준으로 경과 시간 리셋.
-3. **EOD 청산**: 15:30 ET 기준 수익률이 +5% 이하면 강제 청산 (오버나잇 리스크 헷지).
-4. **TS 업데이트**: 최고가 갱신 시 `Highest - k×ATR` 또는 고정 % 방식으로 스탑 상향.
-5. **Scale-Out 발동**: 1차 조건 도달 시 보유 수량의 50% 매도 후 3분간 TS 발동 쿨다운.
-6. **TS 청산**: 현재가가 `ts_threshold` 밑으로 내려가면 잔여 물량 전량 청산.
+2. **Time-Decay Exit**: Scale-Out 미완료 포지션 한정. 일반 60분·페니 90분 경과 & 수익률 ±2% 이내(횡보)면 청산. 오버나이트 홀딩은 당일 09:30 ET 기준으로 경과 시간 리셋. **장기 보유 모드(`is_long_term`)는 스킵**.
+3. **EOD 청산**: 15:30 ET 기준 수익률이 +5% 이하면 강제 청산 (오버나잇 리스크 헷지). **장기 보유 모드는 스킵** — 오버나이트/장기 홀딩이 의도된 동작.
+4. **TS 업데이트**: 최고가 갱신 시 `Highest - k×ATR` 또는 고정 % 방식으로 스탑 상향. **장기 보유 모드는 `highest_price × LONG_TERM_TS_TRAIL_PCT`(-5%) 고정 트레일링만 사용** — ATR·브레이크이븐 락인 없음.
+5. **Scale-Out 발동**: 1차 조건 도달 시 보유 수량의 50% 매도 후 3분간 TS 발동 쿨다운. **장기 보유 모드는 스킵** — 자동 익절 없이 전량 보유, 사용자가 수동 매도로 직접 결정.
+6. **TS 청산**: 현재가가 `ts_threshold` 밑으로 내려가면 잔여 물량 전량 청산. 장기 보유 모드에서도 이 단계는 그대로 적용되는 유일한 자동 매도 경로.
 
 ### watchlist 동기화 메서드
 
@@ -535,3 +547,4 @@ NEXAR_CLIENT_SECRET
 | 개선 검증 트래커의 "Forward Return 로거" 항목이 실제 독립 표본보다 훨씬 많은 표본을 수집한 것으로 오판정(VERIFIED)해 신뢰도를 과장 표시 | `routers/checklist.py` | `compute_improvement_status()`가 `engine_decisions` 원본 행을 그대로 세어 표본 수를 산정 — 같은 종목이 짧은 간격으로 반복 게이트 차단되면(예: GSUN 크래시 중 `COOLDOWN_ACTIVE`가 15:15~15:42 사이 10회 연속 기록) 하나의 시장 사건이 여러 행으로 중복 집계됨. 127건(원본)이 실제로는 독립 종목 13개뿐이었는데도 목표(100건) 초과로 VERIFIED 판정되고 DNA≥80 평균 30m 수익률(-9.32%)도 이 중복에 왜곡됨 | `_dedup_signal_episodes()` 추가 — 같은 티커가 15분 이내 재등장하면 같은 사건으로 묶어 최초 행만 표본으로 인정. 적용 후 127행→48건(독립 사건)으로 정정되어 상태가 VERIFIED→COLLECTING으로 바뀜. "원본 로그 행수(중복 포함)" 메트릭을 별도로 남겨 두 숫자를 함께 확인 가능하게 함 (2026-07-27) |
 | Risk Analytics 패널이 phantom position 사고 소급 기록 행을 실제 거래로 집계 | `routers/broker.py` | `get_paper_history()`(`/api/broker/paper/history`)가 `paper_history`를 필터 없이 반환 — `routers/strategy.py`·`routers/checklist.py`는 이미 "Manual Sell (Backfilled" 행을 제외하는데 이 엔드포인트만 누락되어 있었음. 이 엔드포인트가 `RiskAnalyticsPanel`(Win/Loss Ratio·Avg Win/Loss·MDD 폴백)과 대시보드 승률·거래건수 표시의 데이터 원천이라, 부분체결 유령 보유 소급 기록 4건(CHAI/MED/SLGB/INUV)이 실거래처럼 집계됨(현재는 n=200 중 4건이라 승률 영향 0.11%p로 미미하나, 같은 사고 재발 시 왜곡 확대 가능) | `strategy.py`/`checklist.py`와 동일하게 `Manual Sell (Backfilled`로 시작하는 행 제외 필터 추가 (2026-07-27) |
 | 개선 검증 트래커의 목표 진행률(n_ts/n_penny/n_ext/n_pullback)이 포지션 승률(pos_wr) 계산과 다른 기준(원본 청산 행수)을 사용 | `routers/checklist.py` | `_calc_metrics_expectancy()`는 Scale-Out 이중 집계 방지를 위해 ticker+진입가로 포지션 그룹핑해 `pos_wr`을 계산하지만, 호출부의 `n_ts`/`n_penny`/`n_ext`/`n_pullback`은 `len(sub_trades)`(원본 청산 행수)를 그대로 써서 서로 다른 분모를 사용. 부분체결 유령 보유 사고(2026-07-25) 복구로 SLGB/MED/CHAI가 같은 진입가로 청산 행 2개씩 남은 잔재 때문에 atr_stop/extension_guard_tighten 항목의 표시 건수가 실제 포지션 수보다 많게 나옴(예: extension_guard_tighten 16건 표시 vs 실제 13포지션) | `_calc_metrics_expectancy()`가 포지션 그룹 수(`pos_trades`)도 함께 반환하도록 변경, 4개 항목 모두 이 값을 목표 진행률에 사용하도록 통일. 원본 행수와 다를 때만 "원본 청산 행수" 메트릭을 별도 표시. 판정 결과(REGRESSED/COLLECTING) 자체는 이번엔 안 바뀜 — 표본이 여전히 5건 이상이라 임계값 통과 여부는 동일 (2026-07-27) |
+| 프리마켓/애프터마켓에 TS 감시 경로가 전무해 갭다운이 무방비로 방치됨(실사례: GSUN, TS $0.3958 대비 현재가 $0.1828까지 프리마켓에서 폭락하는 동안 09:30 정규장 재개 전까지 청산 시도 자체가 없었음) | `schedulers/tasks.py` + `utils/utils.py` | `position_ts_sweeper()`가 1분봉 공백 사각지대를 메우려고 2026-07-17에 추가된 10초 안전망인데(RAYA 사고 대응), 정작 게이트가 정규장 전용 `is_market_hours()`(평일 09:30~16:00 ET)라 가장 위험한 프리마켓/애프터마켓 자체가 커버 대상에서 빠져있었음. 1분봉 스트림도 `stream_scheduler()`가 장마감 시 완전히 끊어 정규장에만 도는 건 동일 | `utils.py`에 `is_extended_market_hours()`(평일 04:00~20:00 ET) 신규 추가, `position_ts_sweeper()`의 게이트를 `is_market_hours()`→`is_extended_market_hours()`로 교체. CLOSING 고착 복구 로직은 같은 루프 안에서 자동으로 확장 시간대까지 커버됨 — 단, EOD 강제청산(`is_eod`)은 게이트 확장에 편승해 15:30~20:00 ET 전체로 같이 넓어지면 애프터마켓 저유동성 가격에 강제 체결되는 부작용이 있어 `dtime(15,30) <= now_et.time() < dtime(16,0)`로 원래 30분 창을 명시적으로 유지(코드 리뷰에서 발견해 즉시 수정). 심야(20:00~04:00 ET)는 Alpaca 체결 데이터가 희박해 여전히 미커버 — LIVE 모드 브로커 사이드 Stop-Market(`ensure_broker_stop`)도 Alpaca `clock.is_open` 기준이라 정규장 외엔 등록되지 않아(`extended_hours` 미설정) 별개 과제로 남음 (2026-07-28) |
