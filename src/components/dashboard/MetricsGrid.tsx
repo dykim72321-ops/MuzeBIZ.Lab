@@ -90,7 +90,7 @@ export const MetricsGrid = React.memo(function MetricsGrid({
   return (
     <div className="flex flex-wrap xl:flex-nowrap gap-3 w-full">
       {/* 1. Total Assets */}
-      <div className="flex-1 bg-white border-2 border-blue-200 rounded-md p-3 flex flex-col justify-between shadow-sm min-w-[160px]">
+      <div className="flex-1 bg-white border-2 border-blue-200 rounded-md p-3 flex flex-col justify-between shadow-sm min-w-[140px] sm:min-w-[160px]">
         <div className="flex justify-between items-center mb-1">
           <span className="text-xs font-black text-blue-950 uppercase tracking-widest block font-mono whitespace-nowrap">
             Total Assets
@@ -118,7 +118,7 @@ export const MetricsGrid = React.memo(function MetricsGrid({
       </div>
 
       {/* 2. Available Cash */}
-      <div className="flex-1 bg-white border-2 border-blue-200 rounded-md p-3 flex flex-col justify-between shadow-sm min-w-[160px]">
+      <div className="flex-1 bg-white border-2 border-blue-200 rounded-md p-3 flex flex-col justify-between shadow-sm min-w-[140px] sm:min-w-[160px]">
         <div className="flex justify-between items-center mb-1">
           <span className="text-xs font-black text-blue-950 uppercase tracking-widest block font-mono whitespace-nowrap">
             Avail Cash
@@ -133,7 +133,7 @@ export const MetricsGrid = React.memo(function MetricsGrid({
       </div>
 
       {/* 3. Current P&L */}
-      <div className={clsx("flex-1 border-2 rounded-md p-3 flex flex-col justify-between shadow-sm min-w-[160px]", totalPnl >= 0 ? "bg-emerald-50 border-emerald-300" : "bg-rose-50 border-rose-300")}>
+      <div className={clsx("flex-1 border-2 rounded-md p-3 flex flex-col justify-between shadow-sm min-w-[140px] sm:min-w-[160px]", totalPnl >= 0 ? "bg-emerald-50 border-emerald-300" : "bg-rose-50 border-rose-300")}>
         <div className="flex justify-between items-center mb-1">
           <span className={clsx("text-xs font-black uppercase tracking-widest block font-mono whitespace-nowrap", totalPnl >= 0 ? "text-emerald-800" : "text-rose-800")}>
             Current P&L
@@ -151,7 +151,7 @@ export const MetricsGrid = React.memo(function MetricsGrid({
       </div>
 
       {/* 4. Mini Gauges (Win Rate & Concentration) */}
-      <div className="flex-1 bg-white border-2 border-blue-200 rounded-md p-3 px-4 flex items-center justify-around shadow-sm min-w-[340px]">
+      <div className="flex-1 bg-white border-2 border-blue-200 rounded-md p-3 px-4 flex items-center justify-around shadow-sm w-full sm:w-auto min-w-[280px] sm:min-w-[340px]">
         <div className="flex-1 min-w-0">
           <CompactGauge
             title="Win Rate"

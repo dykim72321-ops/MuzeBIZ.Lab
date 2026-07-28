@@ -26,7 +26,7 @@ export const DashboardControls = React.memo(function DashboardControls({
   onOpenSettings: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 min-w-[240px]">
+    <div className="flex flex-col gap-2 w-full min-w-[200px] sm:min-w-[240px]">
       {/* System ARM Toggle */}
       <button
         onClick={onToggleArm}
@@ -55,10 +55,10 @@ export const DashboardControls = React.memo(function DashboardControls({
         <div className="flex-[1.5] flex items-center gap-2 px-3 py-2 bg-transparent border border-blue-200 rounded-md shadow-sm">
           <Activity className="w-5 h-5 text-blue-700 shrink-0" />
           <div className="leading-none">
-            <span className="text-[10px] font-black text-blue-900 uppercase tracking-widest block font-mono">
+            <span className="text-[10px] font-black text-blue-900 uppercase tracking-widest block font-mono truncate max-w-[80px] sm:max-w-full">
               Auto Scan
             </span>
-            <span className="text-xs text-black font-black block mt-0.5 font-sans">
+            <span className="text-xs text-black font-black block mt-0.5 font-sans truncate max-w-[80px] sm:max-w-full">
               {pennyScanStatus?.last_scan_at
                 ? new Date(pennyScanStatus.last_scan_at).toLocaleTimeString('ko-KR', {
                     hour: '2-digit',

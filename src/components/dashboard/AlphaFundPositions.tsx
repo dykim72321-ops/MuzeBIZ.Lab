@@ -100,11 +100,11 @@ export const AlphaFundPositions = () => {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-white/[0.02]">
-                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em]">Asset</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em]">Entry Price</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right">Market Price</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right">Live P&L</th>
-                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right">Duration</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] min-w-[120px]">Asset</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] min-w-[100px]">Entry Price</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right min-w-[100px]">Market Price</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right min-w-[110px]">Live P&L</th>
+                                <th className="px-6 py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.12em] text-right min-w-[100px]">Duration</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/[0.04]">
