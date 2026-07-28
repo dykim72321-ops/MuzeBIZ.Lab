@@ -11,7 +11,7 @@ import {
   LayoutGrid, List, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import type { SortField, ComponentPart } from '../types/muzepart';
-import './MuzepartSearchPage.css';
+import { ErrorBoundary } from '../components/ui/ErrorBoundary';
 
 export const MuzepartSearchPage: React.FC = () => {
   const {
@@ -94,7 +94,9 @@ export const MuzepartSearchPage: React.FC = () => {
       </header>
 
       {/* Market Intel Section */}
-      <MuzepartMarketIntel intelData={intelData} resultsCount={processedResults.length} />
+      <ErrorBoundary>
+        <MuzepartMarketIntel intelData={intelData} resultsCount={processedResults.length} />
+      </ErrorBoundary>
 
       {/* Main Content Area */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">

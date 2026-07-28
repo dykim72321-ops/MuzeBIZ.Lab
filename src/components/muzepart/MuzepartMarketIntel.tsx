@@ -38,7 +38,7 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
             ) : (
               <div className="flex items-center h-full gap-2">
                 <div className="w-[140px] h-full flex-shrink-0 relative">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={100}>
                     <PieChart>
                       <Pie
                         data={intelData.inventoryData}
@@ -190,7 +190,7 @@ export const MuzepartMarketIntel: React.FC<MarketIntelProps> = ({ intelData, res
             ) : (
               <div className="h-full flex flex-col">
                 <div className="flex-1 min-h-0 relative mt-2">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={100} minHeight={100}>
                     <BarChart data={intelData.priceData} margin={{ top: 10, right: 0, bottom: 20, left: -20 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }} axisLine={false} tickLine={false} angle={-30} textAnchor="end" interval={0} />

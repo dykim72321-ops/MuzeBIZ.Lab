@@ -84,10 +84,6 @@ export const getDistributorUrl = (part: ComponentPart) => {
     return `https://${url}`;
   };
 
-  if (part.product_url && part.product_url.trim().length > 0) {
-    return ensureProtocol(part.product_url);
-  }
-
   const q = encodeURIComponent(part.mpn);
   const dist = part.distributor.toLowerCase();
   let url = '';
@@ -96,7 +92,7 @@ export const getDistributorUrl = (part: ComponentPart) => {
   else if (dist.includes('digi-key') || dist.includes('digikey')) url = `https://www.digikey.com/en/products/result?keywords=${q}`;
   else if (dist.includes('arrow')) url = `https://www.arrow.com/en/products/search?q=${q}`;
   else if (dist.includes('avnet')) url = `https://www.avnet.com/shop/us/search/${q}`;
-  else if (dist.includes('element14') || dist.includes('farnell') || dist.includes('newark')) url = `https://www.newark.com/search?st=${q}`;
+  else if (dist.includes('element14') || dist.includes('farnell') || dist.includes('newark') || dist.includes('e14')) url = `https://www.newark.com/search?st=${q}`;
   else if (dist.includes('future')) url = `https://www.futureelectronics.com/search/?text=${q}`;
   else if (dist.includes('rs component') || dist.includes('rs-online')) url = `https://uk.rs-online.com/web/c/?searchTerm=${q}`;
   else if (dist.includes('verical')) url = `https://www.verical.com/search?text=${q}`;
@@ -106,7 +102,14 @@ export const getDistributorUrl = (part: ComponentPart) => {
   else if (dist.includes('rochester')) url = `https://www.rocelec.com/search?q=${q}`;
   else if (dist.includes('flip')) url = `https://www.flipelectronics.com/search?q=${q}`;
   else if (dist.includes('netcomponents')) url = `https://www.netcomponents.com/results.htm?t=f&r=1&s=1&v=1&p=${q}`;
-  else url = `https://www.google.com/search?q=${encodeURIComponent(part.distributor)}+${q}`;
 
-  return ensureProtocol(url);
+  if (url) {
+    return ensureProtocol(url);
+  }
+
+  if (part.product_url && part.product_url.trim().length > 0) {
+    return ensureProtocol(part.product_url);
+  }
+
+  return ensureProtocol(`https://www.google.com/search?q=${encodeURIComponent(part.distributor)}+${q}`);
 };

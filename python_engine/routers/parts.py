@@ -19,9 +19,13 @@ try:
 except ImportError:
     SearchAggregator = None
 
+try:
+    from scripts.lcsc_scraper import LcscScraper
+except ImportError:
+    LcscScraper = None
+
 from utils.cache_manager import get_cache_manager
 from infra.inventory_service import inventory_service
-from infra.nexar_client import nexar_client
 from utils.utils import PartNormalizer
 
 router = APIRouter(tags=["parts"])
@@ -170,7 +174,8 @@ class SourcingEngine:
                         price=price,
                         price_history=self._generate_price_history(price),
                         currency=ext.get("currency", "USD"),
-                        delivery=ext.get("delivery", "3-5 Days"),
+                        delivery=ext.get("delivery")
+                        or ("1-2 Days" if stock > 0 else "Check Lead Time"),
                         condition="New",
                         date_code="2023+",
                         is_eol=is_eol,
@@ -217,22 +222,24 @@ class SourcingEngine:
 
         tasks = [asyncio.wait_for(self._fetch_from_local(q), timeout=5.0)]
 
-        if SearchAggregator is not None:
-            aggregator = SearchAggregator()
+        aggregator = SearchAggregator() if SearchAggregator is not None else None
+
+        if aggregator is not None:
             tasks.append(
                 asyncio.wait_for(
                     self._fetch_from_provider("Market Aggregator", aggregator, q),
-                    timeout=30.0,
+                    timeout=10.0,
                 )
             )
         else:
             print("❌ [ENGINE] SearchAggregator unavailable (bs4/aiohttp missing)")
 
-        if nexar_client.is_configured:
+        if LcscScraper is not None:
+            lcsc_scraper = LcscScraper()
             tasks.append(
                 asyncio.wait_for(
-                    self._fetch_from_provider("Nexar (Octopart)", nexar_client, q),
-                    timeout=20.0,
+                    self._fetch_from_provider("LCSC", lcsc_scraper, q),
+                    timeout=8.0,
                 )
             )
 
@@ -245,7 +252,7 @@ class SourcingEngine:
                 print(f"⚠️ [ENGINE] Source timeout or failure: {res}")
 
         is_weak = len(results) < 3 or all((p.risk_score or 0) > 70 for p in results)
-        if is_weak:
+        if is_weak and aggregator is not None:
             try:
                 base_family = PartNormalizer.get_base_family(q)
                 if base_family and base_family.upper() != q.upper():

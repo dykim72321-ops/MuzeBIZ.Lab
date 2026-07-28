@@ -74,7 +74,7 @@ class SearchAggregator:
         url = f"{self.base_url}{search_q}"
 
         try:
-            timeout = aiohttp.ClientTimeout(total=20)
+            timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(
                     url, headers={"User-Agent": self.user_agent}
@@ -152,6 +152,8 @@ class SearchAggregator:
                         actual_mpn, stock, "Active"
                     )
 
+                    delivery = "1-2 Days" if stock > 0 else "Check Lead Time"
+
                     results.append(
                         {
                             "distributor": dist_name,
@@ -160,6 +162,7 @@ class SearchAggregator:
                             "manufacturer": manufacturer,
                             "stock": stock,
                             "price": price,
+                            "delivery": delivery,
                             "relevance_score": relevance,
                             "risk_level": (
                                 "High"

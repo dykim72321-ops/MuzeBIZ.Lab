@@ -212,6 +212,15 @@ class NexarClient:
                             actual_mpn, stock, "Active"
                         )
 
+                        factory_lead = offer.get("factoryLeadDays")
+                        if factory_lead is not None and factory_lead > 0:
+                            if factory_lead < 7:
+                                delivery = f"{factory_lead} Days"
+                            else:
+                                delivery = f"{factory_lead // 7} Weeks"
+                        else:
+                            delivery = "1-2 Days" if stock > 0 else "Check Lead Time"
+
                         results.append(
                             {
                                 "distributor": dist_name,
@@ -221,6 +230,7 @@ class NexarClient:
                                 "stock": stock,
                                 "price": price,
                                 "currency": currency,
+                                "delivery": delivery,
                                 "relevance_score": relevance,
                                 "risk_level": (
                                     "High"

@@ -143,10 +143,20 @@ export const useMuzepartSearch = () => {
     // Update URL params and trigger query
     setSearchParams({ q: targetQuery });
     resetFilters();
-    setActiveSearchQuery(targetQuery);
-  }, [query, history, setSearchParams, setActiveSearchQuery, setPhase, setError, setLogs, setHistory, resetFilters]);
+    
+    if (activeSearchQuery === targetQuery) {
+      // Force refetch if the query is the same so we don't get stuck in SCOUTING
+      // because React Query might just use cached data without triggering a fetch
+      setTimeout(() => {
+        const fetchEvent = new CustomEvent('force-refetch');
+        window.dispatchEvent(fetchEvent);
+      }, 50);
+    } else {
+      setActiveSearchQuery(targetQuery);
+    }
+  }, [query, history, setSearchParams, setActiveSearchQuery, setPhase, setError, setLogs, setHistory, resetFilters, activeSearchQuery]);
 
-  const { data: queryData, isFetching: isSearchFetching, isError, error: queryError } = useQuery({
+  const { data: queryData, isFetching: isSearchFetching, isError, error: queryError, refetch } = useQuery({
     queryKey: ['partsSearch', activeSearchQuery],
     queryFn: async () => {
       if (!activeSearchQuery.trim()) return [];
@@ -174,7 +184,15 @@ export const useMuzepartSearch = () => {
     },
     enabled: !!activeSearchQuery,
     staleTime: 5 * 60 * 1000,
+    retry: 1, // Don't retry too many times to prevent infinite loading feel
   });
+
+  // Listen for force refetch
+  useEffect(() => {
+    const handleForceRefetch = () => refetch();
+    window.addEventListener('force-refetch', handleForceRefetch);
+    return () => window.removeEventListener('force-refetch', handleForceRefetch);
+  }, [refetch]);
 
   // Sync React Query data to Zustand for local mutation (toggleQC, handleLock)
   useEffect(() => {
