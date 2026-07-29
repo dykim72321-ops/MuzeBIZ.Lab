@@ -948,6 +948,10 @@ class PaperTradingManager:
                 recommended_weight=recommended_weight,
                 atr=atr,
                 ai_report=ai_report,
+                rvol=rvol,
+                adx=adx,
+                macd_diff=macd_diff,
+                is_extended=is_extended,
             )
             if watch_resolved is not None:
                 return watch_resolved
@@ -1244,6 +1248,10 @@ class PaperTradingManager:
                 is_penny_signal=is_penny_signal,
                 acc=acc,
                 recent_history_rows=recent_history_rows,
+                rvol=rvol,
+                adx=adx,
+                macd_diff=macd_diff,
+                is_extended=is_extended,
             )
 
         # --- 2. 기존 포지션 관리 (Trailing Stop & Scale Out) ---
@@ -1586,13 +1594,20 @@ class PaperTradingManager:
         recent_history_rows: list[dict],
         order_kind: str = "MARKET",
         limit_price: float | None = None,
+        rvol: float | None = None,
+        adx: float | None = None,
+        macd_diff: float | None = None,
+        is_extended: bool | None = None,
     ) -> bool | None:
         """신규 진입 admission control(포지션 수 상한·재진입 쿨다운·집중도·예산) + 실주문
         제출 + 포지션 확정. 호출자가 이미 DNA 게이트·서킷브레이커·쿨다운·변동성 필터를
         통과시킨 뒤 호출해야 한다 — 즉시매수 경로(_process_signal_locked의 STRONG BUY
         분기, order_kind="MARKET")와 눌림목 확인 후 진입 경로(_evaluate_pullback_watch,
         order_kind="LIMIT") 양쪽에서 재사용된다.
-        """
+
+        rvol/adx/macd_diff/is_extended는 engine_decisions 로깅 전용이며(2026-07-29),
+        호출부가 없으면 None으로 남는다."""
+        atr_pct = round(atr / price * 100, 4) if price else None
         # 매수 락: 이 티커의 신규 진입(admission control ~ 실주문 제출·체결
         # 확인)을 직렬화한다. 청산 락(_get_exit_lock)과 분리되어 있으므로,
         # 아래 실주문 체결 확인 대기(_on_order_buy, LIVE 모드는 최대 5초 폴링)
@@ -2031,13 +2046,19 @@ class PaperTradingManager:
         recommended_weight: float,
         atr: float,
         ai_report: str,
+        rvol: float | None = None,
+        adx: float | None = None,
+        macd_diff: float | None = None,
+        is_extended: bool | None = None,
     ) -> bool | None:
         """활성 눌림목 감시 행을 평가한다.
 
         반환값: 감시 행이 없으면 None(호출자가 평소 로직으로 진행), 감시 행이 있으면
         True(진입 체결 성공)/False(감시 갱신·무효화·만료 — 호출자는 이번 신호 처리를
         여기서 끝낸다).
-        """
+
+        rvol/adx/macd_diff/is_extended는 engine_decisions 로깅 전용이다(2026-07-29)."""
+        atr_pct = round(atr / price * 100, 4) if price else None
         try:
             res = await asyncio.to_thread(
                 self.supabase.table("pullback_watches")
@@ -2179,6 +2200,10 @@ class PaperTradingManager:
             is_penny_signal=is_penny_now,
             acc=acc,
             recent_history_rows=recent_history_rows,
+            rvol=rvol,
+            adx=adx,
+            macd_diff=macd_diff,
+            is_extended=is_extended,
             # 되돌림·반등이 확인된 현재가를 지정가로 제출 — LIVE 모드는 이 가격에
             # 실제 Alpaca 지정가 주문을 걸고(paper 모드는 봉 종가 단위라 이 가격에
             # 즉시 체결한 것으로 근사), 시장가 추격 매수보다 불리한 체결을 방지한다.
