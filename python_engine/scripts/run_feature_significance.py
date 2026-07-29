@@ -50,6 +50,10 @@ COLUMNS = [
     "dna_score",
     "rsi",
     "rvol",
+    "adx",
+    "macd_diff",
+    "is_extended",
+    "atr_pct",
     "forward_return_30m",
     "forward_return_60m",
     "ts",
@@ -60,14 +64,25 @@ DNA_BIN_LABELS = ["<40", "40-60", "60-75", "75-80", ">=80"]
 
 # routers/checklist.py의 IMPROVEMENT_ADOPTED와 동일 목록의 로컬 사본 — 그 모듈은
 # FastAPI app_state/의존성과 결합돼 있어 독립 스크립트에서 직접 import하기엔 무겁다.
-# 새 항목이 checklist.py에 추가되면 이쪽도 함께 갱신해야 한다.
-# 가장 최근 도입일을 --since 기본값으로 써서, 서로 다른 게이트 파라미터 체제가 섞인
-# 채로 DNA_Score 예측력을 계산하는 것을 방지한다(트래커가 각 항목별로 하는 것과 동일 원칙).
+# 새 항목이 checklist.py에 추가되면 이쪽도 함께 갱신해야 한다(2026-07-29: pullback_entry
+# 누락이 발견돼 이번에 추가 — 두 목록이 이미 한 번 어긋났었다는 뜻이므로 향후 주의).
+#
+# checklist.py에는 없지만 여기에만 추가하는 두 항목: 게이트/시그널 로직 변경이 아니라
+# 실행 인프라 버그 수정일이다. 2026-07-29 RSI 피처 유의성 분석에서, 표본 내 최악의
+# 이상치(GSUN -51~-60%, CHAI -11.5%, SLGB -7.7%)가 전부 이 두 버그의 피해였음을
+# 확인했다 — "나쁜 신호"가 아니라 "보호 장치가 없어 방치된 포지션"이 진입 시점의
+# RSI/DNA_Score와 무관하게 forward_return을 왜곡시켰으므로, 이 스크립트의 목적(진입
+# 시그널의 순수한 예측력 검증)상 포함시키는 게 맞다.
+# 가장 최근 도입일을 --since 기본값으로 써서, 서로 다른 체제(게이트 파라미터든 실행
+# 인프라 안전장치든)가 섞인 채로 예측력을 계산하는 것을 방지한다.
 IMPROVEMENT_ADOPTED_DATES = [
     "2026-07-13",  # whipsaw_fix
     "2026-07-17",  # penny_gate_80
     "2026-07-18",  # atr_stop / forward_return_logger
     "2026-07-20",  # extension_guard_tighten
+    "2026-07-23",  # pullback_entry (checklist.py에는 있었으나 이 로컬 사본에서 누락됐던 항목)
+    "2026-07-24",  # 브로커 사이드 Stop-Market 도입 (갭다운 무방비 방지, checklist.py 미포함)
+    "2026-07-25",  # 부분체결 유령 보유 방지 (checklist.py 미포함)
 ]
 DEFAULT_SINCE = max(IMPROVEMENT_ADOPTED_DATES)
 
@@ -121,6 +136,37 @@ def fetch_engine_decisions(
             break
         offset += PAGE_SIZE
     return pd.DataFrame(rows[:limit])
+
+
+DEDUP_GAP_MINUTES = 15
+
+
+def dedup_signal_episodes(
+    df: pd.DataFrame, gap_minutes: int = DEDUP_GAP_MINUTES
+) -> pd.DataFrame:
+    """routers/checklist.py의 _dedup_signal_episodes와 동일 원칙의 로컬 사본.
+
+    같은 종목이 짧은 간격으로 반복 기록되면(예: 급락 중 COOLDOWN_ACTIVE가 몇 분
+    간격으로 수십 행 쌓이는 경우) 하나의 시장 사건이 여러 표본으로 중복 집계된다
+    (2026-07-27: GSUN 크래시 1건이 checklist.py 트래커에서 10행으로 중복 집계돼
+    지표가 오판정된 사례). 이 스크립트는 checklist.py를 무겁게 import하지 않으므로
+    (fetch_engine_decisions 위 IMPROVEMENT_ADOPTED_DATES와 동일한 이유로 로컬 사본
+    유지 — checklist.py 쪽이 바뀌면 이쪽도 함께 갱신 필요) 동일 로직을 재구현한다.
+    2026-07-29: 이 dedup 없이 RSI/DNA_Score의 forward_return 상관계수를 계산하면
+    같은 원인으로 왜곡된다는 것을 실측으로 확인 — 예를 들어 GSUN 단일 사고가
+    RSI 60-70 구간 표본 34건 중 12건을 차지해 그 구간 평균 수익률을 -20.9%까지
+    끌어내렸다(dedup 후에는 10건으로 줄고 평균도 -9.6%로 완화)."""
+    kept_idx: list = []
+    for _, group in df.sort_values("ts").groupby("ticker"):
+        last_kept_ts: pd.Timestamp | None = None
+        for idx, row in group.iterrows():
+            ts = pd.Timestamp(row["ts"])
+            if last_kept_ts is None or (ts - last_kept_ts) > pd.Timedelta(
+                minutes=gap_minutes
+            ):
+                kept_idx.append(idx)
+                last_kept_ts = ts
+    return df.loc[kept_idx].sort_values("ts").reset_index(drop=True)
 
 
 def print_section(title: str):
@@ -190,7 +236,7 @@ def analyze_feature_correlation(df: pd.DataFrame) -> pd.DataFrame:
     from scipy import stats
 
     records = []
-    for feature in ["rsi", "rvol", "dna_score"]:
+    for feature in ["rsi", "rvol", "dna_score", "adx", "macd_diff", "atr_pct"]:
         for window in ["forward_return_30m", "forward_return_60m"]:
             pair = df[[feature, window]].dropna()
             if len(pair) < 3:
@@ -356,9 +402,25 @@ def main():
             "(--since all로 전체 기간을 확인해보세요)"
         )
         return
-    print(f"  → {len(df)}건 로드 (outcome 분포: {dict(df['outcome'].value_counts())})")
+    raw_n = len(df)
+    print(f"  → {raw_n}건 로드 (outcome 분포: {dict(df['outcome'].value_counts())})")
 
-    for col in ["dna_score", "rsi", "rvol", "forward_return_30m", "forward_return_60m"]:
+    df = dedup_signal_episodes(df)
+    print(
+        f"  → 중복 사건(같은 티커 {DEDUP_GAP_MINUTES}분 이내 재등장) 제거: "
+        f"{raw_n}건 → {len(df)}건 독립 사건 (이하 모든 분석은 이 표본 기준)"
+    )
+
+    for col in [
+        "dna_score",
+        "rsi",
+        "rvol",
+        "adx",
+        "macd_diff",
+        "atr_pct",
+        "forward_return_30m",
+        "forward_return_60m",
+    ]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     print_section("0. checklist.py 대시보드 미니 분석과 대사(reconciliation)")
@@ -405,15 +467,33 @@ def main():
         "0% 근방에 평평하게 몰려 있으면 예측력이 약하거나 없다는 뜻."
     )
 
-    print_section("2. RSI / RVOL / DNA_Score 단일 피처 상관관계")
+    print_section(
+        "2. RSI / RVOL / DNA_Score / ADX / MACD_diff / ATR% 단일 피처 상관관계"
+    )
     corr_table = analyze_feature_correlation(df)
     print_markdown_table(
         corr_table, float_cols=["pearson_r", "pearson_p", "spearman_r", "spearman_p"]
     )
     print(
         "\n해석 가이드: |r|이 0.1 미만이면 사실상 무상관, p-value>=0.05면 "
-        "통계적으로 유의하지 않음(우연으로 설명 가능)."
+        "통계적으로 유의하지 않음(우연으로 설명 가능). adx/macd_diff/atr_pct는 "
+        f"{IMPROVEMENT_ADOPTED_DATES[-1]} 이전 행에는 로깅되지 않아(2026-07-29 도입) "
+        "표본이 rsi/dna_score보다 작을 수 있다."
     )
+
+    is_ext = df[df["is_extended"].notna()]
+    if len(is_ext):
+        print("\n  Is_Extended 여부별 forward_return_30m:")
+        print(
+            is_ext.groupby("is_extended")["forward_return_30m"]
+            .agg(["count", "mean", "median"])
+            .to_string()
+        )
+    else:
+        print(
+            "\n  Is_Extended 표본 없음 (이 --since 구간에 로깅 확장 이후 데이터가 "
+            "아직 없음)"
+        )
 
     print_section("3. 게이트 효율성 (EXECUTED vs BLOCKED)")
     outcome_table = analyze_outcome(df)

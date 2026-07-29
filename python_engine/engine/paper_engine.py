@@ -46,6 +46,9 @@ SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 �
 # 않고 사용자가 기존 수동 매도(청산) 버튼으로 직접 결정한다.
 LONG_TERM_MAX_PRICE = 50.0
 LONG_TERM_TS_TRAIL_PCT = 0.95  # 최고가 추종 TS: highest × 95% (-5%). 진입 시점(highest=entry)에도 동일 폭 적용
+LONG_TERM_BREAKEVEN_TRIGGER = (
+    1.02  # +2% 도달 이력이 있으면 TS 하한을 본전(entry_price)으로 락인 (2026-07-29)
+)
 
 # ── 오버트레이딩(Whipsaw) 방지 파라미터 ──────────────────────────────────────
 MAX_DAILY_TRADES_PER_TICKER = (
@@ -313,8 +316,18 @@ class PaperTradingManager:
         rvol: float = None,
         price: float = None,
         note: str = None,
+        adx: float = None,
+        macd_diff: float = None,
+        is_extended: bool = None,
+        atr_pct: float = None,
     ):
-        """게이트 통과/차단 결과를 engine_decisions 테이블에 기록."""
+        """게이트 통과/차단 결과를 engine_decisions 테이블에 기록.
+
+        adx/macd_diff/is_extended/atr_pct는 feature_significance 분석(2026-07-29)이
+        daily_discovery의 최신 스냅샷(결정 시점과 시간이 안 맞는 근사치)에 의존하지
+        않고 결정 시점 값 그대로 DNA_Score 구성 요소의 예측력을 검증할 수 있도록
+        추가됐다 — 호출부(_process_signal_locked)가 실제 값을 못 받은 경로(예: HOLD
+        경량 경로)는 None으로 남는다."""
         try:
             row = {
                 "ticker": ticker,
@@ -326,6 +339,10 @@ class PaperTradingManager:
                 "rvol": rvol,
                 "price": price,
                 "note": note,
+                "adx": adx,
+                "macd_diff": macd_diff,
+                "is_extended": is_extended,
+                "atr_pct": atr_pct,
             }
             await asyncio.to_thread(
                 self.supabase.table("engine_decisions").insert(row).execute
@@ -836,11 +853,19 @@ class PaperTradingManager:
         atr: float = 0.0,
         smoothed_er: float = 0.5,
         recent_spike_pct: float = 0.0,
+        rvol: float | None = None,
+        adx: float | None = None,
+        macd_diff: float | None = None,
+        is_extended: bool | None = None,
     ) -> bool:
         """진입/청산 처리 — 매수는 _get_buy_lock, 청산은 _get_exit_lock으로 각각
         직렬화한다 (_process_signal_locked 내부에서 분기별로 락을 잡는다). 두 락을
         분리한 이유는 매수 체결 확인 대기(최대 5초, LIVE 모드)가 같은 티커의
-        트레일링 스탑/수동매도를 지연시키지 않도록 하기 위함이다."""
+        트레일링 스탑/수동매도를 지연시키지 않도록 하기 위함이다.
+
+        rvol/adx/macd_diff/is_extended는 매매 로직에 관여하지 않고 engine_decisions
+        로깅 전용이다 (2026-07-29, feature_significance 분석용 — 호출부가 없으면
+        None으로 남아 로그에도 null로 기록된다)."""
         return await self._process_signal_locked(
             ticker,
             price,
@@ -854,6 +879,10 @@ class PaperTradingManager:
             atr=atr,
             smoothed_er=smoothed_er,
             recent_spike_pct=recent_spike_pct,
+            rvol=rvol,
+            adx=adx,
+            macd_diff=macd_diff,
+            is_extended=is_extended,
         )
 
     async def _process_signal_locked(
@@ -870,6 +899,10 @@ class PaperTradingManager:
         atr: float = 0.0,
         smoothed_er: float = 0.5,
         recent_spike_pct: float = 0.0,
+        rvol: float | None = None,
+        adx: float | None = None,
+        macd_diff: float | None = None,
+        is_extended: bool | None = None,
     ) -> bool:
         """
         v4 State Machine:
@@ -886,6 +919,9 @@ class PaperTradingManager:
         if not acc:
             print("⚠️ Paper Account not initialized.")
             return
+
+        # engine_decisions 로깅 전용 파생값 (매매 로직에는 관여하지 않음, 2026-07-29)
+        atr_pct = round(atr / price * 100, 4) if price else None
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
         is_penny_signal = price <= PENNY_MAX_PRICE
@@ -926,6 +962,11 @@ class PaperTradingManager:
                     signal=signal_type,
                     dna_score=dna_score,
                     rsi=rsi,
+                    rvol=rvol,
+                    adx=adx,
+                    macd_diff=macd_diff,
+                    is_extended=is_extended,
+                    atr_pct=atr_pct,
                     price=price,
                     note="SYSTEM_ARMED=False — 매수 신호 수신했으나 비무장 상태",
                 )
@@ -938,6 +979,11 @@ class PaperTradingManager:
                     signal=signal_type,
                     dna_score=dna_score,
                     rsi=rsi,
+                    rvol=rvol,
+                    adx=adx,
+                    macd_diff=macd_diff,
+                    is_extended=is_extended,
+                    atr_pct=atr_pct,
                     price=price,
                     note=f"DNA {dna_score:.1f} < gate {dna_gate} ({'penny' if is_penny_signal else 'normal'})",
                 )
@@ -991,6 +1037,11 @@ class PaperTradingManager:
                             signal=signal_type,
                             dna_score=dna_score,
                             rsi=rsi,
+                            rvol=rvol,
+                            adx=adx,
+                            macd_diff=macd_diff,
+                            is_extended=is_extended,
+                            atr_pct=atr_pct,
                             price=price,
                             note="Global Circuit Breaker Activated",
                         )
@@ -1052,6 +1103,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note="당일 손실/손절 청산 이력 존재 (Whipsaw 방지)",
                     )
@@ -1072,6 +1128,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note=f"당일 거래 {daily_trade_count}건 ≥ 한도 {self.max_daily_trades_per_ticker}건",
                     )
@@ -1098,6 +1159,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note=f"ATR/가격비 {volatility_ratio*100:.1f}% > 상한 {vol_cap*100:.1f}%",
                     )
@@ -1146,6 +1212,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note=note,
                     )
@@ -1296,10 +1367,16 @@ class PaperTradingManager:
                 # 실전에서는 atr>0이 상시 공급되므로 그 분기가 사실상 죽은 코드였다 — 통합으로 해결.
                 if not is_scaled_out:
                     if is_long_term:
-                        # 장기 보유 모드: ATR/ER 무관, 최고가 대비 고정 -5% 트레일링만
-                        # 사용한다. highest_price가 이미 단조 증가이므로 이 값 자체가
-                        # 항상 비가역(monotonic)이다.
+                        # 장기 보유 모드: ATR/ER 무관, 최고가 대비 고정 -5% 트레일링이
+                        # 기본이나, +2%(LONG_TERM_BREAKEVEN_TRIGGER) 이상 도달한 이력이
+                        # 있으면 하한을 본전(entry_price)으로 영구 락인한다 —
+                        # highest_price가 단조 증가이므로 별도 상태 없이 매 호출 시
+                        # 파생 가능. 5% 트레일 자체가 +5.26%(=1/0.95) 이상에서는 이미
+                        # 본전 이상을 보장하므로, +2%~+5.26% 구간의 손실 전환만 이 락인이
+                        # 추가로 방어한다 (2026-07-29 추가, LGHL 무손익 왕복 사례 참고)
                         ts_threshold = highest_price * LONG_TERM_TS_TRAIL_PCT
+                        if highest_price >= entry_price * LONG_TERM_BREAKEVEN_TRIGGER:
+                            ts_threshold = max(ts_threshold, entry_price)
                     else:
                         effective_atr = atr if atr > 0 else (entry_price * 0.02)
                         ts_threshold = update_reversible_trailing_stop(
@@ -1545,6 +1622,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note=f"동시 포지션 {pos_count_res.count}개 ≥ 한도 {MAX_CONCURRENT_POSITIONS}개",
                     )
@@ -1562,6 +1644,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
                     )
@@ -1584,6 +1671,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note=f"투입 비중 {conc_pct:.1f}% ≥ 한도 {MAX_CONCENTRATION_PCT*100:.0f}%",
                     )
@@ -1639,6 +1731,11 @@ class PaperTradingManager:
                         signal=signal_type,
                         dna_score=dna_score,
                         rsi=rsi,
+                        rvol=rvol,
+                        adx=adx,
+                        macd_diff=macd_diff,
+                        is_extended=is_extended,
+                        atr_pct=atr_pct,
                         price=price,
                         note=f"매수 예산 ${buy_budget:.2f} < 최소 ${MIN_BUY_BUDGET}",
                     )
@@ -1730,6 +1827,11 @@ class PaperTradingManager:
                     signal=signal_type,
                     dna_score=dna_score,
                     rsi=rsi,
+                    rvol=rvol,
+                    adx=adx,
+                    macd_diff=macd_diff,
+                    is_extended=is_extended,
+                    atr_pct=atr_pct,
                     price=price,
                     note="실주문 제출/체결확인 실패 — Alpaca가 거절했거나 제한시간 내 미체결 (Discord 알림 참고)",
                 )
@@ -1802,6 +1904,11 @@ class PaperTradingManager:
                     signal="BUY",
                     dna_score=dna_score,
                     rsi=rsi,
+                    rvol=rvol,
+                    adx=adx,
+                    macd_diff=macd_diff,
+                    is_extended=is_extended,
+                    atr_pct=atr_pct,
                     price=fill_price,
                     note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}",
                 )
@@ -1974,6 +2081,11 @@ class PaperTradingManager:
                 signal=signal_type,
                 dna_score=dna_score,
                 rsi=rsi,
+                rvol=rvol,
+                adx=adx,
+                macd_diff=macd_diff,
+                is_extended=is_extended,
+                atr_pct=atr_pct,
                 price=price,
                 note=f"눌림목 감시 {PULLBACK_MAX_WAIT_MINUTES}분 경과 — 만료",
             )
@@ -1994,6 +2106,11 @@ class PaperTradingManager:
                 signal=signal_type,
                 dna_score=dna_score,
                 rsi=rsi,
+                rvol=rvol,
+                adx=adx,
+                macd_diff=macd_diff,
+                is_extended=is_extended,
+                atr_pct=atr_pct,
                 price=price,
                 note=f"고점 대비 하락폭 {retrace_pct*100:.1f}% > 상한 {PULLBACK_RETRACE_MAX_PCT*100:.0f}% — 추세 붕괴로 무효화",
             )
@@ -2034,6 +2151,11 @@ class PaperTradingManager:
                 signal=signal_type,
                 dna_score=dna_score,
                 rsi=rsi,
+                rvol=rvol,
+                adx=adx,
+                macd_diff=macd_diff,
+                is_extended=is_extended,
+                atr_pct=atr_pct,
                 price=price,
                 note="되돌림·반등 확인됐으나 재진입 쿨다운 중 — 무효화",
             )

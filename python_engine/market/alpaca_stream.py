@@ -27,6 +27,18 @@ from utils.utils import is_market_hours
 _background_tasks: set[asyncio.Task] = set()
 
 
+def _atr_pct(payload: dict) -> float | None:
+    """engine_decisions 로깅 전용 파생값(atr/price*100) — paper_engine.py의
+    동일 계산과 별개로 payload 기반 직접 기록 경로(MARKET_HOURS/MOMENTUM_VALIDATOR
+    차단은 process_signal() 호출 전에 걸러지므로 그쪽 atr_pct 계산을 안 탄다)에서
+    필요해 로컬로 둔다 (2026-07-29)."""
+    atr = payload.get("atr")
+    price = payload.get("price")
+    if not atr or not price:
+        return None
+    return round(float(atr) / float(price) * 100, 4)
+
+
 def _spawn_background(coro) -> None:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
@@ -368,6 +380,10 @@ async def on_minute_bar_closed(bar):
                                 "rvol": float(payload.get("rvol", 0)),
                                 "price": float(payload.get("price", 0)),
                                 "note": reason,
+                                "adx": payload.get("adx"),
+                                "macd_diff": payload.get("macd_diff"),
+                                "is_extended": payload.get("is_extended"),
+                                "atr_pct": _atr_pct(payload),
                             }
                         )
                         .execute
@@ -415,6 +431,10 @@ async def on_minute_bar_closed(bar):
                                     "rvol": float(payload.get("rvol", 0)),
                                     "price": float(payload.get("price", 0)),
                                     "note": reject_reason,
+                                    "adx": payload.get("adx"),
+                                    "macd_diff": payload.get("macd_diff"),
+                                    "is_extended": payload.get("is_extended"),
+                                    "atr_pct": _atr_pct(payload),
                                 }
                             )
                             .execute
@@ -451,6 +471,10 @@ async def on_minute_bar_closed(bar):
                 atr=float(payload.get("atr", 0.0)),
                 smoothed_er=float(payload.get("smoothed_er", 0.5)),
                 recent_spike_pct=float(payload.get("recent_spike_pct", 0.0)),
+                rvol=payload.get("rvol"),
+                adx=payload.get("adx"),
+                macd_diff=payload.get("macd_diff"),
+                is_extended=payload.get("is_extended"),
             )
             if buy_executed:
                 app_state._held_tickers.add(ticker_symbol)
