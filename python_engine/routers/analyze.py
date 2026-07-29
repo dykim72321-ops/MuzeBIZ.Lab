@@ -184,7 +184,7 @@ def translate_to_korean(text: str) -> str:
             + urllib.parse.quote(text)
         )
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        response = urllib.request.urlopen(req)
+        response = urllib.request.urlopen(req, timeout=5)
         data = json.loads(response.read().decode("utf-8"))
         return "".join([sentence[0] for sentence in data[0]])
     except Exception as e:

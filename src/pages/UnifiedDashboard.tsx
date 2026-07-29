@@ -470,7 +470,12 @@ export default function UnifiedDashboard() {
 
           {/* ── RIGHT COLUMN: Risk & Analytics & Logs (Span 3) ── */}
           <div className="xl:col-span-3 flex flex-col gap-5">
-            <RiskAnalyticsPanel history={slicedHistory} portfolioHistory={slicedPortfolioHistory} strategyStats={null} />
+            <RiskAnalyticsPanel 
+              history={slicedHistory} 
+              portfolioHistory={slicedPortfolioHistory} 
+              totalEquity={displayedAccount.total_assets}
+              availableCash={displayedAccount.cash_available}
+            />
             <PositionAnalyticsPanel positions={livePositions} totalEquity={displayedAccount.total_assets} />
 
             <div className="sfdc-card flex-1 flex flex-col min-h-[300px] max-h-[550px]">

@@ -6,30 +6,22 @@ import type { PaperHistory, PortfolioHistoryPoint } from '../../types/dashboard'
 interface RiskAnalyticsPanelProps {
   history: PaperHistory[];
   portfolioHistory?: PortfolioHistoryPoint[];
-  strategyStats: unknown;
+  totalEquity: number;
+  availableCash: number;
 }
 
-function stddev(values: number[]): number {
-  if (values.length < 2) return 0;
-  const mean = values.reduce((s, v) => s + v, 0) / values.length;
-  const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
-  return Math.sqrt(variance);
-}
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const idx = Math.floor((p / 100) * sorted.length);
-  return sorted[Math.max(0, Math.min(idx, sorted.length - 1))];
-}
-
-function getCardStyles(status: 'good' | 'bad' | 'neutral') {
+function getCardStyles(status: 'good' | 'bad' | 'neutral' | 'critical') {
   if (status === 'good') return {
     borderColor: 'border-emerald-200',
     bgAnimClass: 'bg-emerald-100/60 animate-[pulse_3s_ease-in-out_infinite]'
   };
   if (status === 'bad') return {
-    borderColor: 'border-rose-200',
-    bgAnimClass: 'bg-rose-100/60 animate-[pulse_3s_ease-in-out_infinite]'
+    borderColor: 'border-amber-300',
+    bgAnimClass: 'bg-amber-100/60 animate-[pulse_2s_ease-in-out_infinite]'
+  };
+  if (status === 'critical') return {
+    borderColor: 'border-rose-400',
+    bgAnimClass: 'bg-rose-200/80 animate-[pulse_1s_ease-in-out_infinite]'
   };
   return {
     borderColor: 'border-slate-200',
@@ -37,41 +29,44 @@ function getCardStyles(status: 'good' | 'bad' | 'neutral') {
   };
 }
 
-export const RiskAnalyticsPanel = ({ history, portfolioHistory }: RiskAnalyticsPanelProps) => {
+export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, availableCash }: RiskAnalyticsPanelProps) => {
   const metrics = useMemo(() => {
-    // We still want to show something if there's portfolio history but no trades
     if ((!history || history.length === 0) && (!portfolioHistory || portfolioHistory.length === 0)) return null;
 
-    let dailyReturns: number[] = [];
-    if (portfolioHistory && portfolioHistory.length > 1) {
-      for (let i = 1; i < portfolioHistory.length; i++) {
-        const prev = portfolioHistory[i - 1].equity;
-        const curr = portfolioHistory[i].equity;
-        if (prev > 0) {
-          dailyReturns.push((curr - prev) / prev);
-        }
+    // 1. Current Exposure (자본 노출도)
+    const exposurePct = totalEquity > 0 ? ((totalEquity - availableCash) / totalEquity) * 100 : 0;
+
+    // 2. Consecutive Losses (현재 연속 손실 횟수)
+    // History is usually chronological or reverse-chronological. Let's sort to be sure (newest first).
+    const sortedDesc = [...history].sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
+    let consecutiveLosses = 0;
+    for (const trade of sortedDesc) {
+      if (Number(trade.profit_amt) < 0) {
+        consecutiveLosses++;
+      } else if (Number(trade.profit_amt) > 0) {
+        break; // Stop at first win
       }
-    } else {
-      dailyReturns = history.map(h => Number(h.pnl_pct || 0) / 100);
     }
 
-    const returns = dailyReturns;
-    const mean = returns.length > 0 ? returns.reduce((s, v) => s + v, 0) / returns.length : 0;
-    const std = stddev(returns);
-    const sharpe = std > 0 ? (mean / std) * Math.sqrt(252) : 0;
+    // 3. Recent 10 Hit Rate (최근 10회 승률)
+    const recentTrades = sortedDesc.slice(0, 10);
+    const recentWins = recentTrades.filter(t => Number(t.profit_amt) > 0).length;
+    const recentHitRate = recentTrades.length > 0 ? (recentWins / recentTrades.length) * 100 : 0;
 
-    const sortedReturns = [...returns].sort((a, b) => a - b);
-    const var95 = percentile(sortedReturns, 5) * 100;
+    // 4. Largest Losing Trade (최대 단일 손실률)
+    const pnlPcts = history.map(h => Number(h.pnl_pct || 0));
+    const largestLoss = pnlPcts.length > 0 ? Math.min(...pnlPcts, 0) : 0; // Negative number
 
-    // Win/Loss ratio remains based on individual trades
+    // 5. Avg Win / Avg Loss
     const tradeReturns = history.map(h => Number(h.pnl_pct || 0) / 100);
     const posReturns = tradeReturns.filter(r => r > 0);
     const negReturns = tradeReturns.filter(r => r < 0);
     const avgWin = posReturns.length > 0 ? posReturns.reduce((s, v) => s + v, 0) / posReturns.length : 0;
     const avgLoss = negReturns.length > 0 ? negReturns.reduce((s, v) => s + v, 0) / negReturns.length : 0;
-    const winLossRatio = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : (avgWin > 0 ? 99 : 0);
 
+    // 6. Current Drawdown & Max Drawdown
     let mdd = 0;
+    let cdd = 0;
     if (portfolioHistory && portfolioHistory.length > 0) {
       let peak = portfolioHistory[0].equity;
       let maxDD = 0;
@@ -81,80 +76,81 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory }: RiskAnalyticsP
         if (dd < maxDD) maxDD = dd;
       }
       mdd = Math.abs(maxDD) * 100;
+      
+      const currentEquity = portfolioHistory[portfolioHistory.length - 1].equity;
+      cdd = peak > 0 ? Math.abs((currentEquity - peak) / peak) * 100 : 0;
     } else {
-      const sorted = [...history].sort(
-        (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
-      );
+      const sortedAsc = [...history].sort((a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
       let equity = 100000;
       let peak = equity;
       let maxDD = 0;
-      for (const item of sorted) {
+      for (const item of sortedAsc) {
         equity += Number(item.profit_amt ?? 0);
         if (equity > peak) peak = equity;
         const dd = (equity - peak) / peak;
         if (dd < maxDD) maxDD = dd;
       }
       mdd = Math.abs(maxDD) * 100;
+      cdd = peak > 0 ? Math.abs((equity - peak) / peak) * 100 : 0;
     }
 
-    let totalReturn = 0;
-    if (portfolioHistory && portfolioHistory.length > 0) {
-      const first = portfolioHistory[0].equity;
-      const last = portfolioHistory[portfolioHistory.length - 1].equity;
-      totalReturn = first > 0 ? ((last - first) / first) * 100 : 0;
-    } else {
-      totalReturn = (tradeReturns.reduce((s, v) => s + v, 0)) * 100;
-    }
-    const calmar = mdd > 0 ? totalReturn / mdd : 0;
-
-    return { sharpe, var95, winLossRatio, mdd, calmar, avgWin: avgWin * 100, avgLoss: avgLoss * 100 };
-  }, [history, portfolioHistory]);
+    return { 
+      exposurePct, 
+      consecutiveLosses, 
+      recentHitRate, 
+      largestLoss, 
+      cdd,
+      mdd,
+      avgWin: avgWin * 100, 
+      avgLoss: avgLoss * 100 
+    };
+  }, [history, portfolioHistory, totalEquity, availableCash]);
 
   if (!metrics) {
     return (
       <div className="sfdc-card p-6 flex flex-col items-center justify-center min-h-[200px] gap-3">
         <AlertTriangle className="w-8 h-8 text-amber-500" />
         <p className="text-sm font-black text-blue-900">데이터 부족</p>
-        <p className="text-xs text-blue-800 text-center">리스크 지표를 계산하기 위한 포트폴리오/청산 이력이 부족합니다.</p>
+        <p className="text-xs text-blue-800 text-center">실시간 리스크를 계산하기 위한 이력이 부족합니다.</p>
       </div>
     );
   }
 
   const cards = [
     {
-      label: 'Sharpe Ratio',
-      koLabel: '위험 대비 수익성',
-      value: metrics?.sharpe.toFixed(2) ?? '—',
-      color: metrics ? (metrics.sharpe > 1 ? 'text-emerald-700' : metrics.sharpe > 0 ? 'text-slate-700' : 'text-rose-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.sharpe > 1 ? 'good' : metrics.sharpe > 0 ? 'neutral' : 'bad') : 'neutral'),
+      label: 'Current Drawdown',
+      koLabel: '현재 낙폭',
+      value: metrics ? `${metrics.cdd.toFixed(2)}%` : '—',
+      color: metrics ? (metrics.cdd < 2 ? 'text-emerald-700' : metrics.cdd > 5 ? 'text-rose-700' : 'text-slate-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.cdd < 2 ? 'good' : metrics.cdd > 8 ? 'critical' : metrics.cdd > 4 ? 'bad' : 'neutral') : 'neutral'),
     },
     {
-      label: 'VaR 95%',
-      koLabel: '최대 예상 손실',
-      value: metrics ? `${metrics.var95.toFixed(2)}%` : '—',
-      color: metrics ? (metrics.var95 > -5 ? 'text-emerald-700' : metrics.var95 <= -10 ? 'text-rose-700' : 'text-slate-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.var95 > -5 ? 'good' : metrics.var95 <= -10 ? 'bad' : 'neutral') : 'neutral'),
+      label: 'Current Exposure',
+      koLabel: '시장 노출도',
+      value: metrics ? `${metrics.exposurePct.toFixed(1)}%` : '—',
+      color: metrics ? (metrics.exposurePct < 80 ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.exposurePct < 70 ? 'neutral' : metrics.exposurePct > 90 ? 'critical' : 'bad') : 'neutral'),
     },
     {
-      label: 'Win/Loss Ratio',
-      koLabel: '손익비',
-      value: metrics?.winLossRatio.toFixed(2) ?? '—',
-      color: metrics ? (metrics.winLossRatio > 1.2 ? 'text-emerald-700' : metrics.winLossRatio > 0.8 ? 'text-slate-700' : 'text-rose-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.winLossRatio > 1.2 ? 'good' : metrics.winLossRatio > 0.8 ? 'neutral' : 'bad') : 'neutral'),
+      label: 'Consecutive Loss',
+      koLabel: '현재 연속 손실',
+      value: metrics ? `${metrics.consecutiveLosses}연패` : '—',
+      color: metrics ? (metrics.consecutiveLosses === 0 ? 'text-emerald-700' : metrics.consecutiveLosses >= 3 ? 'text-rose-700' : 'text-slate-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.consecutiveLosses === 0 ? 'good' : metrics.consecutiveLosses >= 4 ? 'critical' : metrics.consecutiveLosses >= 2 ? 'bad' : 'neutral') : 'neutral'),
     },
     {
-      label: 'Max Drawdown',
-      koLabel: '최대 낙폭',
-      value: metrics ? `${metrics.mdd.toFixed(2)}%` : '—',
-      color: metrics ? (metrics.mdd < 5 ? 'text-emerald-700' : metrics.mdd > 15 ? 'text-rose-700' : 'text-slate-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.mdd < 5 ? 'good' : metrics.mdd > 15 ? 'bad' : 'neutral') : 'neutral'),
+      label: 'Recent Hit Rate',
+      koLabel: '최근 10회 승률',
+      value: metrics ? `${metrics.recentHitRate.toFixed(0)}%` : '—',
+      color: metrics ? (metrics.recentHitRate >= 50 ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.recentHitRate >= 50 ? 'good' : metrics.recentHitRate < 30 ? 'critical' : 'bad') : 'neutral'),
     },
     {
-      label: 'Calmar Ratio',
-      koLabel: '회복 탄력성',
-      value: metrics?.calmar.toFixed(2) ?? '—',
-      color: metrics ? (metrics.calmar > 1 ? 'text-emerald-700' : metrics.calmar > 0 ? 'text-slate-700' : 'text-rose-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.calmar > 1 ? 'good' : metrics.calmar > 0 ? 'neutral' : 'bad') : 'neutral'),
+      label: 'Largest Loss',
+      koLabel: '최대 단일 손실',
+      value: metrics ? `${metrics.largestLoss.toFixed(2)}%` : '—',
+      color: metrics ? (metrics.largestLoss > -5 ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
+      ...getCardStyles(metrics ? (metrics.largestLoss > -5 ? 'neutral' : metrics.largestLoss < -10 ? 'critical' : 'bad') : 'neutral'),
     },
     {
       label: 'Avg Win / Loss',

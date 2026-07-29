@@ -939,7 +939,16 @@ async def get_closed_trades(limit: int = 30, api_key: str = Security(get_api_key
         from alpaca.trading.enums import QueryOrderStatus
 
         req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500, nested=False)
-        orders = await asyncio.to_thread(trading_client.get_orders, filter=req)
+        orders = []
+        for attempt in range(3):
+            try:
+                orders = await asyncio.to_thread(trading_client.get_orders, filter=req)
+                break
+            except Exception as e:
+                print(f"[Broker] get_orders attempt {attempt + 1} failed: {e}")
+                if attempt == 2:
+                    return []
+                await asyncio.sleep(1.0)
 
         # 체결 완료 주문만 필터, fill 시각 오름차순 정렬
         filled = [
