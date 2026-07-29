@@ -31,7 +31,7 @@ const POLL_INTERVAL_MS = 5_000;
 
 export function useDashboardData() {
   const navigate = useNavigate();
-  const { isHunting, triggerHunt } = useMarketEngine();
+  const { isHunting, triggerHunt, isCooldown } = useMarketEngine();
 
   // Zustand Store — Selector 기반 구독으로 최소한의 리렌더링
   const loading = useTradingStore((s) => s.loading);
@@ -448,6 +448,7 @@ export function useDashboardData() {
     handleToggleArm,
     handleClosePosition,
     isHunting,
+    isCooldown,
     navigate,
   };
 }

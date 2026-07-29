@@ -34,14 +34,18 @@ export const useMarketEngine = () => {
   // 2. 하이브리드 수동 탐색(Hunting) 상태 관리
   const [isHunting, setIsHunting] = useState(false);
   const [huntStatus, setHuntStatus] = useState<'success' | 'error' | null>(null);
+  const [isCooldown, setIsCooldown] = useState(false);
 
   const handleTriggerHunt = async () => {
+    if (isCooldown) return;
     setIsHunting(true);
     setHuntStatus(null);
     try {
       const result = await triggerHunt();
       if (result.success) {
         setHuntStatus('success');
+        setIsCooldown(true);
+        setTimeout(() => setIsCooldown(false), 60000);
       } else {
         throw new Error(result.message);
       }
@@ -50,6 +54,7 @@ export const useMarketEngine = () => {
       console.error("Hunting Error:", error);
       setHuntStatus('error');
       setTimeout(() => setHuntStatus(null), 3000);
+      throw error;
     } finally {
       setIsHunting(false);
     }
@@ -61,6 +66,7 @@ export const useMarketEngine = () => {
     lastUpdatedTicker,
     isHunting,
     huntStatus,
+    isCooldown,
     triggerHunt: handleTriggerHunt,
     error
   };

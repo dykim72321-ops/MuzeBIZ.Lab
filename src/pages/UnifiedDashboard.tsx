@@ -37,7 +37,7 @@ export default function UnifiedDashboard() {
     displayedAccount, displayedWinRate, displayedTotalTrades, totalPnl, investedCapital,
     concentrationPct, chartData, setIsSettingsOpen, setChartRange, setTerminalData,
     setEdgeAlert, handleDeepDive, handleLiveHuntingTrigger, handleToggleArm, handleClosePosition,
-    isHunting,
+    isHunting, isCooldown,
   } = useDashboardData();
 
   const [selectedCompanyTicker, setSelectedCompanyTicker] = useState<string | null>(null);
@@ -148,18 +148,6 @@ export default function UnifiedDashboard() {
 
           {/* ── LEFT COLUMN: Alpha Discovery & Status (Span 3) ── */}
           <div className="xl:col-span-3 flex flex-col gap-5">
-            
-            <div className="sfdc-card p-6">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-sm" />
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-500 font-mono">System Status</span>
-              </div>
-              <p className="text-[13px] text-slate-800 font-bold leading-relaxed">
-                {isArmed
-                  ? "ARMED: 자동 매매 활성. 퀀트 신호 충족 시 실시간 매수가 구동됩니다."
-                  : "SAFE: 자동 매매 정지. 직접 실행 버튼을 통한 수동 개입만 허용됩니다."}
-              </p>
-            </div>
 
             <div className="sfdc-card">
               <div className="sfdc-card-header">
@@ -170,12 +158,17 @@ export default function UnifiedDashboard() {
               <div className="p-5 bg-white">
                 <button
                   onClick={handleLiveHuntingTrigger}
-                  disabled={isHunting}
+                  disabled={isHunting || isCooldown}
                   className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 disabled:bg-slate-200 disabled:text-slate-600 disabled:shadow-none"
                 >
                   {isHunting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Play className="w-4 h-4" />}
-                  {isHunting ? '스캔 및 분석 중...' : 'AI 퀀트 헌팅 실행'}
+                  {isHunting ? '스캔 및 분석 중...' : isCooldown ? '쿨타임 적용 중...' : '알파 종목 즉시 재스캔 (Force Rescan)'}
                 </button>
+                {pennyScanStatus?.next_scan_in_seconds != null && (
+                  <p className="text-center text-[11px] font-bold text-slate-500 mt-3 font-mono">
+                    다음 자동 스캔: {Math.floor(pennyScanStatus.next_scan_in_seconds / 60)}분 {pennyScanStatus.next_scan_in_seconds % 60}초 후
+                  </p>
+                )}
               </div>
             </div>
 
@@ -480,7 +473,7 @@ export default function UnifiedDashboard() {
             <RiskAnalyticsPanel history={slicedHistory} portfolioHistory={slicedPortfolioHistory} strategyStats={null} />
             <PositionAnalyticsPanel positions={livePositions} totalEquity={displayedAccount.total_assets} />
 
-            <div className="sfdc-card flex-1 flex flex-col min-h-[250px] max-h-[420px]">
+            <div className="sfdc-card flex-1 flex flex-col min-h-[300px] max-h-[550px]">
               <div className="sfdc-card-header">
                 <h2 className="text-sm font-black flex items-center gap-2">
                   <Clock className="w-4 h-4 text-slate-900" /> Recent Exits
