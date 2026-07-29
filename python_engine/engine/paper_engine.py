@@ -535,6 +535,9 @@ class PaperTradingManager:
         ticker = pos["ticker"]
         entry_price = float(pos["entry_price"])
         units = float(pos["units"])
+        requested_units = (
+            units  # 이번 호출이 청산하려던 원래 전체 수량 (부분체결 판정 기준)
+        )
         is_penny = entry_price <= PENNY_MAX_PRICE
         original_status = pos.get("status") or "HOLD"
 
@@ -579,6 +582,25 @@ class PaperTradingManager:
                     return None
                 units, fill_price = executed
 
+            # ── 부분체결 판정 (LIVE 전용, GSUN 2026-07-27 사고) ─────────────────────
+            # _close_position()은 항상 "전량 청산" 의도로 호출되는데, 저유동성 종목은
+            # close_all 시장가 주문도 극단적으로는 요청 수량의 일부만 체결되고 나머지는
+            # 타임아웃으로 취소될 수 있다(_submit_alpaca_order 참고). 이 경우 실체결분
+            # (units)만 paper_history에 팔린 것으로 기록하고, 남은 물량은 포지션을 삭제하는
+            # 대신 units를 잔여분으로 정정해 HOLD 유지한다 — 그래야 다음 TS 스위퍼
+            # 사이클이 잔여 물량을 계속 청산 시도한다. 이걸 빼먹으면 체결분만 "전체 청산
+            # 완료"로 기록되고 나머지는 DB 어디에도 안 잡히는 유령 보유가 된다(2026-07-27
+            # GSUN: 2,614주 중 373주만 체결됐는데 전량 청산으로 기록되어 잔여 2,241주가
+            # 이틀 가까이 무방비로 방치되다 사용자가 Alpaca에서 직접 발견해 수동 매도함).
+            PARTIAL_CLOSE_TOLERANCE = (
+                0.01  # 1% 미만 잔여는 반올림 오차로 간주하고 완전 종료
+            )
+            remaining_units = requested_units - units
+            is_partial_close = (
+                external_fill is None
+                and remaining_units > requested_units * PARTIAL_CLOSE_TOLERANCE
+            )
+
             # ── 브로커 하드 스탑(Hard Stop-Loss) 주문 시뮬레이션 (PAPER 전용) ────────
             entry_stop_pct = pos.get("entry_stop_pct")
             hard_stop_init_pct = (
@@ -616,17 +638,46 @@ class PaperTradingManager:
 
             await self._apply_cash_delta(proceeds)
             cash_applied = True
+            history_data["exit_reason"] = (
+                f"{exit_reason} (부분체결 {units:.2f}/{requested_units:.2f}주)"
+                if is_partial_close
+                else exit_reason
+            )
             await asyncio.to_thread(
                 self.supabase.table("paper_history").insert(history_data).execute
             )
             history_inserted = True
-            await asyncio.to_thread(
-                self.supabase.table("paper_positions")
-                .delete()
-                .eq("ticker", ticker)
-                .execute
-            )
-            await self._sync_watchlist_exit(ticker)
+
+            if is_partial_close:
+                # 잔여 물량이 남아있다 — 삭제 대신 units만 정정해 HOLD로 되돌려
+                # TS 스위퍼가 다음 사이클에서 남은 물량을 계속 청산 시도하게 한다.
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .update({"status": original_status, "units": remaining_units})
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                print(
+                    f"⚠️ [{ticker}] 부분체결 청산 — {units:.2f}주만 체결, "
+                    f"잔여 {remaining_units:.2f}주는 포지션 유지 (다음 스위퍼 사이클에서 재시도)"
+                )
+                await self.webhook.send_alert(
+                    title=f"⚠️ [부분체결 청산] {ticker}",
+                    description=(
+                        f"{exit_reason} 청산 요청 {requested_units:.2f}주 중 {units:.2f}주만 "
+                        f"체결됐습니다 (@ ${fill_price:.4f}). 잔여 {remaining_units:.2f}주는 "
+                        f"포지션을 유지하며 다음 청산 사이클에서 계속 재시도합니다."
+                    ),
+                    color=0xE67E22,
+                )
+            else:
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .delete()
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                await self._sync_watchlist_exit(ticker)
 
             # KellySizer 캐시 무효화 (청산 후 과거 데이터가 변경되었으므로)
             if ticker in self._kelly_cache:
@@ -657,17 +708,27 @@ class PaperTradingManager:
                             .insert(history_data)
                             .execute
                         )
-                    # paper_positions DELETE 재시도
-                    await asyncio.to_thread(
-                        self.supabase.table("paper_positions")
-                        .delete()
-                        .eq("ticker", ticker)
-                        .execute
-                    )
-                    try:
-                        await self._sync_watchlist_exit(ticker)
-                    except Exception:
-                        pass  # watchlist 동기화 실패는 치명적이지 않음
+                    # paper_positions 정리 재시도 — 부분체결이면 삭제 대신 잔여수량으로 HOLD 유지
+                    if is_partial_close:
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_positions")
+                            .update(
+                                {"status": original_status, "units": remaining_units}
+                            )
+                            .eq("ticker", ticker)
+                            .execute
+                        )
+                    else:
+                        await asyncio.to_thread(
+                            self.supabase.table("paper_positions")
+                            .delete()
+                            .eq("ticker", ticker)
+                            .execute
+                        )
+                        try:
+                            await self._sync_watchlist_exit(ticker)
+                        except Exception:
+                            pass  # watchlist 동기화 실패는 치명적이지 않음
                     if ticker in self._kelly_cache:
                         del self._kelly_cache[ticker]
                     retry_ok = True
