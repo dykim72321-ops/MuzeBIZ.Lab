@@ -106,15 +106,6 @@ export default function ReportsPage() {
     <div className="space-y-6 bg-slate-50 p-4 md:p-8 lg:p-10 min-h-screen text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900">
       {/* Page Header */}
       <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 w-full">
-        <div className="flex items-center gap-4 w-full lg:w-auto flex-shrink-0">
-          <div className="sfdc-icon-badge">
-            <BarChart3 className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">Performance Reports</p>
-            <h1 className="text-3xl font-black text-slate-900 leading-tight tracking-tighter">성과 리포트</h1>
-          </div>
-        </div>
 
         <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl">
           <button
@@ -169,10 +160,10 @@ export default function ReportsPage() {
             <span className="font-extrabold text-sm">{error}</span>
           </div>
         ) : reportData && reportData.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="flex flex-col gap-6">
             
-            {/* Left Col: Main Chart & Data Table */}
-            <div className="lg:col-span-8 flex flex-col gap-6">
+            {/* Main Chart & Data Table — Full Width */}
+            <div className="flex flex-col gap-6">
               
               {/* Net Profit Trend Chart */}
               <div className="sfdc-card p-6 lg:p-8 relative overflow-hidden">
@@ -322,15 +313,16 @@ export default function ReportsPage() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="text-xs font-bold font-mono text-slate-500 uppercase tracking-wider border-b border-slate-200/80 bg-slate-50/80 whitespace-nowrap">
-                        <th className="py-3.5 px-6 w-[20%] text-left">기간</th>
-                        <th className="py-3.5 px-6 text-right w-[22%]">순이익</th>
-                        <th className="py-3.5 px-6 text-right w-[24%]" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률) — 엔진이 청산 시 기록한 자체 로그(paper_history) 기준입니다. 대시보드 상단의 Win Rate(Alpaca 실체결 기준)와 산출 방식이 달라 수치가 다를 수 있습니다.">
-                          체결승률(포지션)
+                        <th className="py-3.5 px-4 text-left w-[12%]">기간</th>
+                        <th className="py-3.5 px-4 text-right w-[10%]">거래건수</th>
+                        <th className="py-3.5 px-4 text-right w-[14%]">총 수익/손실</th>
+                        <th className="py-3.5 px-4 text-right w-[12%]">순이익</th>
+                        <th className="py-3.5 px-4 text-right w-[12%]">평균 손익</th>
+                        <th className="py-3.5 px-4 text-right w-[18%]" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률)">
+                          승률(포지션)
                         </th>
-                        <th className="py-3.5 px-6 text-right w-[14%]">PF</th>
-                        <th className="py-3.5 px-6 text-right w-[20%]" title="기간 내 Local Peak 대비 MDD (괄호: 계좌 전체 MDD)">
-                          기간(계좌) MDD
-                        </th>
+                        <th className="py-3.5 px-4 text-right w-[10%]">PF</th>
+                        <th className="py-3.5 px-4 text-right w-[12%]">MDD(계좌)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -339,18 +331,35 @@ export default function ReportsPage() {
                         const posWinRate = row.pos_win_rate ?? row.win_rate;
                         const periodMdd = row.alpaca_period_mdd ?? row.period_mdd ?? row.mdd;
                         const globalMdd = row.alpaca_mdd ?? row.mdd;
+                        const trades = row.total_trades;
+                        const posTrades = row.pos_total_trades ?? trades;
+                        const avgPnl = row.avg_pnl ?? (trades > 0 ? netProfit / trades : 0);
 
                         return (
                           <tr key={idx} className="group odd:bg-white even:bg-slate-50/40 hover:bg-indigo-50/20 transition-colors duration-150 whitespace-nowrap">
                             {/* 1. 기간 (Period) */}
-                            <td className="py-4 px-6 text-left">
+                            <td className="py-4 px-4 text-left">
                               <span className="text-sm font-bold font-mono text-slate-800 tracking-tight">
                                 {row.period_label}
                               </span>
                             </td>
 
-                            {/* 2. 순이익 (Net Profit) */}
-                            <td className="py-4 px-6 text-right">
+                            {/* 2. 거래건수 (Trades) */}
+                            <td className="py-4 px-4 text-right font-mono">
+                              <span className="text-sm font-bold text-slate-700">{trades}</span>
+                              <span className="text-xs font-medium text-slate-400 ml-1">({posTrades})</span>
+                            </td>
+
+                            {/* 3. 총 수익/손실 (Gross) */}
+                            <td className="py-4 px-4 text-right font-mono text-xs">
+                              <div className="flex flex-col items-end">
+                                <span className="text-emerald-600 font-bold">+${row.gross_profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                <span className="text-rose-600 font-bold">-${row.gross_loss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                            </td>
+
+                            {/* 4. 순이익 (Net Profit) */}
+                            <td className="py-4 px-4 text-right">
                               <span className={clsx(
                                 "text-base font-black font-mono tracking-tight",
                                 netProfit >= 0 ? "text-emerald-600" : "text-rose-600"
@@ -359,8 +368,15 @@ export default function ReportsPage() {
                               </span>
                             </td>
 
-                            {/* 3. 체결승률(포지션) (Win Rate) */}
-                            <td className="py-4 px-6 text-right font-mono">
+                            {/* 5. 평균 손익 (Avg PnL) */}
+                            <td className="py-4 px-4 text-right font-mono">
+                              <span className={clsx("text-sm font-bold", avgPnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                                {avgPnl >= 0 ? '+' : '-'}${Math.abs(avgPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </td>
+
+                            {/* 6. 체결승률(포지션) (Win Rate) */}
+                            <td className="py-4 px-4 text-right font-mono">
                               <span className={clsx("text-sm font-bold", row.win_rate >= 50 ? "text-slate-900" : "text-rose-600")}>
                                 {row.win_rate.toFixed(1)}%
                               </span>
@@ -369,15 +385,15 @@ export default function ReportsPage() {
                               </span>
                             </td>
 
-                            {/* 4. PF (Profit Factor) */}
-                            <td className="py-4 px-6 text-right font-mono">
+                            {/* 7. PF (Profit Factor) */}
+                            <td className="py-4 px-4 text-right font-mono">
                               <span className={clsx("text-sm font-bold", row.profit_factor >= 1.0 ? "text-slate-900" : "text-slate-600")}>
                                 {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
                               </span>
                             </td>
 
-                            {/* 5. 기간(계좌) MDD */}
-                            <td className="py-4 px-6 text-right font-mono">
+                            {/* 8. 기간(계좌) MDD */}
+                            <td className="py-4 px-4 text-right font-mono">
                               <span className="text-sm font-bold text-rose-600">
                                 {periodMdd.toFixed(1)}%
                               </span>

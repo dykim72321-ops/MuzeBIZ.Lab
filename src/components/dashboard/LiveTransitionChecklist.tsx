@@ -86,84 +86,92 @@ export const LiveTransitionChecklist = () => {
         <p className="text-xs font-bold text-slate-400 mt-2 uppercase tracking-widest">Live Trading Readiness</p>
       </div>
       <div className="px-8 pb-8 flex-1 bg-white">
-        <div className="mb-8">
-          <div className="flex justify-between text-[10px] font-black text-slate-400 font-mono uppercase tracking-widest mb-3">
-            <span>Readiness Score</span>
-            <span className={clsx("transition-colors text-sm font-black", isAllCleared ? "text-emerald-500" : "text-slate-900")}>
-              {Math.round(progressPercent)}%
-            </span>
-          </div>
-          <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-            <div 
-              className={clsx(
-                "h-full transition-all duration-500 rounded-full",
-                isAllCleared ? "bg-emerald-500" : "bg-black"
-              )} 
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="text-center py-6 text-slate-600 text-xs font-bold">로딩 중...</div>
-        ) : loadError ? (
-          <div className="flex flex-col items-center gap-2 py-6 text-rose-600 text-xs font-bold">
-            <AlertTriangle className="w-5 h-5" />
-            체크리스트를 불러오지 못했습니다. 백엔드 연결을 확인하세요.
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            {checklist.map(item => {
-              const isAutomated = !!item.is_automated;
-              const isFailedAuto = isAutomated && !item.is_checked;
-              const isPassed = item.is_checked;
-              const statusKey = isPassed ? "pass" : isFailedAuto ? "fail" : "idle";
-              const styles = STATUS_STYLES[statusKey];
-              return (
-                <button
-                  key={item.item_key}
-                  onClick={() => handleToggle(item.item_key, isAutomated)}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column: Checklist */}
+          <div>
+            <div className="mb-8">
+              <div className="flex justify-between text-[10px] font-black text-slate-400 font-mono uppercase tracking-widest mb-3">
+                <span>Readiness Score</span>
+                <span className={clsx("transition-colors text-sm font-black", isAllCleared ? "text-emerald-500" : "text-slate-900")}>
+                  {Math.round(progressPercent)}%
+                </span>
+              </div>
+              <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div 
                   className={clsx(
-                    "w-full flex items-start gap-4 p-4 rounded-2xl border-2 text-left transition-all bg-white",
-                    isAutomated ? "cursor-default" : "cursor-pointer group",
-                    styles.border
-                  )}
-                >
-                  <div className={clsx(
-                    "mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 border-2 transition-colors",
-                    styles.icon
-                  )}>
-                    {isPassed ? <Check className="w-3.5 h-3.5" strokeWidth={3} /> : isFailedAuto ? <XIcon className="w-3 h-3" strokeWidth={3} /> : <Check className="w-3 h-3" strokeWidth={3} />}
-                  </div>
-                  <div className="flex-1">
-                    <div className={clsx("text-xs font-black leading-tight mb-1", styles.label)}>
-                      {item.label}
-                    </div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className={clsx("text-[10px] font-bold leading-relaxed uppercase tracking-widest", styles.category)}>
-                        {item.category}
-                      </div>
-                      {isAutomated && (
-                        <span className={clsx("px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border", styles.badge)}>
-                          Auto
-                        </span>
-                      )}
-                    </div>
-                    {item.auto_note && (
-                      <div className={clsx("text-[10px] font-medium leading-tight mt-1", styles.note)}>
-                        ↳ {item.auto_note}
-                      </div>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+                    "h-full transition-all duration-500 rounded-full",
+                    isAllCleared ? "bg-emerald-500" : "bg-black"
+                  )} 
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
 
-        {/* 전략 개선 검증 트래커 — Forward Return/ATR 스탑/페니 게이트/Whipsaw 진행 현황 */}
-        <div className="mt-6">
-          <ImprovementTracker />
+            {loading ? (
+              <div className="text-center py-6 text-slate-600 text-xs font-bold">로딩 중...</div>
+            ) : loadError ? (
+              <div className="flex flex-col items-center gap-2 py-6 text-rose-600 text-xs font-bold">
+                <AlertTriangle className="w-5 h-5" />
+                체크리스트를 불러오지 못했습니다. 백엔드 연결을 확인하세요.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {checklist.map(item => {
+                  const isAutomated = !!item.is_automated;
+                  const isFailedAuto = isAutomated && !item.is_checked;
+                  const isPassed = item.is_checked;
+                  const statusKey = isPassed ? "pass" : isFailedAuto ? "fail" : "idle";
+                  const styles = STATUS_STYLES[statusKey];
+                  return (
+                    <button
+                      key={item.item_key}
+                      onClick={() => handleToggle(item.item_key, isAutomated)}
+                      className={clsx(
+                        "w-full flex items-start gap-4 p-4 rounded-2xl border-2 text-left transition-all bg-white",
+                        isAutomated ? "cursor-default" : "cursor-pointer group",
+                        styles.border
+                      )}
+                    >
+                      <div className={clsx(
+                        "mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 border-2 transition-colors",
+                        styles.icon
+                      )}>
+                        {isPassed ? <Check className="w-3.5 h-3.5" strokeWidth={3} /> : isFailedAuto ? <XIcon className="w-3 h-3" strokeWidth={3} /> : <Check className="w-3 h-3" strokeWidth={3} />}
+                      </div>
+                      <div className="flex-1">
+                        <div className={clsx("text-xs font-black leading-tight mb-1", styles.label)}>
+                          {item.label}
+                        </div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={clsx("text-[10px] font-bold leading-relaxed uppercase tracking-widest", styles.category)}>
+                            {item.category}
+                          </div>
+                          {isAutomated && (
+                            <span className={clsx("px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border", styles.badge)}>
+                              Auto
+                            </span>
+                          )}
+                        </div>
+                        {item.auto_note && (
+                          <div className={clsx("text-[10px] font-medium leading-tight mt-1", styles.note)}>
+                            ↳ {item.auto_note}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Right Column: 전략 개선 검증 트래커 */}
+          <div>
+            <div className="flex justify-between text-[10px] font-black text-slate-400 font-mono uppercase tracking-widest mb-3">
+              <span>Improvement Tracker</span>
+            </div>
+            <ImprovementTracker />
+          </div>
         </div>
       </div>
       <div className="p-8 bg-slate-50">

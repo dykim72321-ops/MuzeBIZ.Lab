@@ -86,16 +86,7 @@ export default function UnifiedDashboard() {
 
       <div className="w-full mx-auto space-y-5 animate-in fade-in duration-700 relative z-10 px-4 md:px-6 mt-4">
         
-        {/* ════════ TOP: HEADER & GLOBAL METRICS ════════ */}
-        <div className="flex items-center gap-4 mb-10 w-full">
-          <div className="sfdc-icon-badge">
-            <Activity className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">Operations Center</p>
-            <h1 className="text-3xl font-black text-slate-900 leading-tight tracking-tighter">통합 지휘소</h1>
-          </div>
-        </div>
+        {/* ════════ TOP: GLOBAL METRICS ════════ */}
 
         <div className="sfdc-card flex flex-col xl:flex-row xl:items-center gap-6 p-6 w-full bg-white mb-8">
           <div className="flex-shrink-0">

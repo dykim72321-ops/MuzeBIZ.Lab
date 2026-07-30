@@ -67,15 +67,6 @@ export const MuzepartSearchPage: React.FC = () => {
 
       {/* Page Header */}
       <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 w-full">
-        <div className="flex items-center gap-4 w-full lg:w-auto flex-shrink-0">
-          <div className="sfdc-icon-badge">
-            <Search className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 font-mono">Global Sourcing</p>
-            <h1 className="text-3xl font-black text-slate-900 leading-tight tracking-tighter">제품 검색</h1>
-          </div>
-        </div>
         
         <div className="bg-white px-6 py-4 rounded-full flex items-center gap-6 sfdc-card shadow-sm w-full lg:w-auto">
           <form onSubmit={handleSearch} className="flex items-center gap-2 w-full">
