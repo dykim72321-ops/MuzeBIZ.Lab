@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, CalendarClock, CalendarDays, CalendarRange, Loader2 } from 'lucide-react';
+import { BarChart3, CalendarClock, CalendarDays, CalendarRange, Loader2, AlertTriangle } from 'lucide-react';
 import clsx from 'clsx';
 import {
   ResponsiveContainer,
@@ -14,7 +14,12 @@ import {
   ReferenceLine,
   Legend,
 } from 'recharts';
-import { fetchStrategyReports, type StrategyReportBucket } from '../services/pythonApiService';
+import {
+  fetchStrategyReports,
+  fetchTradeSourceReconciliation,
+  type StrategyReportBucket,
+  type TradeSourceReconciliation,
+} from '../services/pythonApiService';
 import { LiveTransitionChecklist } from '../components/dashboard/LiveTransitionChecklist';
 
 type TimeRange = 'day' | 'week' | 'month';
@@ -37,6 +42,8 @@ export default function ReportsPage() {
   const [reportData, setReportData] = useState<StrategyReportBucket[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [alpacaDataStale, setAlpacaDataStale] = useState(false);
+  const [reconciliation, setReconciliation] = useState<TradeSourceReconciliation | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -47,8 +54,10 @@ export default function ReportsPage() {
         if (!data) {
           setError('리포트 데이터를 불러오는데 실패했습니다.');
           setReportData(null);
+          setAlpacaDataStale(false);
         } else {
           setReportData(data.buckets);
+          setAlpacaDataStale(Boolean(data.alpaca_data_stale));
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : '리포트 데이터를 불러오는데 실패했습니다.');
@@ -58,6 +67,12 @@ export default function ReportsPage() {
     }
     loadData();
   }, [timeRange]);
+
+  // 대시보드(closed-trades)와 리포트(paper_history) 두 소스의 최근 7일 거래건수/순손익
+  // 괴리를 감시한다 — 시간대 선택(timeRange)과 무관하게 한 번만 로드.
+  useEffect(() => {
+    fetchTradeSourceReconciliation(7).then(setReconciliation);
+  }, []);
 
   // Aggregate Data for Chart — 기간별 순이익(바) + 누적 순이익(자산곡선 라인).
   // 두 시리즈 모두 달러 단위이므로 하나의 Y축을 공유한다 (이중축 금지).
@@ -282,15 +297,25 @@ export default function ReportsPage() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold bg-blue-50/80 text-blue-700 border border-blue-200/60 shadow-2xs" title="순이익 및 MDD는 Alpaca 계좌 실제 변동을 반영합니다">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-                      ALPACA ACCOUNT HISTORY (PNL/MDD)
-                    </span>
+                    {alpacaDataStale ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold bg-amber-50/80 text-amber-700 border border-amber-200/60 shadow-2xs" title="Alpaca 계좌 히스토리 조회에 실패해 아래 순이익/MDD는 내부 추정치(gross_profit - gross_loss)입니다. 실계좌 실측값이 아닙니다.">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                        ⚠️ ALPACA 조회 실패 — 내부 추정치 표시 중
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold bg-blue-50/80 text-blue-700 border border-blue-200/60 shadow-2xs" title="순이익 및 MDD는 Alpaca 계좌 실제 변동을 반영합니다">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                        ALPACA ACCOUNT HISTORY (PNL/MDD)
+                      </span>
+                    )}
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold bg-indigo-50/80 text-indigo-700 border border-indigo-200/60 shadow-2xs">
                       KELLY FORMULA & RISK-ADJUSTED MATCHED
                     </span>
                   </div>
                 </div>
+                <p className="px-6 md:px-8 pb-3 -mt-1 text-[10px] text-slate-400 font-medium">
+                  ※ 승률/PF는 엔진 청산 로그(paper_history) 기준입니다. 통합 지휘소 상단의 Win Rate는 Alpaca 실체결(closed-trades) 기준으로 별도 산출되어 두 값이 다를 수 있습니다.
+                </p>
 
                 {/* Desktop / Tablet View (≥ 768px) */}
                 <div className="hidden md:block overflow-x-auto">
@@ -299,7 +324,7 @@ export default function ReportsPage() {
                       <tr className="text-xs font-bold font-mono text-slate-500 uppercase tracking-wider border-b border-slate-200/80 bg-slate-50/80 whitespace-nowrap">
                         <th className="py-3.5 px-6 w-[20%] text-left">기간</th>
                         <th className="py-3.5 px-6 text-right w-[22%]">순이익</th>
-                        <th className="py-3.5 px-6 text-right w-[24%]" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률)">
+                        <th className="py-3.5 px-6 text-right w-[24%]" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률) — 엔진이 청산 시 기록한 자체 로그(paper_history) 기준입니다. 대시보드 상단의 Win Rate(Alpaca 실체결 기준)와 산출 방식이 달라 수치가 다를 수 있습니다.">
                           체결승률(포지션)
                         </th>
                         <th className="py-3.5 px-6 text-right w-[14%]">PF</th>
@@ -409,6 +434,19 @@ export default function ReportsPage() {
 
             {/* Right Col: Checklist */}
             <div className="lg:col-span-4 flex flex-col gap-6">
+              {reconciliation?.available && reconciliation.diverged && (
+                <div className="sfdc-card p-5 border-2 border-amber-300 bg-amber-50/60 flex flex-col gap-2">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertTriangle className="w-4 h-4" />
+                    <h3 className="text-xs font-black uppercase tracking-widest">데이터 소스 괴리 감지</h3>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    최근 {reconciliation.window_days}일: 엔진 로그(paper_history) {reconciliation.paper_history?.trade_count}건 /
+                    ${reconciliation.paper_history?.net_pnl.toLocaleString()} vs Alpaca 실체결 {reconciliation.alpaca_closed_trades?.trade_count}건 /
+                    ${reconciliation.alpaca_closed_trades?.net_pnl.toLocaleString()}. paper_history 기록 누락·중복 가능성을 점검하세요.
+                  </p>
+                </div>
+              )}
               <LiveTransitionChecklist />
             </div>
 

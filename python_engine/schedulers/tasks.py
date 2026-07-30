@@ -314,6 +314,7 @@ async def position_ts_sweeper():
     전혀 없어진다 (GSUN 2026-07-28 사고: TS $0.3958 대비 현재가 $0.1828까지
     프리마켓에서 무방비로 폭락, 09:30 정규장 재개까지 청산 시도 자체가 없었음).
     """
+    import yfinance as yf
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
 
@@ -322,6 +323,16 @@ async def position_ts_sweeper():
     # 10초 주기 — 보유 종목 전체를 배치 1요청으로 조회하므로 분당 6요청,
     # Alpaca 200req/min 제한 대비 3% 수준. 청산 지연을 최대 30초 → 10초로 단축.
     SWEEP_INTERVAL_SEC = 10
+
+    # ZNB 사례(2026-07-30): IEX는 미국 전체 거래량의 2~3%만 처리하는 단일 거래소라
+    # 저유동성 종목은 체결이 몇 분씩 끊길 수 있다 — 그 사이 다른 거래소에서 TS를
+    # 이탈하는 진짜 하락이 일어나도 IEX만 보는 이 스위퍼는 알 방법이 없다(실측:
+    # ZNB가 09:59 ET에 $2.28(TS $2.318 하회)까지 하락했으나 Alpaca IEX 1분봉은
+    # 13:50~14:01 UTC 구간이 통째로 비어 감지 실패, 가격이 반등한 뒤에야 재개됨).
+    # IEX 체결이 이 시간 이상 정체되면 yfinance(전체 거래소 통합 시세)를 보조로
+    # 조회해 더 낮은 쪽을 채택한다 — yfinance도 완벽한 실시간은 아니므로 여전히
+    # 100% 보장은 아니지만, IEX 단독보다는 공백을 크게 줄인다.
+    STALE_TRADE_THRESHOLD_SEC = 120
     print("🧹 [TS Sweeper] Trailing-stop safety sweep started.")
 
     # 이 스위퍼는 start_alpaca_stream()의 스트림 락과 무관하게 앱 시작 시
@@ -606,6 +617,34 @@ async def position_ts_sweeper():
                     price = float(trade.price)
                     if price <= 0:
                         continue
+
+                    # IEX 체결 정체 시 yfinance(통합 시세) 보조 체크 — 더 낮은 쪽 채택
+                    trade_ts = getattr(trade, "timestamp", None)
+                    if trade_ts is not None:
+                        try:
+                            trade_age_sec = (
+                                datetime.now(timezone.utc)
+                                - trade_ts.astimezone(timezone.utc)
+                            ).total_seconds()
+                        except Exception:
+                            trade_age_sec = 0
+                        if trade_age_sec > STALE_TRADE_THRESHOLD_SEC:
+                            try:
+                                yf_price = await asyncio.to_thread(
+                                    lambda t=ticker: yf.Ticker(t).fast_info.get(
+                                        "lastPrice"
+                                    )
+                                )
+                                if yf_price and 0 < float(yf_price) < price:
+                                    print(
+                                        f"⚠️ [TS Sweeper] {ticker} IEX 체결 {trade_age_sec:.0f}초 정체 "
+                                        f"— yfinance 보조가 채택: IEX ${price:.4f} → yfinance ${float(yf_price):.4f}"
+                                    )
+                                    price = float(yf_price)
+                            except Exception as yf_err:
+                                print(
+                                    f"⚠️ [TS Sweeper] {ticker} yfinance 보조 체크 실패: {yf_err}"
+                                )
 
                     # 봉이 안 와도 대시보드/DB 현재가는 최신으로 유지 (스테일 방지)
                     if abs(float(pos.get("current_price") or 0) - price) > 0.0001:

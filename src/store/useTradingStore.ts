@@ -265,13 +265,17 @@ export const useTradingStore = create<TradingState>((set) => ({
       set(updates);
 
       // Edge Monitor 경보 상태 조회
-      const { data: settingsRow } = await supabaseClient
+      const { data: settingsRow, error: settingsError } = await supabaseClient
         .from('system_settings')
         .select('edge_alert_active, edge_alert_message')
         .eq('id', 1)
         .single();
 
-      if (settingsRow) {
+      if (settingsError) {
+        // 이 조회가 실패하면 Edge Monitor 배너가 그냥 안 뜨는 것과 "경보 없음"이
+        // 구분되지 않으므로 최소한 로그는 남긴다.
+        console.error('Failed to load edge alert status:', settingsError);
+      } else if (settingsRow) {
         set({
           edgeAlert: {
             active: Boolean(settingsRow.edge_alert_active),

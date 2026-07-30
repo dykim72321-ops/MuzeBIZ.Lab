@@ -9,7 +9,14 @@ interface PositionHealthBarProps {
 }
 
 export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold, entryPrice }: PositionHealthBarProps) {
-  if (currentPrice === null) return null;
+  if (currentPrice === null) {
+    return (
+      <div className="w-full flex flex-col gap-1 items-end opacity-40">
+        <span className="text-[10px] font-mono font-black uppercase tracking-widest whitespace-nowrap text-slate-400">WAITING</span>
+        <div className="w-full h-1.5 bg-slate-200/50 rounded-full" />
+      </div>
+    );
+  }
 
   // 고점~트레일링스탑 구간에서 현재가가 남긴 여유분 (0% = 스탑 근접, 100% = 방금 고점 경신)
   const isBreached = currentPrice < tsThreshold;
@@ -27,7 +34,7 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold, ent
 
   let gradient = isRiskFree ? 'from-amber-400 to-amber-300' : 'from-emerald-400 to-emerald-300';
   let glow = isRiskFree ? 'rgba(245,158,11,0.5)' : 'rgba(16,185,129,0.4)';
-  let label = isRiskFree ? 'RISK-FREE 🛡️' : 'SAFE';
+  let label = isRiskFree ? 'RISK-FREE' : 'SAFE';
   let labelColor = isRiskFree ? 'text-amber-500' : 'text-emerald-600';
 
   if (isBreached) {
@@ -58,7 +65,7 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold, ent
 
   return (
     <div className="w-full flex flex-col gap-1.5 mt-1" title={`Health: ${healthPct.toFixed(1)}% / 스탑까지 ${distanceToStopPct.toFixed(1)}%`}>
-      <div className="flex justify-between items-center text-xs font-mono font-black px-0.5">
+      <div className="flex justify-between items-center text-xs font-mono font-black px-0.5 whitespace-nowrap">
         <span className={clsx('uppercase tracking-widest transition-colors duration-500', labelColor)}>
           {label}
         </span>

@@ -3,28 +3,39 @@ import { Settings, Bell, Save, RefreshCw, Shield, ShieldOff, ShieldCheck, Send }
 import { supabase } from '../../lib/supabase';
 import { toast } from 'sonner';
 import { toggleSystemArm, updateWebhookUrl, testWebhook } from '../../services/pythonApiService';
+import { useTradingStore } from '../../store/useTradingStore';
 
 export const CommandSettings: React.FC = () => {
   const [webhookUrl, setWebhookUrl] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
 
-  const [isArmed, setIsArmed] = useState<boolean>(false);
+  // ARM 상태는 이 컴포넌트가 독자적으로 들고 있지 않고 useTradingStore를 그대로 구독한다.
+  // 예전엔 여기서 system_settings.is_armed를 별도로 Supabase 조회했는데, 헤더 배지가
+  // 참조하는 스토어 값과 별개의 소스라 watchdog 긴급청산 등 백엔드发 자동 disarm이 발생하면
+  // 이 패널만 재오픈 전까지 낡은 상태를 보여주는 불일치가 있었다.
+  const isArmed = useTradingStore((s) => s.isArmed);
+  const setIsArmed = useTradingStore((s) => s.setIsArmed);
   const [isTogglingArm, setIsTogglingArm] = useState(false);
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      const { data } = await supabase
+    const fetchWebhookUrl = async () => {
+      const { data, error } = await supabase
         .from('system_settings')
-        .select('*')
+        .select('webhook_url')
         .single();
 
-      if (data) {
-        if (data.webhook_url) setWebhookUrl(data.webhook_url);
-        if (data.is_armed !== undefined) setIsArmed(!!data.is_armed);
+      if (error) {
+        console.error('[CommandSettings] system_settings 조회 실패:', error);
+        toast.error('설정 로드 실패', {
+          description: 'Webhook URL을 불러오지 못했습니다. DB 연결을 확인하세요.',
+        });
+        return;
       }
+
+      if (data?.webhook_url) setWebhookUrl(data.webhook_url);
     };
-    fetchSettings();
+    fetchWebhookUrl();
   }, []);
 
   const handleToggleArm = async () => {

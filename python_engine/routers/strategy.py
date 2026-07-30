@@ -13,6 +13,7 @@ from fastapi import APIRouter
 
 from engine.paper_engine import INITIAL_CAPITAL
 from app.state import app_state
+from utils.utils import is_backfilled_phantom_trade
 
 router = APIRouter(prefix="/api/strategy", tags=["strategy"])
 
@@ -21,6 +22,14 @@ stats_cache: TTLCache = TTLCache(maxsize=8, ttl=300)
 _stats_cache_lock = threading.Lock()
 
 _MAX_PROFIT_FACTOR = 99.0
+
+# ── 거래 소스 괴리 감시 임계값 (get_trade_source_reconciliation) ──
+# closed-trades(Alpaca FIFO, 브로커 진실)와 paper_history(엔진 청산 로그)는 원래
+# 측정 대상이 달라(전자는 순수 체결, 후자는 전략 귀속) 약간의 차이는 정상이다.
+# 아래 임계값을 "동시에" 넘을 때만 진짜 이상 신호(phantom position류 엔진 장부 누락)로 본다.
+RECONCILIATION_COUNT_RATIO_THRESHOLD = 0.3  # 거래건수 상대 차이 30% 초과
+RECONCILIATION_PNL_ABS_THRESHOLD = 50.0  # 순손익 절대 차이 $50 초과
+RECONCILIATION_PNL_RATIO_THRESHOLD = 0.3  # 순손익 상대 차이 30% 초과
 
 
 def _base_stats(is_simulated: bool, message: str, badge: str) -> dict:
@@ -204,11 +213,7 @@ async def get_strategy_stats():
         # phantom position 사고 복구 백필 행은 같은 사건의 실제 청산 행과 나란히 남아있어
         # 동일 거래를 두 번 집계하게 만든다 (checklist.py의 compute_improvement_status()와
         # 동일 이슈, 2026-07-23 발견) — 승률/PF/Kelly 입력에서 제외한다.
-        trades = [
-            t
-            for t in (res.data or [])
-            if not (t.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
-        ]
+        trades = [t for t in (res.data or []) if not is_backfilled_phantom_trade(t)]
 
         if not trades:
             return _base_stats(
@@ -313,11 +318,7 @@ async def get_strategy_reports(period: str = "month"):
             .order("closed_at", desc=False)
             .execute
         )
-        all_trades = [
-            t
-            for t in (res.data or [])
-            if not (t.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
-        ]
+        all_trades = [t for t in (res.data or []) if not is_backfilled_phantom_trade(t)]
 
         if not all_trades:
             result = {"period": period, "buckets": [], "message": "거래 내역 없음"}
@@ -353,6 +354,11 @@ async def get_strategy_reports(period: str = "month"):
         trading_client = app_state.trading_client
         alpaca_points = []
         base_value = INITIAL_CAPITAL
+        # Alpaca 실계좌 히스토리 조회가 실패하면 alpaca_net_profit/cumulative/period_mdd가
+        # 전부 내부 추정치(gross_profit-gross_loss 등)로 대체된 채 "ALPACA ACCOUNT
+        # HISTORY" 라벨을 달고 나가는 문제가 있었다 — 이 플래그로 프론트가 그 사실을
+        # 표시할 수 있게 한다 (ReportsPage.tsx의 alpaca_data_stale 배지 참고).
+        alpaca_data_stale = trading_client is None
 
         if trading_client:
             from alpaca.trading.requests import GetPortfolioHistoryRequest
@@ -375,6 +381,7 @@ async def get_strategy_reports(period: str = "month"):
                     alpaca_points.append({"dt": dt_ny, "equity": float(eq_val)})
             except Exception as e:
                 print(f"⚠️ Alpaca history fetch failed: {e}")
+                alpaca_data_stale = True
 
         prev_equity = base_value
         alpaca_global_max = base_value
@@ -507,6 +514,7 @@ async def get_strategy_reports(period: str = "month"):
             "period": period,
             "buckets": bucket_list,
             "message": "거래 내역 기반 리포트입니다.",
+            "alpaca_data_stale": alpaca_data_stale,
         }
         with _stats_cache_lock:
             stats_cache[cache_key] = result
@@ -518,3 +526,91 @@ async def get_strategy_reports(period: str = "month"):
         traceback.print_exc()
         print(f"❌ [strategy/reports] {e}")
         return {"period": period, "buckets": [], "message": f"리포트 계산 오류: {e}"}
+
+
+@router.get("/reconciliation")
+async def get_trade_source_reconciliation(days: int = 7):
+    """closed-trades(Alpaca FIFO, 브로커 진실)와 paper_history(엔진 청산 로그) 두 소스의
+    최근 N일 거래건수·순손익을 비교해 비정상적 괴리를 감지한다.
+
+    통합 지휘소(Win Rate)와 성과 리포트(승률/PF)가 서로 다른 데이터 소스를 쓰는 것은
+    설계상 의도(전자=브로커 진실, 후자=전략 귀속 로그)이지만, 과거 phantom position
+    사고(2026-07-25/07-29, GSUN 부분체결 유령 보유 등)처럼 엔진 장부가 실제 체결과
+    어긋나는 사고가 재발하면 이 괴리가 조기 경보 역할을 한다.
+    """
+    supabase = app_state.supabase
+    trading_client = app_state.trading_client
+    if not supabase or not trading_client:
+        return {
+            "available": False,
+            "message": "DB 또는 브로커 연결 없음 — 괴리 감시 불가",
+        }
+
+    cache_key = f"reconciliation_{days}"
+    if cache_key in stats_cache:
+        return stats_cache[cache_key]
+
+    try:
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        # 1) paper_history (엔진 청산 로그) 소스
+        ph_res = await asyncio.to_thread(
+            supabase.table("paper_history")
+            .select("profit_amt,closed_at,exit_reason")
+            .gte("closed_at", cutoff_iso)
+            .execute
+        )
+        ph_trades = [
+            t for t in (ph_res.data or []) if not is_backfilled_phantom_trade(t)
+        ]
+        ph_count = len(ph_trades)
+        ph_pnl = round(sum(float(t.get("profit_amt") or 0) for t in ph_trades), 2)
+
+        # 2) Alpaca closed-trades (브로커 진실) 소스 — broker.py와 동일 계산 로직 재사용
+        from routers.broker import _compute_closed_trades_from_alpaca
+
+        alpaca_trades_all = await _compute_closed_trades_from_alpaca(trading_client)
+        alpaca_trades = [
+            t for t in alpaca_trades_all if (t.get("created_at") or "") >= cutoff_iso
+        ]
+        alpaca_count = len(alpaca_trades)
+        alpaca_pnl = round(
+            sum(float(t.get("profit_amt") or 0) for t in alpaca_trades), 2
+        )
+
+        count_diff = abs(ph_count - alpaca_count)
+        count_ratio = count_diff / max(ph_count, alpaca_count, 1)
+        pnl_diff = round(abs(ph_pnl - alpaca_pnl), 2)
+        pnl_ratio = pnl_diff / max(abs(ph_pnl), abs(alpaca_pnl), 1.0)
+
+        diverged = count_ratio > RECONCILIATION_COUNT_RATIO_THRESHOLD or (
+            pnl_diff > RECONCILIATION_PNL_ABS_THRESHOLD
+            and pnl_ratio > RECONCILIATION_PNL_RATIO_THRESHOLD
+        )
+
+        result = {
+            "available": True,
+            "window_days": days,
+            "paper_history": {"trade_count": ph_count, "net_pnl": ph_pnl},
+            "alpaca_closed_trades": {
+                "trade_count": alpaca_count,
+                "net_pnl": alpaca_pnl,
+            },
+            "count_diff": count_diff,
+            "pnl_diff": pnl_diff,
+            "diverged": diverged,
+            "message": (
+                f"⚠️ 두 소스 괴리 감지: 거래건수 {ph_count}건(엔진 로그) vs {alpaca_count}건"
+                f"(Alpaca 실체결), 순손익 ${ph_pnl}(엔진 로그) vs ${alpaca_pnl}(Alpaca 실체결). "
+                "paper_history 기록 누락·중복 가능성을 점검하세요."
+                if diverged
+                else "두 소스가 허용 범위 내에서 일치합니다."
+            ),
+        }
+        with _stats_cache_lock:
+            stats_cache[cache_key] = result
+        return result
+
+    except Exception as e:
+        print(f"❌ [strategy/reconciliation] {e}")
+        return {"available": False, "message": f"괴리 감시 계산 오류: {e}"}

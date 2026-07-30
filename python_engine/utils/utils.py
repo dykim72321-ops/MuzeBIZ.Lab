@@ -8,6 +8,18 @@ import pandas_market_calendars as mcal
 _nyse_calendar = mcal.get_calendar("NYSE")
 _holiday_cache: dict = {}
 
+# phantom position 사고(부분체결 유령 보유 등) 소급 복구 시 paper_history에 남기는
+# exit_reason 접두어. 실거래가 아니므로 승률/PF/체크리스트 표본에서 제외해야 하는데,
+# 이 문자열이 checklist.py/strategy.py/broker.py/paper_engine.py 여러 곳에 각각
+# 하드코딩되어 있었다 — 한 곳만 바뀌면 나머지가 조용히 필터링을 멈추는 리스크가 있어
+# 단일 상수로 통일한다.
+BACKFILLED_EXIT_REASON_PREFIX = "Manual Sell (Backfilled"
+
+
+def is_backfilled_phantom_trade(record: dict) -> bool:
+    """paper_history/paper_positions 레코드가 phantom 사고 소급 복구 행인지 판별."""
+    return (record.get("exit_reason") or "").startswith(BACKFILLED_EXIT_REASON_PREFIX)
+
 
 def _is_trading_day(now_et: datetime) -> bool:
     """평일이면서 NYSE 휴장일이 아닌 날인지 (요일·캘린더만 체크, 시간대는 무관)."""

@@ -133,12 +133,12 @@ export function useDashboardData() {
   const displayedTotalTrades = useMemo(() => slicedHistory.length, [slicedHistory]);
 
   // ── Derived: Total PnL ──
+  // 백엔드(broker.py._with_unrealized_pl)가 Decimal 정밀도로 계산한 unrealized_pl을
+  // 그대로 합산한다. 여기서 (current-entry)*units를 float으로 재계산하면 포지션
+  // 테이블의 행별 unrealized_pl 합계와 이 카드의 값이 반올림 오차로 미세하게
+  // 어긋날 수 있어 백엔드 단일 소스 원칙을 그대로 따른다.
   const totalPnl = useMemo(
-    () =>
-      livePositions.reduce(
-        (sum, p) => sum + (((p.current_price || p.entry_price) - p.entry_price) * p.units || 0),
-        0,
-      ),
+    () => livePositions.reduce((sum, p) => sum + (p.unrealized_pl ?? 0), 0),
     [livePositions],
   );
 
@@ -381,26 +381,34 @@ export function useDashboardData() {
   }, []);
 
   const handleClosePosition = useCallback(
-    async (ticker: string) => {
-      toast(`🛑 ${ticker} 청산 확인`, {
-        description: '이 포지션을 시장가로 즉시 청산하시겠습니까?',
+    async (ticker: string, percentage: number = 100) => {
+      const isPartial = percentage < 100;
+      toast(`🛑 ${ticker} ${isPartial ? `${percentage}% 부분 매도` : '전량 청산'} 확인`, {
+        description: isPartial
+          ? `이 포지션의 ${percentage}%를 시장가로 즉시 매도하시겠습니까? 나머지는 계속 보유합니다.`
+          : '이 포지션을 시장가로 즉시 청산하시겠습니까?',
+        duration: 15000,
         action: {
-          label: '청산 실행',
+          label: '확정',
           onClick: async () => {
-            const toastId = toast.loading(`${ticker} 청산 명령 전송 중...`);
+            const toastId = toast.loading(`${ticker} ${isPartial ? '부분 매도' : '청산'} 명령 전송 중...`);
             try {
-              const result = await sellPaperPosition(ticker);
+              const result = await sellPaperPosition(ticker, percentage);
               if (result?.status === 'success') {
-                toast.success(`${ticker} 청산 성공`, { id: toastId });
+                toast.success(`${ticker} ${isPartial ? '부분 매도' : '청산'} 성공`, { id: toastId });
                 loadDashboardData();
               } else {
-                toast.error(result?.error || '청산 실패', { id: toastId });
+                toast.error(result?.error || '매도 실패', { id: toastId });
               }
             } catch (e: unknown) {
               const detail = e instanceof ApiClientError ? e.detail : undefined;
-              toast.error(detail || '청산 에러', { id: toastId });
+              toast.error(detail || '매도 에러', { id: toastId });
             }
           },
+        },
+        cancel: {
+          label: '취소',
+          onClick: () => {},
         },
       });
     },

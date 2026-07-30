@@ -17,6 +17,7 @@ import { BacktestPanel } from '../components/dashboard/BacktestPanel';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
 import { TensionGauge } from '../components/dashboard/TensionGauge';
 import { PositionHealthBar } from '../components/dashboard/PositionHealthBar';
+import { PartialSellControl } from '../components/dashboard/PartialSellControl';
 import { DashboardControls } from '../components/dashboard/HeaderCommandBar';
 import { MetricsGrid } from '../components/dashboard/MetricsGrid';
 import { RiskAnalyticsPanel } from '../components/dashboard/RiskAnalyticsPanel';
@@ -338,7 +339,7 @@ export default function UnifiedDashboard() {
                 {/* Desktop Table View */}
                 <table className="hidden md:table w-full text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-100 text-[10px] font-mono font-extrabold text-slate-600 uppercase bg-slate-50/50 sticky top-0 shadow-sm z-10">
+                    <tr className="border-b border-slate-100 text-xs font-mono font-extrabold text-slate-600 uppercase bg-slate-50/50 sticky top-0 shadow-sm z-10">
                       <th className="py-3 px-5">종목</th>
                       <th className="py-3 px-3 text-right hidden sm:table-cell">수량</th>
                       <th className="py-3 px-3 text-right">진입가</th>
@@ -380,18 +381,13 @@ export default function UnifiedDashboard() {
                             <td className="py-4 px-3 text-right font-mono text-slate-600 text-xs font-bold hidden md:table-cell">
                               ${pos.trailing_stop ? Number(pos.trailing_stop).toFixed(dec) : '-'}
                             </td>
-                            <td className={clsx("py-4 px-5 text-right font-mono text-xs font-extrabold", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
+                            <td className={clsx("py-4 px-5 text-right font-mono text-sm font-extrabold", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
                               <span className="block">{hasPnl ? `${isProfit ? '+' : '-'}$${Math.abs(Number(pos.unrealized_pl ?? 0)).toFixed(2)}` : '-'}</span>
-                              <span className="block text-[10px] mt-1">{hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}</span>
+                              <span className="block text-xs mt-1">{hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}</span>
                             </td>
                             <td className="py-4 px-5 align-middle">
-                              <div className="flex flex-col items-center gap-1.5 w-full max-w-[80px] mx-auto">
-                                <button
-                                  onClick={() => handleClosePosition(pos.ticker)}
-                                  className="btn-ghost-rose text-[11px] px-3 py-1.5 w-full"
-                                >
-                                  정산
-                                </button>
+                              <div className="flex flex-col items-center gap-1.5 w-full max-w-[130px] mx-auto">
+                                <PartialSellControl onSell={(pct) => handleClosePosition(pos.ticker, pct)} />
                                 <div className="w-full">
                                   <PositionHealthBar 
                                     currentPrice={pos.current_price} 
@@ -447,12 +443,7 @@ export default function UnifiedDashboard() {
                               <span className="font-black text-black text-sm mt-0.5">${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}</span>
                             </div>
                           </div>
-                          <button
-                            onClick={() => handleClosePosition(pos.ticker)}
-                            className="w-full btn-ghost-rose text-xs font-extrabold py-2.5"
-                          >
-                            정산하기
-                          </button>
+                          <PartialSellControl onSell={(pct) => handleClosePosition(pos.ticker, pct)} />
                           <div className="mt-4 px-1">
                             <PositionHealthBar 
                               currentPrice={pos.current_price} 
@@ -486,11 +477,11 @@ export default function UnifiedDashboard() {
                   <Clock className="w-4 h-4 text-slate-900" /> Recent Exits
                 </h2>
               </div>
-              <div className="p-4 flex-1 min-h-0 overflow-auto bg-slate-50/50">
+              <div className="p-4 flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-slate-50/50">
                 {liveHistory.length === 0 ? (
                   <div className="text-center py-10 text-slate-600 text-xs font-bold">기록 없음</div>
                 ) : (
-                  <div className="space-y-3 min-w-[320px]">
+                  <div className="space-y-3 w-full">
                     {liveHistory.slice(0, 30).map((trade: PaperHistory, idx: number) => {
                       const isWin = Number(trade.profit_amt) >= 0;
                       return (

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from services.quant_engine import SPIKE_GUARD_PCT_NORMAL
+from utils.utils import is_backfilled_phantom_trade
 
 _NY_TZ = ZoneInfo(
     "America/New_York"
@@ -17,9 +18,7 @@ INITIAL_CAPITAL = 100000.0
 MIN_BUY_BUDGET = (
     100.0  # 최소 주문 금액 (달러) - 초소형 파편화 거래 방지 (기존 10.0에서 상향)
 )
-MAX_BUY_BUDGET = 5000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_BUDGET × MAX_CONCURRENT = 총 배포 상한
-# Kelly 15% × $100k = $15k → MAX_BUY_BUDGET $5k 캡으로 실질 포지션당 $5k 고정
-# $5k × 15 = $75k = MAX_CONCENTRATION 75% → 내부 수학 완결
+MAX_BUY_BUDGET = 1000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_BUDGET × MAX_CONCURRENT = 총 배포 상한
 MAX_CONCURRENT_POSITIONS = 20  # 동시 보유 최대 종목 수 (실질 도달 가능 상한)
 MAX_CONCENTRATION_PCT = 0.75  # 총 자산 대비 투입 비중 상한 (75%)
 TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%, 손실 포지션 빠른 탈출)
@@ -774,6 +773,74 @@ class PaperTradingManager:
                         )
             raise close_err
 
+    async def manual_partial_sell(
+        self, pos: dict, signal_price: float, sell_units: float
+    ) -> dict | None:
+        """사령관 수동 부분 매도 — 요청 수량만 매도하고 나머지는 포지션에 그대로 남긴다.
+
+        Scale-Out(process_signal 내부)과 동일한 "일부 매도 → units 정정" 패턴을
+        재사용하되, 자동 트리거(RSI/수익률) 대신 사용자가 직접 수량을 지정한다는
+        점만 다르다. TS(ts_threshold)는 건드리지 않는다 — 자동 Scale-Out과 달리
+        사용자가 이미 직접 판단해 일부만 정리한 것이므로, 남은 물량의 방어선을
+        임의로 조이지 않고 기존 트레일링 스탑 로직이 계속 관리하게 둔다.
+
+        호출부(manual_paper_sell)가 이미 engine._get_exit_lock(ticker) 안에서
+        호출하므로 자동 청산 경로(EOD/Time-Decay/Scale-Out/Trailing Stop)와의
+        경합은 그 락이 막는다.
+        """
+        ticker = pos["ticker"]
+        entry_price = float(pos["entry_price"])
+        units = float(pos["units"])
+
+        fill_price = _apply_slippage(signal_price, is_buy=False)
+        executed = await self._on_order_sell(
+            ticker, sell_units, fill_price, "Manual Partial Sell"
+        )
+        if executed is None:
+            return None
+        sell_units, fill_price = executed
+
+        proceeds = sell_units * fill_price
+        await self._apply_cash_delta(proceeds)
+
+        remaining_units = round(units - sell_units, 4)
+        await asyncio.to_thread(
+            self.supabase.table("paper_positions")
+            .update({"units": remaining_units, "current_price": fill_price})
+            .eq("ticker", ticker)
+            .execute
+        )
+
+        pnl_pct = (fill_price / entry_price - 1) * 100
+        profit_amt = sell_units * (fill_price - entry_price)
+        await asyncio.to_thread(
+            self.supabase.table("paper_history")
+            .insert(
+                {
+                    "ticker": ticker,
+                    "entry_price": entry_price,
+                    "exit_price": fill_price,
+                    "signal_price": signal_price,
+                    "slippage_pct": (fill_price / signal_price - 1) * 100,
+                    "pnl_pct": pnl_pct,
+                    "profit_amt": profit_amt,
+                    "exit_reason": f"Manual Partial Sell ({sell_units:.2f}주)",
+                }
+            )
+            .execute
+        )
+
+        if ticker in self._kelly_cache:
+            del self._kelly_cache[ticker]
+
+        return {
+            "fill_price": fill_price,
+            "sold_units": sell_units,
+            "remaining_units": remaining_units,
+            "pnl_pct": pnl_pct,
+            "profit_amt": profit_amt,
+        }
+
     REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간
     # PDT Rule은 마진 계좌 $25k 미만에만 적용 — $100k 가상 계좌에서는 불필요
     ENFORCE_PDT_SAFEGUARD = False
@@ -976,9 +1043,7 @@ class PaperTradingManager:
                 cb_rows = [
                     r
                     for r in (cb_history.data or [])
-                    if not (r.get("exit_reason") or "").startswith(
-                        "Manual Sell (Backfilled"
-                    )
+                    if not is_backfilled_phantom_trade(r)
                 ]
                 if len(cb_rows) > 0:
                     total_pnl = sum(float(r.get("profit_amt") or 0) for r in cb_rows)
@@ -1040,9 +1105,7 @@ class PaperTradingManager:
                 recent_history_rows = [
                     r
                     for r in (recent_history.data or [])
-                    if not (r.get("exit_reason") or "").startswith(
-                        "Manual Sell (Backfilled"
-                    )
+                    if not is_backfilled_phantom_trade(r)
                 ]
                 today_rows = []
                 for r in recent_history_rows:
@@ -1902,9 +1965,7 @@ class PaperTradingManager:
             .execute
         )
         return [
-            r
-            for r in (recent_history.data or [])
-            if not (r.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+            r for r in (recent_history.data or []) if not is_backfilled_phantom_trade(r)
         ]
 
     async def _register_pullback_watch(

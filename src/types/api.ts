@@ -93,6 +93,8 @@ export interface PaperSellResponse {
   exit_price: number;
   pnl_pct: number;
   profit_amt: number;
+  sold_units?: number;
+  remaining_units?: number;
   error?: string;
 }
 

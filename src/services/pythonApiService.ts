@@ -106,6 +106,8 @@ export interface StrategyReportsResponse {
   period: 'week' | 'month';
   buckets: StrategyReportBucket[];
   message: string;
+  /** true면 Alpaca 실계좌 히스토리 조회가 실패해 alpaca_* 필드가 내부 추정치로 대체됐음을 뜻한다 */
+  alpaca_data_stale?: boolean;
 }
 
 export interface BacktestRunParams {
@@ -280,26 +282,19 @@ export async function fetchPaperHistory(): Promise<PaperHistoryRaw[]> {
  * 브로커 오픈 포지션 조회
  */
 export async function fetchBrokerPositions(): Promise<BrokerPositionRaw[]> {
-  try {
-    const data = await apiClient.broker.get<BrokerPositionRaw[]>('/api/broker/positions');
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Positions fetch error:', error);
-    return [];
-  }
+  // 실패 시 예외를 그대로 전파한다 — 호출부(Promise.allSettled)가 rejected로 인식해야
+  // connectionError 배지가 켜진다. 여기서 []로 스웰로우하면 "포지션 0개"와 "조회 실패"가
+  // 구분 불가능해져 실제 보유 포지션이 대시보드에서 사라진 것처럼 보이는 사고로 이어진다.
+  const data = await apiClient.broker.get<BrokerPositionRaw[]>('/api/broker/positions');
+  return Array.isArray(data) ? data : [];
 }
 
 /**
  * 브로커 최근 주문 내역 조회
  */
 export async function fetchBrokerOrders(limit: number = 50): Promise<ManualOrderResponse[]> {
-  try {
-    const data = await apiClient.broker.get<ManualOrderResponse[]>(`/api/broker/orders?limit=${limit}`);
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Orders fetch error:', error);
-    return [];
-  }
+  const data = await apiClient.broker.get<ManualOrderResponse[]>(`/api/broker/orders?limit=${limit}`);
+  return Array.isArray(data) ? data : [];
 }
 
 /**
@@ -342,8 +337,8 @@ export async function fetchAlpacaQuotes(tickers: string[]): Promise<AlpacaBatchQ
 /**
  * 페이퍼 트레이딩 포지션 수동 청산
  */
-export async function sellPaperPosition(ticker: string): Promise<PaperSellResponse> {
-  return apiClient.broker.post<PaperSellResponse>('/api/broker/paper/sell', { ticker });
+export async function sellPaperPosition(ticker: string, percentage: number = 100): Promise<PaperSellResponse> {
+  return apiClient.broker.post<PaperSellResponse>('/api/broker/paper/sell', { ticker, percentage });
 }
 
 /**
@@ -357,26 +352,16 @@ export async function deletePaperHistory(historyId: string): Promise<{ status: s
  * Alpaca 실계좌 체결 이력 조회 (FIFO PnL 매칭)
  */
 export async function fetchClosedTrades(limit: number = 30): Promise<ClosedTradeRaw[]> {
-  try {
-    const data = await apiClient.broker.get<ClosedTradeRaw[]>(`/api/broker/closed-trades?limit=${limit}`);
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Closed trades fetch error:', error);
-    return [];
-  }
+  const data = await apiClient.broker.get<ClosedTradeRaw[]>(`/api/broker/closed-trades?limit=${limit}`);
+  return Array.isArray(data) ? data : [];
 }
 
 /**
  * Alpaca 실제 포트폴리오 히스토리 조회
  */
 export async function fetchPortfolioHistory(period: string = "all", timeframe: string = "1D"): Promise<unknown[]> {
-  try {
-    const data = await apiClient.broker.get<unknown[]>(`/api/broker/portfolio-history?period=${period}&timeframe=${timeframe}`);
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('[PythonAPI] Portfolio history fetch error:', error);
-    return [];
-  }
+  const data = await apiClient.broker.get<unknown[]>(`/api/broker/portfolio-history?period=${period}&timeframe=${timeframe}`);
+  return Array.isArray(data) ? data : [];
 }
 
 /**
@@ -428,6 +413,30 @@ export async function fetchStrategyReports(period: 'day' | 'week' | 'month' = 'm
     return await apiClient.get<StrategyReportsResponse>(`/api/strategy/reports?period=${period}`);
   } catch (error) {
     console.error('[PythonAPI] Strategy reports error:', error);
+    return null;
+  }
+}
+
+export interface TradeSourceReconciliation {
+  available: boolean;
+  window_days?: number;
+  paper_history?: { trade_count: number; net_pnl: number };
+  alpaca_closed_trades?: { trade_count: number; net_pnl: number };
+  count_diff?: number;
+  pnl_diff?: number;
+  diverged?: boolean;
+  message: string;
+}
+
+/**
+ * 대시보드(Alpaca closed-trades)와 성과 리포트(paper_history) 두 소스의 거래건수·순손익
+ * 괴리를 감시한다. phantom position류 사고(엔진 장부 ≠ 실제 체결)의 조기 경보 용도.
+ */
+export async function fetchTradeSourceReconciliation(days: number = 7): Promise<TradeSourceReconciliation | null> {
+  try {
+    return await apiClient.get<TradeSourceReconciliation>(`/api/strategy/reconciliation?days=${days}`);
+  } catch (error) {
+    console.error('[PythonAPI] Trade source reconciliation error:', error);
     return null;
   }
 }

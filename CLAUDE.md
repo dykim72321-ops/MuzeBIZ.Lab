@@ -234,11 +234,10 @@ HOLD 포지션(`app_state._held_tickers`)은 경량 경로: RSI-14·ATR-14만 �
 ### 포지션 사이징 상수
 
 ```python
-KELLY_FRACTION = 0.15    # 가용 현금의 15% (Kelly 15% × $100k = $15k → MAX_BUY_BUDGET 캡으로 $5k 고정)
-MIN_BUY_BUDGET = 10.0   # 최소 주문 금액
-MAX_BUY_BUDGET = 5000.0 # 종목당 최대 매수 금액 ($5000)
+MIN_BUY_BUDGET = 100.0  # 최소 주문 금액 (초소형 파편화 거래 방지, 2026-07-30 이전 $10에서 상향)
+MAX_BUY_BUDGET = 1000.0 # 종목당 최대 매수 금액 ($1,000, 2026-07-30 $5,000에서 하향)
 MAX_CONCURRENT_POSITIONS = 20  # 동시 보유 최대 종목 수 (실질 도달 가능한 상한)
-MAX_CONCENTRATION_PCT = 0.75   # 총 자산 대비 투입 비중 상한 (20종목 × $5k = $100k = 100% 이론 상한)
+MAX_CONCENTRATION_PCT = 0.75   # 총 자산 대비 투입 비중 상한 (20종목 × $1k = $20k = $100k 계좌의 20% — 75% 상한과는 이제 수학적으로 무관, 실제 체결 종목 수가 늘어도 75% 캡이 먼저 걸릴 일은 거의 없음)
 TS_INIT_PCT    = 0.90   # 일반: 초기 TS -10%
 TS_TRAIL_PCT   = 0.95   # 일반: 최고가 추종 TS
 REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간
@@ -273,7 +272,7 @@ LONG_TERM_MAX_PRICE    = 50.0  # 진입가가 이 값 이하이면 장기 보유
 LONG_TERM_TS_TRAIL_PCT = 0.95  # 최고가 추종 TS -5% (진입 시점부터 동일 폭 — ATR/브레이크이븐락인 없음)
 ```
 
-`is_long_term` 판정: `entry_price <= LONG_TERM_MAX_PRICE` (진입가 기준, 매 호출 시 계산). 진입은 기존 DNA 게이트(75)로 완전 자동, 매도는 최고가 대비 -5% 트레일링 스탑 단 하나만 자동이고 그 외 자동 청산(Scale-Out/Time-Decay/EOD 강제청산)은 전부 스킵 — 사용자가 기존 수동 매도(청산) 버튼으로 익절 시점을 직접 결정하는 것이 의도된 설계. 새 매수 버튼은 없음(기존 자동매수 그대로). **2026-07-28부로 스캐너(`core/quant_scanner.py`)가 $1 이하·$50 초과 종목을 아예 스캔·watchlist 등록 대상에서 제외**하므로, 신규 진입은 사실상 전부 이 장기 보유 모드로만 발생한다 — $50 초과 진입가에 적용되는 일반(ATR 트레일링) 경로는 그 이전에 이미 매수된 레거시 포지션이 청산될 때까지만 코드에 남아있는 하위호환 경로다.
+`is_long_term` 판정: `entry_price <= LONG_TERM_MAX_PRICE` (진입가 기준, 매 호출 시 계산). 진입은 기존 DNA 게이트(75)로 완전 자동, 매도는 최고가 대비 -5% 트레일링 스탑 단 하나만 자동이고 그 외 자동 청산(Scale-Out/Time-Decay/EOD 강제청산)은 전부 스킵 — 사용자가 기존 수동 매도(청산) 버튼으로 익절 시점을 직접 결정하는 것이 의도된 설계. 새 매수 버튼은 없음(기존 자동매수 그대로). **2026-07-30부터 수동 매도가 부분 매도도 지원** — 대시보드 포지션 카드의 "50%" 버튼(또는 `POST /api/broker/paper/sell {ticker, percentage}`)으로 일부만 정리하고 나머지는 계속 보유 가능. 부분 매도는 `ts_threshold`를 조정하지 않으므로 남은 물량의 -5% 트레일링 스탑은 그대로 유지된다. **2026-07-28부로 스캐너(`core/quant_scanner.py`)가 $1 이하·$50 초과 종목을 아예 스캔·watchlist 등록 대상에서 제외**하므로, 신규 진입은 사실상 전부 이 장기 보유 모드로만 발생한다 — $50 초과 진입가에 적용되는 일반(ATR 트레일링) 경로는 그 이전에 이미 매수된 레거시 포지션이 청산될 때까지만 코드에 남아있는 하위호환 경로다.
 
 ### Scale-Out 조건 (`process_signal()`)
 
@@ -390,7 +389,7 @@ Frontend (Vite :5173)
 | `/api/broker/paper/account` | GET | 가상 계좌 잔고 |
 | `/api/broker/paper/positions` | GET | 현재 보유 포지션 |
 | `/api/broker/paper/history` | GET | 최근 30건 거래 이력 |
-| `/api/broker/paper/sell` | POST | 수동 청산 `{ticker}` |
+| `/api/broker/paper/sell` | POST | 수동 청산 `{ticker, percentage?}` — `percentage` 생략 시 100(전량). 100 미만이면 `PaperTradingManager.manual_partial_sell()`로 분기해 해당 비중만 매도하고 나머지는 포지션(HOLD) 그대로 유지, `ts_threshold`는 건드리지 않음 (2026-07-30) |
 | `/api/broker/arm` | POST | 자동 매매 ON/OFF `{arm: bool}` |
 
 ### Penny Lab
@@ -553,3 +552,4 @@ NEXAR_CLIENT_SECRET
 | 프리마켓/애프터마켓에 TS 감시 경로가 전무해 갭다운이 무방비로 방치됨(실사례: GSUN, TS $0.3958 대비 현재가 $0.1828까지 프리마켓에서 폭락하는 동안 09:30 정규장 재개 전까지 청산 시도 자체가 없었음) | `schedulers/tasks.py` + `utils/utils.py` | `position_ts_sweeper()`가 1분봉 공백 사각지대를 메우려고 2026-07-17에 추가된 10초 안전망인데(RAYA 사고 대응), 정작 게이트가 정규장 전용 `is_market_hours()`(평일 09:30~16:00 ET)라 가장 위험한 프리마켓/애프터마켓 자체가 커버 대상에서 빠져있었음. 1분봉 스트림도 `stream_scheduler()`가 장마감 시 완전히 끊어 정규장에만 도는 건 동일 | `utils.py`에 `is_extended_market_hours()`(평일 04:00~20:00 ET) 신규 추가, `position_ts_sweeper()`의 게이트를 `is_market_hours()`→`is_extended_market_hours()`로 교체. CLOSING 고착 복구 로직은 같은 루프 안에서 자동으로 확장 시간대까지 커버됨 — 단, EOD 강제청산(`is_eod`)은 게이트 확장에 편승해 15:30~20:00 ET 전체로 같이 넓어지면 애프터마켓 저유동성 가격에 강제 체결되는 부작용이 있어 `dtime(15,30) <= now_et.time() < dtime(16,0)`로 원래 30분 창을 명시적으로 유지(코드 리뷰에서 발견해 즉시 수정). 심야(20:00~04:00 ET)는 Alpaca 체결 데이터가 희박해 여전히 미커버 — LIVE 모드 브로커 사이드 Stop-Market(`ensure_broker_stop`)도 Alpaca `clock.is_open` 기준이라 정규장 외엔 등록되지 않아(`extended_hours` 미설정) 별개 과제로 남음 (2026-07-28) |
 | 저유동성 종목의 전량 청산 시장가 주문이 부분체결(요청 수량 일부만 체결 후 잔여분 타임아웃 취소)되면, 실제로는 일부만 팔렸는데도 시스템이 "전체 포지션 청산 완료"로 기록해 미판매 잔여분이 DB 어디에도 안 잡히는 유령 보유가 됨(실사례: GSUN 2026-07-27, 2,614주 청산 시도 중 극심한 유동성 고갈로 5회 연속 시장가 주문 0주 체결·취소, 마지막 시도에서 373주(14%)만 체결됐는데 `paper_history`엔 전량 청산으로 기록되고 `paper_positions` 행이 삭제됨. 잔여 2,241주가 이틀 가까이(7/27~7/29) TS 감시 대상에서 완전히 이탈해 방치되다 사용자가 Alpaca 대시보드에서 직접 발견해 수동 매도) | `engine/paper_engine.py` | `_close_position()`이 항상 "요청 수량 = 실제 판매 수량"을 가정하고 `_on_order_sell()`(LIVE 모드는 `_submit_alpaca_order`)이 반환한 실체결 수량을 그대로 "전체 청산"으로 처리 — 부분체결이어도 `paper_positions`를 무조건 DELETE. 매수(BUY) 쪽엔 이미 동일 패턴의 phantom 방지 로직이 있었으나(2026-07-25, `_FILLED_STATUSES`에서 `PARTIALLY_FILLED` 제거) 매도(SELL) 쪽엔 대칭 방어가 없었음 | 청산 요청 수량(`requested_units`) 대비 실체결 수량이 1% 넘게 부족하면(`is_partial_close`) `paper_history`엔 실체결분만 `(부분체결 X/Y주)` 표시로 기록하고, `paper_positions`는 삭제 대신 `units`를 잔여분으로 정정해 원래 상태(HOLD)로 유지 — 다음 `position_ts_sweeper` 사이클이 잔여 물량을 계속 청산 시도하도록 함. 정상 예외처리 재시도 경로(cash 반영 후 history/positions 갱신 실패 시 1회 재시도)도 동일하게 분기 처리. Discord에 부분체결 사실과 잔여 수량을 별도 알림 (2026-07-29) |
 | 2026-07-28 스캐너 변경으로 진입가 $1 이하 신규 진입이 완전히 불가능해졌는데도 `paper_engine.py`에 페니 전용 상태머신(진입 게이트·TS·슬리피지·Scale-Out·Chandelier·눌림목 되돌림폭)이 그대로 남아있어, 코드를 처음 보는 사람이 "페니 전략이 아직 살아있다"고 오인하거나 실수로 그 죽은 분기에 새 로직을 얹을 위험이 있었음 | `engine/paper_engine.py` + `live_engine.py` + `schedulers/tasks.py` + `routers/checklist.py` + `engine/portfolio_backtester.py` + 프론트엔드(`TensionGauge.tsx`) | 진입가 $1 이하 오픈 포지션이 0건임을 DB로 확인 후에도 `PENNY_MAX_PRICE`/`PENNY_TS_*`/`penny_dna_gate` 등 관련 상수·`is_penny`/`is_penny_signal` 분기가 계속 유지되고 있었음 — "이전에 매수된 레거시 포지션의 청산 로직 유지 목적"이라는 주석과 달리 실제로 지킬 레거시 포지션이 이미 사라진 상태였음 | 페니 전용 상태머신 전체 삭제(항상 "일반" 값만 사용), `PENNY_MAX_PRICE`→`LONG_TERM_MIN_PRICE`로 개명해 장기 보유 모드 하한 경계로만 재사용. `live_engine.py`의 `PENNY_FILL_POLL_TIMEOUT_SEC`, `checklist.py`의 `penny_gate_80` 롤백 액션(감사 기록은 유지)도 함께 제거. `TensionGauge.tsx`의 페니 전용 DNA 80 게이트 표시(실제로는 이미 75 단일 게이트)도 제거. `backtest_harness/run_comparison.py`(9e52902 이전 OLD 전략 재현 하네스)만 예외적으로 로컬 상수로 페니 파라미터 보존 (2026-07-30) |
+| 저유동성 종목(ZNB)이 TS(-5%) 아래로 실제 하락했는데도 PAPER 모드 포지션이 청산되지 않음 — 사용자가 대시보드 밖 실제 시세로 -6.56% 손실을 확인했는데 시스템은 -2%대로 표시, TS 미발동 | `schedulers/tasks.py` (`position_ts_sweeper`) | 원인은 로직 버그가 아니라 데이터 피드 공백이었음 — Alpaca `StockLatestTradeRequest`가 기본으로 쓰는 `DataFeed.IEX`는 전체 미국 주식 거래량의 2~3%만 처리하는 단일 거래소라, ZNB처럼 거래량이 희박한 종목은 체결이 몇 분씩 끊긴다. 실측: yfinance(전 거래소 통합 시세)는 09:59 ET에 $2.28(TS $2.318 하회)까지 하락한 걸 보여줬지만, 같은 시간 Alpaca IEX 1분봉은 13:50~14:01 UTC 구간이 통째로 비어 있었고 가격이 반등한 뒤인 13:50 체결가($2.39)만 스위퍼에 남아 TS 이탈이 감지되지 않음 | `position_ts_sweeper()`에 IEX 체결 정체 감지 추가 — 최신 체결(`trade.timestamp`)이 `STALE_TRADE_THRESHOLD_SEC`(120초)보다 오래됐으면 `yf.Ticker(ticker).fast_info["lastPrice"]`(통합 시세)를 보조 조회해 IEX가와 비교, 더 낮은 쪽을 TS 판정·`current_price` 갱신에 채택. yfinance도 완전한 실시간은 아니므로 100% 보장은 아니며, 이 한계는 LIVE 모드에서는 `ensure_broker_stop()`(브로커 사이드 실제 Stop-Market)이 이미 커버해 영향 없음 — PAPER 전용 보완책 (2026-07-30) |

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from api.deps import get_api_key
 from app.state import app_state
+from utils.utils import is_backfilled_phantom_trade
 
 router = APIRouter(prefix="/api/broker", tags=["broker"])
 
@@ -45,6 +46,7 @@ class ClosePositionRequest(BaseModel):
 
 class PaperSellRequest(BaseModel):
     ticker: str
+    percentage: float = 100.0  # 매도할 비중 (0 초과 ~ 100 이하). 100 미만이면 부분 매도
 
 
 # ── Alpaca 실계좌 ────────────────────────────────────────────────────────────
@@ -227,7 +229,7 @@ async def get_portfolio_history(
         return data
     except Exception as e:
         print(f"⚠️ Portfolio history fetch failed: {e}")
-        return []
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.post("/arm")
@@ -538,7 +540,7 @@ async def get_broker_positions(api_key: str = Security(get_api_key)):
         return result
     except Exception as e:
         print(f"❌ Broker Positions Error: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/orders")
@@ -572,7 +574,7 @@ async def get_broker_orders(limit: int = 50, api_key: str = Security(get_api_key
         ]
     except Exception as e:
         print(f"❌ Broker Orders Error: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 # ── Paper Trading ────────────────────────────────────────────────────────────
@@ -719,9 +721,7 @@ async def get_paper_history(limit: int = 30, api_key: str = Security(get_api_key
         # 승률/리스크 지표 집계에서 제외한다 — routers/strategy.py·routers/checklist.py와
         # 동일 컨벤션 (2026-07-27: 이 엔드포인트만 누락되어 있던 것을 발견해 정합화).
         filtered_data = [
-            item
-            for item in res.data
-            if not (item.get("exit_reason") or "").startswith("Manual Sell (Backfilled")
+            item for item in res.data if not is_backfilled_phantom_trade(item)
         ]
         history = []
         for item in filtered_data:
@@ -776,6 +776,12 @@ async def manual_paper_sell(
         raise HTTPException(status_code=503, detail="Trading engine not initialized")
 
     ticker = req.ticker.upper()
+    percentage = req.percentage
+    if not (0 < percentage <= 100):
+        raise HTTPException(
+            status_code=400, detail="percentage는 0 초과 100 이하여야 합니다"
+        )
+    is_partial = percentage < 99.99  # 부동소수 오차 감안 — 사실상 100%는 전량 경로
 
     async with engine._get_exit_lock(ticker):
         pos = await engine.get_position(ticker)
@@ -793,6 +799,37 @@ async def manual_paper_sell(
                 signal_price = float(hist["Close"].iloc[-1])
         except Exception:
             pass
+
+        if is_partial:
+            sell_units = round(float(pos["units"]) * (percentage / 100), 4)
+            result = await engine.manual_partial_sell(pos, signal_price, sell_units)
+            if result is None:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"{ticker} 부분 매도 주문 실패/미확인 — 포지션을 유지합니다",
+                )
+
+            status_emoji = "✅" if result["pnl_pct"] > 0 else "🛑"
+            slippage_pct = (result["fill_price"] / signal_price - 1) * 100
+            await engine.webhook.send_alert(
+                title=f"{status_emoji} [PAPER MANUAL PARTIAL EXIT] {ticker}",
+                description=(
+                    f"{percentage:.0f}% 매도 — 시장가: ${signal_price:.4f} → 체결가: ${result['fill_price']:.4f} "
+                    f"(슬리피지 {slippage_pct:+.2f}%) | 수익률: {result['pnl_pct']:.2f}%\n"
+                    f"매도: {result['sold_units']:.2f}주 | 잔여: {result['remaining_units']:.2f}주\n사유: 사령관 수동 부분 매도"
+                ),
+                color=0x2ECC71 if result["pnl_pct"] > 0 else 0xE74C3C,
+            )
+
+            return {
+                "status": "success",
+                "ticker": ticker,
+                "exit_price": round(result["fill_price"], 4),
+                "pnl_pct": round(result["pnl_pct"], 2),
+                "profit_amt": round(result["profit_amt"], 2),
+                "sold_units": round(result["sold_units"], 4),
+                "remaining_units": round(result["remaining_units"], 4),
+            }
 
         # paper_engine.py의 공통 청산 경로 재사용: 슬리피지 적용 → 실주문 제출/체결 확인 →
         # 현금 갱신(원자적 _apply_cash_delta) → paper_history 기록 → paper_positions 삭제 →
@@ -927,6 +964,92 @@ class QuotesRequest(BaseModel):
     tickers: List[str]
 
 
+async def _compute_closed_trades_from_alpaca(trading_client) -> list[dict]:
+    """Alpaca 체결 주문 기반 FIFO 손익 계산 — 완성된 매수→매도 라운드트립 반환 (최신순).
+
+    /api/broker/closed-trades 라우트와 routers/strategy.py의 소스 괴리 감시
+    (get_trade_source_reconciliation)가 이 로직을 공유한다 — 후자가 별도로
+    재구현하면 두 값이 애초에 같은 계산인지조차 보장할 수 없기 때문.
+    """
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus
+
+    req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500, nested=False)
+    orders = []
+    for attempt in range(3):
+        try:
+            orders = await asyncio.to_thread(trading_client.get_orders, filter=req)
+            break
+        except Exception as e:
+            print(f"[Broker] get_orders attempt {attempt + 1} failed: {e}")
+            if attempt == 2:
+                raise HTTPException(status_code=502, detail=str(e))
+            await asyncio.sleep(1.0)
+
+    # 체결 완료 주문만 필터, fill 시각 오름차순 정렬
+    filled = [
+        o
+        for o in orders
+        if str(o.status.value) == "filled"
+        and o.filled_at
+        and float(o.filled_qty or 0) > 0
+    ]
+    filled.sort(key=lambda o: o.filled_at)
+
+    # FIFO 포지션 장부: ticker → [{price, qty}]
+    book: dict[str, list[dict]] = {}
+    closed_trades: list[dict] = []
+
+    for o in filled:
+        ticker = o.symbol
+        qty = float(o.filled_qty or 0)
+        price = float(o.filled_avg_price or 0)
+        side = str(o.side.value)
+        filled_at = o.filled_at
+
+        if side == "buy":
+            book.setdefault(ticker, []).append({"price": price, "qty": qty})
+
+        elif side == "sell" and book.get(ticker):
+            remain = qty
+            total_cost = 0.0
+            matched = 0.0
+
+            lots = book[ticker]
+            while remain > 0 and lots:
+                lot = lots[0]
+                take = min(lot["qty"], remain)
+                total_cost += lot["price"] * take
+                matched += take
+                remain -= take
+                lot["qty"] -= take
+                if lot["qty"] < 1e-6:
+                    lots.pop(0)
+
+            if matched > 0:
+                avg_entry = total_cost / matched
+                pnl_pct = (price / avg_entry - 1) * 100 if avg_entry > 0 else 0.0
+                profit_amt = (price - avg_entry) * matched
+                closed_trades.append(
+                    {
+                        "id": str(o.id),
+                        "ticker": ticker,
+                        "units": round(matched, 4),
+                        "entry_price": round(avg_entry, 4),
+                        "exit_price": round(price, 4),
+                        "pnl_pct": round(pnl_pct, 2),
+                        "profit_amt": round(profit_amt, 2),
+                        "is_penny": avg_entry <= 1.0,
+                        "exit_reason": "Alpaca Order",
+                        "created_at": filled_at.isoformat(),
+                    }
+                )
+
+    # 최신순 반환
+    closed_trades.reverse()
+    return closed_trades
+
+
 @router.get("/closed-trades")
 async def get_closed_trades(limit: int = 30, api_key: str = Security(get_api_key)):
     """Alpaca 체결 주문 기반 FIFO 손익 계산 — 완성된 매수→매도 라운드트립 반환"""
@@ -935,87 +1058,14 @@ async def get_closed_trades(limit: int = 30, api_key: str = Security(get_api_key
         return []
 
     try:
-        from alpaca.trading.requests import GetOrdersRequest
-        from alpaca.trading.enums import QueryOrderStatus
-
-        req = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500, nested=False)
-        orders = []
-        for attempt in range(3):
-            try:
-                orders = await asyncio.to_thread(trading_client.get_orders, filter=req)
-                break
-            except Exception as e:
-                print(f"[Broker] get_orders attempt {attempt + 1} failed: {e}")
-                if attempt == 2:
-                    return []
-                await asyncio.sleep(1.0)
-
-        # 체결 완료 주문만 필터, fill 시각 오름차순 정렬
-        filled = [
-            o
-            for o in orders
-            if str(o.status.value) == "filled"
-            and o.filled_at
-            and float(o.filled_qty or 0) > 0
-        ]
-        filled.sort(key=lambda o: o.filled_at)
-
-        # FIFO 포지션 장부: ticker → [{price, qty}]
-        book: dict[str, list[dict]] = {}
-        closed_trades: list[dict] = []
-
-        for o in filled:
-            ticker = o.symbol
-            qty = float(o.filled_qty or 0)
-            price = float(o.filled_avg_price or 0)
-            side = str(o.side.value)
-            filled_at = o.filled_at
-
-            if side == "buy":
-                book.setdefault(ticker, []).append({"price": price, "qty": qty})
-
-            elif side == "sell" and book.get(ticker):
-                remain = qty
-                total_cost = 0.0
-                matched = 0.0
-
-                lots = book[ticker]
-                while remain > 0 and lots:
-                    lot = lots[0]
-                    take = min(lot["qty"], remain)
-                    total_cost += lot["price"] * take
-                    matched += take
-                    remain -= take
-                    lot["qty"] -= take
-                    if lot["qty"] < 1e-6:
-                        lots.pop(0)
-
-                if matched > 0:
-                    avg_entry = total_cost / matched
-                    pnl_pct = (price / avg_entry - 1) * 100 if avg_entry > 0 else 0.0
-                    profit_amt = (price - avg_entry) * matched
-                    closed_trades.append(
-                        {
-                            "id": str(o.id),
-                            "ticker": ticker,
-                            "units": round(matched, 4),
-                            "entry_price": round(avg_entry, 4),
-                            "exit_price": round(price, 4),
-                            "pnl_pct": round(pnl_pct, 2),
-                            "profit_amt": round(profit_amt, 2),
-                            "is_penny": avg_entry <= 1.0,
-                            "exit_reason": "Alpaca Order",
-                            "created_at": filled_at.isoformat(),
-                        }
-                    )
-
-        # 최신순 반환
-        closed_trades.reverse()
+        closed_trades = await _compute_closed_trades_from_alpaca(trading_client)
         return closed_trades[:limit]
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Closed Trades Error: {e}")
-        return []
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.get("/quote/{ticker}")

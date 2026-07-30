@@ -19,6 +19,8 @@ interface CompactGaugeProps {
   value: number;
   dialColor: string;
   subtitle?: string;
+  /** 마우스오버 시 노출할 상세 설명. 미지정 시 subtitle을 그대로 사용 */
+  tooltip?: string;
 }
 
 const CompactGauge = React.memo(function CompactGauge({
@@ -26,12 +28,13 @@ const CompactGauge = React.memo(function CompactGauge({
   value,
   dialColor,
   subtitle,
+  tooltip,
 }: CompactGaugeProps) {
   const pct = Math.min(value, 100);
   const strokeDashoffset = 100 - pct;
 
   return (
-    <div className="flex items-center gap-4" title={subtitle}>
+    <div className="flex items-center gap-4" title={tooltip ?? subtitle}>
       <div className="relative w-14 h-14 flex-shrink-0">
         <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
           <circle cx="18" cy="18" r="16" fill="none" className="stroke-blue-100" strokeWidth="3.5" />
@@ -158,6 +161,7 @@ export const MetricsGrid = React.memo(function MetricsGrid({
             value={hasTradeData ? displayedWinRate : 0}
             dialColor="#1d4ed8"
             subtitle={hasTradeData ? `${displayedTotalTrades}건 기준` : '거래 없음'}
+            tooltip="Alpaca 실체결(closed-trades) FIFO 매칭 기준 — 성과 리포트 페이지의 승률(엔진 exit_reason 로그 기준)과는 산출 방식이 달라 수치가 다를 수 있습니다."
           />
         </div>
         <div className="w-[2px] h-10 bg-blue-100 mx-2 flex-shrink-0" />

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, Check, X as XIcon } from 'lucide-react';
+import { ShieldCheck, Check, X as XIcon, AlertTriangle } from 'lucide-react';
 import clsx from 'clsx';
+import { toast } from 'sonner';
 import { fetchChecklist, toggleChecklistItem, type ChecklistItem } from '../../services/pythonApiService';
 import { ImprovementTracker } from './ImprovementTracker';
 
@@ -34,14 +35,22 @@ const STATUS_STYLES = {
 export const LiveTransitionChecklist = () => {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // "체크리스트가 아직 0건" 과 "조회 자체가 실패" 를 구분하기 위한 별도 상태 —
+  // 둘을 구분 안 하면 실패 시에도 그냥 빈 리스트로 보여 사용자가 원인을 알 수 없다.
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     async function loadData() {
+      setLoadError(false);
       try {
         const checklistData = await fetchChecklist();
         setChecklist(checklistData);
       } catch (err) {
         console.error('Failed to load checklist', err);
+        setLoadError(true);
+        toast.error('체크리스트 로드 실패', {
+          description: '실계좌 전환 체크리스트를 불러오지 못했습니다. 백엔드 연결을 확인하세요.',
+        });
       } finally {
         setLoading(false);
       }
@@ -57,6 +66,9 @@ export const LiveTransitionChecklist = () => {
       setChecklist(prev => prev.map(item => item.item_key === itemKey ? updatedItem : item));
     } catch (err) {
       console.error('Failed to toggle item', err);
+      toast.error('체크리스트 항목 변경 실패', {
+        description: err instanceof Error ? err.message : '백엔드 연결을 확인하세요.',
+      });
     }
   };
 
@@ -94,6 +106,11 @@ export const LiveTransitionChecklist = () => {
 
         {loading ? (
           <div className="text-center py-6 text-slate-600 text-xs font-bold">로딩 중...</div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center gap-2 py-6 text-rose-600 text-xs font-bold">
+            <AlertTriangle className="w-5 h-5" />
+            체크리스트를 불러오지 못했습니다. 백엔드 연결을 확인하세요.
+          </div>
         ) : (
           <div className="space-y-2.5">
             {checklist.map(item => {
