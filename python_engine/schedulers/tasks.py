@@ -317,7 +317,7 @@ async def position_ts_sweeper():
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
 
-    from engine.paper_engine import PENNY_MAX_PRICE, _compute_locked_floor
+    from engine.paper_engine import _compute_locked_floor
 
     # 10초 주기 — 보유 종목 전체를 배치 1요청으로 조회하므로 분당 6요청,
     # Alpaca 200req/min 제한 대비 3% 수준. 청산 지연을 최대 30초 → 10초로 단축.
@@ -631,7 +631,6 @@ async def position_ts_sweeper():
                             floor = _compute_locked_floor(
                                 entry_p,
                                 max(float(pos["highest_price"]), price),
-                                entry_p <= PENNY_MAX_PRICE,
                                 pos.get("entry_stop_pct"),
                             )
                             await engine.ensure_broker_stop(

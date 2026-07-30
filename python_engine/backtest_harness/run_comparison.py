@@ -31,24 +31,49 @@ from engine.paper_engine import (
     MAX_CONCENTRATION_PCT,
     TS_INIT_PCT,
     TS_TRAIL_PCT,
-    PENNY_TS_INIT_PCT,
-    PENNY_TS_TRAIL_PCT,
-    PENNY_BREAKEVEN_TRIGGER,
-    PENNY_MAX_PRICE,
-    PENNY_SCALE_OUT_RSI,
-    PENNY_SCALE_OUT_PROFIT,
-    PENNY_TIGHT_TS_PCT,
     SCALE_OUT_RATIO,
     SCALE_OUT_TS_PCT,
     CHANDELIER_K_NORMAL,
-    CHANDELIER_K_PENNY,
     PULLBACK_RETRACE_MIN_PCT_NORMAL,
-    PULLBACK_RETRACE_MIN_PCT_PENNY,
     PULLBACK_RETRACE_MAX_PCT,
     PULLBACK_MIN_RSI,
-    _apply_slippage,
+    SLIPPAGE_BUY_NORMAL,
+    SLIPPAGE_SELL_NORMAL,
+    SLIPPAGE_LOW_VOLUME_THRESHOLD,
     update_reversible_trailing_stop,  # NEW
 )
+
+# 2026-07-30: paper_engine.py에서 페니($1 이하) 포지션 관리 레거시가 제거되면서
+# 아래 PENNY_* 상수와 is_penny 인자를 받는 _apply_slippage가 더 이상 production
+# 코드에 없다. 이 스크립트는 9e52902 이전 "OLD" 전략을 재현하는 대조 하네스이므로
+# 그 시점의 페니 파라미터 값을 여기서 직접 보존한다 — production 상수 삭제와 무관하게
+# 이 하네스의 OLD 시뮬레이션 결과는 그대로 재현 가능해야 한다.
+PENNY_TS_INIT_PCT = 0.85
+PENNY_TS_TRAIL_PCT = 0.90
+PENNY_BREAKEVEN_TRIGGER = 1.10
+PENNY_MAX_PRICE = 1.0
+PENNY_SCALE_OUT_RSI = 60
+PENNY_SCALE_OUT_PROFIT = 0.10
+PENNY_TIGHT_TS_PCT = 0.95
+CHANDELIER_K_PENNY = 4.0
+PULLBACK_RETRACE_MIN_PCT_PENNY = 0.05
+
+
+def _apply_slippage(
+    price: float, is_buy: bool, is_penny: bool, volume: int = 0
+) -> float:
+    """paper_engine._apply_slippage()의 구(舊) 페니 분기 포함 버전 — OLD 전략 재현 전용."""
+    slippage_buy_penny, slippage_sell_penny = 0.030, 0.020
+    base_pct = (
+        (slippage_buy_penny if is_penny else SLIPPAGE_BUY_NORMAL)
+        if is_buy
+        else (slippage_sell_penny if is_penny else SLIPPAGE_SELL_NORMAL)
+    )
+    if volume > 0 and volume < SLIPPAGE_LOW_VOLUME_THRESHOLD:
+        base_pct *= 2.0
+    return round(price * (1.0 + base_pct if is_buy else 1.0 - base_pct), 6)
+
+
 from services.kelly_sizer import KellySizer  # NEW
 from services.quant_engine import (
     calculate_advanced_signals as new_calculate_advanced_signals,
@@ -486,7 +511,6 @@ class Portfolio:
                     highest_price,
                     effective_atr,
                     smoothed_er,
-                    is_penny,
                     entry_stop_pct=self.entry_stop_tight_pct,
                 )
         else:

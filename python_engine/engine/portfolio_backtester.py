@@ -7,7 +7,6 @@ from datetime import datetime
 
 from engine.paper_engine import (
     INITIAL_CAPITAL,
-    PENNY_MAX_PRICE,
     _apply_slippage,
 )
 
@@ -28,7 +27,7 @@ class DNAValidator:
         target_atr: float = 5.0,  # [Optimized] 목표 ATR 멀티플라이어
     ):
         # 슬리피지는 paper_engine._apply_slippage()로 라이브 엔진과 동일하게 산출한다
-        # (페니 여부 · 거래량 저유동성 2배 가중 반영) — 별도 flat slippage_rate 파라미터는 사용하지 않음
+        # (거래량 저유동성 2배 가중 반영) — 별도 flat slippage_rate 파라미터는 사용하지 않음
         self.tickers = tickers
         self.start_date = start_date
         self.end_date = end_date or datetime.now().strftime("%Y-%m-%d")
@@ -165,7 +164,6 @@ class DNAValidator:
         entry_date = None
         target_price = 0
         stop_price = 0
-        is_penny = False
 
         for i in range(20, len(df)):  # RVOL을 위해 20봉 이후부터
             current_close = df["Close"].iloc[i]
@@ -184,12 +182,10 @@ class DNAValidator:
 
                 if cond1 and cond2:
                     is_holding = True
-                    # 라이브 엔진(paper_engine._apply_slippage)과 동일한 페니/저유동성 슬리피지 모델 적용
-                    is_penny = current_close <= PENNY_MAX_PRICE
+                    # 라이브 엔진(paper_engine._apply_slippage)과 동일한 저유동성 슬리피지 모델 적용
                     entry_price = _apply_slippage(
                         current_close,
                         is_buy=True,
-                        is_penny=is_penny,
                         volume=current_volume,
                     )
                     entry_date = current_date
@@ -306,7 +302,6 @@ class DNAValidator:
                     exit_price = _apply_slippage(
                         current_close,
                         is_buy=False,
-                        is_penny=is_penny,
                         volume=current_volume,
                     )
                     pnl = (exit_price - entry_price) / entry_price
@@ -329,7 +324,6 @@ class DNAValidator:
                     exit_price = _apply_slippage(
                         target_price,
                         is_buy=False,
-                        is_penny=is_penny,
                         volume=current_volume,
                     )
                     trades.append(
@@ -349,7 +343,6 @@ class DNAValidator:
                     exit_price = _apply_slippage(
                         stop_price,
                         is_buy=False,
-                        is_penny=is_penny,
                         volume=current_volume,
                     )
                     trades.append(
@@ -369,7 +362,6 @@ class DNAValidator:
                     exit_price = _apply_slippage(
                         current_close,
                         is_buy=False,
-                        is_penny=is_penny,
                         volume=current_volume,
                     )
                     pnl = (exit_price - entry_price) / entry_price

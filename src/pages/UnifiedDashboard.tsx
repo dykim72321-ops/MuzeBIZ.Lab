@@ -215,7 +215,7 @@ export default function UnifiedDashboard() {
                             </span>
                           </div>
                           <div className="w-20 flex flex-col gap-1 items-end">
-                            <TensionGauge score={stock.dna_score} rvol={stock.rvol} isPenny={isPenny} />
+                            <TensionGauge score={stock.dna_score} rvol={stock.rvol} />
                           </div>
                         </div>
                       </div>
@@ -397,6 +397,7 @@ export default function UnifiedDashboard() {
                                     currentPrice={pos.current_price} 
                                     highestPrice={pos.highest_price} 
                                     tsThreshold={pos.ts_threshold ?? (pos.current_price ?? 0)} 
+                                    entryPrice={pos.entry_price}
                                   />
                                 </div>
                               </div>
@@ -457,6 +458,7 @@ export default function UnifiedDashboard() {
                               currentPrice={pos.current_price} 
                               highestPrice={pos.highest_price} 
                               tsThreshold={pos.ts_threshold ?? (pos.current_price ?? 0)} 
+                              entryPrice={pos.entry_price}
                             />
                           </div>
                         </div>
@@ -484,11 +486,11 @@ export default function UnifiedDashboard() {
                   <Clock className="w-4 h-4 text-slate-900" /> Recent Exits
                 </h2>
               </div>
-              <div className="p-4 flex-1 min-h-0 overflow-y-auto bg-slate-50/50">
+              <div className="p-4 flex-1 min-h-0 overflow-auto bg-slate-50/50">
                 {liveHistory.length === 0 ? (
                   <div className="text-center py-10 text-slate-600 text-xs font-bold">기록 없음</div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-3 min-w-[320px]">
                     {liveHistory.slice(0, 30).map((trade: PaperHistory, idx: number) => {
                       const isWin = Number(trade.profit_amt) >= 0;
                       return (

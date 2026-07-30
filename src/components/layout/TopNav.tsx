@@ -34,11 +34,11 @@ export const TopNav = () => {
       <nav className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-white/95 backdrop-blur-xl border-b border-blue-200 font-sans shadow-sm">
         {/* Left: Logo & Nav */}
         <div className="flex items-center gap-8">
-          <NavLink to="/" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 bg-white rounded-lg border border-blue-200 flex items-center justify-center shadow-sm group-hover:border-blue-400 transition-all overflow-hidden p-1">
+          <NavLink to="/" className="flex items-center gap-2 sm:gap-3 group">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 shrink-0 bg-white rounded-lg border border-blue-200 flex items-center justify-center shadow-sm group-hover:border-blue-400 transition-all overflow-hidden p-1">
               <img src="/logo.png" alt="MuzeBIZ Logo" className="w-full h-full object-contain group-hover:scale-110 transition-transform" />
             </div>
-            <span className="text-xl font-black text-black tracking-tighter uppercase font-mono">
+            <span className="text-lg sm:text-xl font-black text-black tracking-tighter uppercase font-mono shrink-0">
               MuzeBIZ<span className="text-blue-700 transition-colors">.Lab</span>
             </span>
           </NavLink>
@@ -64,21 +64,21 @@ export const TopNav = () => {
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
           <button 
             onClick={handleStatusClick}
             className={clsx(
-              "flex items-center gap-2.5 px-4 py-2 rounded-full border shadow-sm transition-all cursor-pointer hover:scale-105",
+              "flex items-center gap-1.5 sm:gap-2.5 px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-full border shadow-sm transition-all cursor-pointer hover:scale-105",
               isOnline ? "bg-blue-50 border-blue-200" : "bg-red-50 border-red-200"
             )}
             title="Click to view detailed system status"
           >
              <div className={clsx(
-               "w-2 h-2 rounded-full animate-pulse",
+               "w-2 h-2 shrink-0 rounded-full animate-pulse",
                isOnline ? "bg-emerald-600 shadow-[0_0_10px_rgba(5,150,105,0.5)]" : "bg-red-600 shadow-[0_0_10px_rgba(220,38,38,0.5)]"
              )} />
              <span className={clsx(
-               "text-[10px] font-black uppercase tracking-widest leading-none",
+               "hidden sm:inline-block text-[10px] font-black uppercase tracking-widest leading-none whitespace-nowrap",
                isOnline ? "text-blue-900" : "text-red-900"
              )}>
                {isOnline ? "System Online" : "System Offline"}
@@ -86,7 +86,7 @@ export const TopNav = () => {
           </button>
 
           <button
-            className="lg:hidden p-2 text-blue-900 hover:text-black transition-all cursor-pointer"
+            className="lg:hidden p-1.5 sm:p-2 text-blue-900 hover:text-black transition-all cursor-pointer"
             onClick={() => setMobileOpen(prev => !prev)}
             aria-label={mobileOpen ? '메뉴 닫기' : '메뉴 열기'}
           >

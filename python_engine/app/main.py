@@ -274,9 +274,11 @@ async def run_startup_sequence():
                 print(f"⚠️ [Startup] Could not restore ARM state: {e}")
 
     # 0a-2. 개선 검증 트래커 자동 롤백으로 조정됐을 수 있는 런타임 파라미터 복원
-    # (penny_dna_gate/atr_stop_enabled/max_daily_trades_per_ticker/reentry_cooldown_minutes —
+    # (atr_stop_enabled/max_daily_trades_per_ticker/reentry_cooldown_minutes —
     # checklist.evaluate_improvement_rollback() 참고). 컬럼이 없으면(마이그레이션 미적용)
     # 조용히 건너뛰고 engine __init__의 기본값을 그대로 사용한다.
+    # penny_dna_gate는 2026-07-30 페니 포지션 관리 레거시 제거로 engine에서
+    # 사라져 더 이상 복원하지 않는다 (system_settings 컬럼 자체는 과거 기록 보존용으로 유지).
     if supabase:
         engines = [
             e for e in (app_state.paper_engine, app_state.live_engine) if e is not None
@@ -286,7 +288,7 @@ async def run_startup_sequence():
                 res = await asyncio.to_thread(
                     supabase.table("system_settings")
                     .select(
-                        "penny_dna_gate,atr_stop_enabled,max_daily_trades_per_ticker,"
+                        "atr_stop_enabled,max_daily_trades_per_ticker,"
                         "reentry_cooldown_minutes,extension_guard_penny_tight_enabled,"
                         "spike_guard_enabled,pullback_entry_enabled"
                     )
@@ -296,8 +298,6 @@ async def run_startup_sequence():
                 )
                 row = res.data or {}
                 for e in engines:
-                    if row.get("penny_dna_gate") is not None:
-                        e.penny_dna_gate = row["penny_dna_gate"]
                     if row.get("atr_stop_enabled") is not None:
                         e.atr_stop_enabled = row["atr_stop_enabled"]
                     if row.get("max_daily_trades_per_ticker") is not None:
@@ -316,7 +316,7 @@ async def run_startup_sequence():
                         e.pullback_entry_enabled = row["pullback_entry_enabled"]
                 print(
                     f"📡 [Startup] Runtime rollback params restored: "
-                    f"penny_dna_gate={row.get('penny_dna_gate')}, atr_stop_enabled={row.get('atr_stop_enabled')}, "
+                    f"atr_stop_enabled={row.get('atr_stop_enabled')}, "
                     f"max_daily_trades_per_ticker={row.get('max_daily_trades_per_ticker')}, "
                     f"reentry_cooldown_minutes={row.get('reentry_cooldown_minutes')}, "
                     f"extension_guard_penny_tight_enabled={row.get('extension_guard_penny_tight_enabled')}, "

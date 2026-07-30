@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from services.quant_engine import SPIKE_GUARD_PCT_NORMAL, SPIKE_GUARD_PCT_PENNY
+from services.quant_engine import SPIKE_GUARD_PCT_NORMAL
 
 _NY_TZ = ZoneInfo(
     "America/New_York"
@@ -29,14 +29,6 @@ SCALE_OUT_RATIO = 0.50  # Scale-Out 시 매도 비율 (50%)
 SCALE_OUT_TS_PCT = 1.01  # Scale-Out 후 TS 본절 + 1%
 POS_WEIGHT = 0.15  # paper_positions.weight 기록값
 
-# ── Penny Lab 전용 파라미터 ($1 이하 종목 동적 적용) ─────────────────────────
-PENNY_MAX_PRICE = 1.0  # 진입가 ≤ 이 값이면 페니 파라미터 자동 전환
-PENNY_TS_INIT_PCT = 0.85  # 초기 TS: 진입가 × 85% (-15%)
-PENNY_TS_TRAIL_PCT = 0.90  # 최고가 추종 TS: highest × 90%
-PENNY_BREAKEVEN_TRIGGER = 1.10  # 수익 +10% 달성 시 TS 하한을 진입가(본전)로 락인
-PENNY_SCALE_OUT_RSI = 60  # 1차 매도 RSI 기준 (일반 52 → 페니 60)
-PENNY_SCALE_OUT_PROFIT = 0.10  # 1차 매도 수익률 기준 (+10% OR RSI>65)
-PENNY_TIGHT_TS_PCT = 0.95  # Scale-Out 후 잔여 물량 TS: highest × 95% (-5%)
 SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 유예
 
 # ── 장기 보유 모드 (진입가 $1 초과 ~ $50 이하 전용, 2026-07-28) ──────────────
@@ -55,17 +47,15 @@ MAX_DAILY_TRADES_PER_TICKER = (
     2  # 종목당 하루 신규 진입(라운드트립) 최대 횟수 — Scale-Out 부분청산은 제외
 )
 VOLATILITY_MAX_RATIO = (
-    0.05  # 일반 종목: ATR/가격 비율이 이보다 크면 단기 과열/휩쏘로 판단해 진입 차단
+    0.05  # ATR/가격 비율이 이보다 크면 단기 과열/휩쏘로 판단해 진입 차단
 )
-PENNY_VOLATILITY_MAX_RATIO = 0.08  # 페니 종목: 원래 변동성이 커서 상한을 완화
 
 # ── 눌림목(Pullback) 2차 대기 지정가 진입 파라미터 (2026-07-23) ──────────────
 # 기존 Spike Guard(급등 스파이크 감지 시 이번 봉만 스킵)는 상태가 없어(stateless) 가격이
 # 식으면 STRONG BUY 신호 자체가 사라져 재평가 기회가 거의 오지 않았다. 이 상수들은
 # pullback_watches 테이블에 감시 상태를 영속시켜, 신호가 사라진 뒤에도 되돌림·반등을
 # 계속 추적해 확인되면 직접 진입시키는 데 쓰인다.
-PULLBACK_RETRACE_MIN_PCT_NORMAL = 0.03  # 일반: 고점 대비 최소 3% 되돌림 확인
-PULLBACK_RETRACE_MIN_PCT_PENNY = 0.05  # 페니: 변동성이 커서 최소 5% 되돌림 요구
+PULLBACK_RETRACE_MIN_PCT_NORMAL = 0.03  # 고점 대비 최소 3% 되돌림 확인
 PULLBACK_RETRACE_MAX_PCT = 0.20  # 고점 대비 20% 초과 하락은 추세 붕괴로 간주해 무효화
 PULLBACK_MAX_WAIT_MINUTES = 45  # 이 시간 내 되돌림·반등이 확인되지 않으면 감시 만료
 PULLBACK_MIN_RSI = 40  # 이보다 낮으면 "떨어지는 칼" 매수 방지 — 감시만 유지, 진입 안 함
@@ -79,32 +69,22 @@ KELLY_CACHE_TTL_SEC = (
 # 공식: TS = Highest - k × ATR(14)
 # ATR이 클수록 스탑이 내려가(더 여유롭게) 마켓메이커 노이즈를 필터링
 CHANDELIER_K_NORMAL = 2.0  # 일반 종목: 타이트한 Chandelier k (빈번한 매매용)
-CHANDELIER_K_PENNY = 4.0  # 페니 종목: 타이트한 Chandelier k (빈번한 매매용)
 
 # ── [Guide-3] 슬리피지 보정 (보수적 시뮬레이션) ─────────────────────────────
-# 페니 종목은 호가 스프레드가 커서 더 높은 슬리피지 적용
 SLIPPAGE_BUY_NORMAL = 0.005  # 일반 종목 매수 슬리피지 +0.5%
 SLIPPAGE_SELL_NORMAL = 0.005  # 일반 종목 매도 슬리피지 -0.5%
-SLIPPAGE_BUY_PENNY = 0.030  # 페니 종목 매수 슬리피지 +3.0% (실측 bid-ask 스프레드 반영)
-SLIPPAGE_SELL_PENNY = 0.020  # 페니 종목 매도 슬리피지 -2.0%
 # 거래량이 극도로 낮은 종목은 슬리피지를 2× 가중 (유동성 패널티)
 SLIPPAGE_LOW_VOLUME_THRESHOLD = 50_000  # 주/일 거래량 기준
 
 
-def _apply_slippage(
-    price: float, is_buy: bool, is_penny: bool, volume: int = 0
-) -> float:
+def _apply_slippage(price: float, is_buy: bool, volume: int = 0) -> float:
     """
     체결 불리 방향으로 슬리피지를 반영한 보수적 모의 체결가 반환.
     - 매수: 시장가보다 높게 체결 (ask 쪽 스프레드)
     - 매도: 시장가보다 낮게 체결 (bid 쪽 스프레드)
     - 거래량 < SLIPPAGE_LOW_VOLUME_THRESHOLD → 슬리피지 2× 가중
     """
-    base_pct = (
-        (SLIPPAGE_BUY_PENNY if is_penny else SLIPPAGE_BUY_NORMAL)
-        if is_buy
-        else (SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL)
-    )
+    base_pct = SLIPPAGE_BUY_NORMAL if is_buy else SLIPPAGE_SELL_NORMAL
     if volume > 0 and volume < SLIPPAGE_LOW_VOLUME_THRESHOLD:
         base_pct *= 2.0
     if is_buy:
@@ -119,7 +99,7 @@ _kelly_sizer = KellySizer()
 
 
 # ── ATR 기반 초기 스탑 폭 (2026-07-18) ───────────────────────────────────────
-# 고정 %(TS_INIT_PCT/PENNY_TS_INIT_PCT) 하나로만 초기 스탑을 잡으면, 변동성이
+# 고정 %(TS_INIT_PCT) 하나로만 초기 스탑을 잡으면, 변동성이
 # 큰 종목은 정상적인 가격 노이즈에도 스탑에 잘리고(승률 분석에서 확인된
 # Trailing Stop 청산의 낮은 승률의 원인 중 하나) 변동성이 작은 종목은 스탑이
 # 지나치게 느슨해 손실을 필요 이상으로 키운다. CHANDELIER_K_*(원래 정의만
@@ -133,7 +113,6 @@ ENTRY_STOP_ATR_CLAMP_HIGH = 1.5  # 고정 % 대비 최대 폭 배수
 def _compute_entry_stop_pct(
     entry_price: float,
     atr: float,
-    is_penny: bool,
     atr_stop_enabled: bool = True,
     is_long_term: bool = False,
 ) -> float:
@@ -153,11 +132,10 @@ def _compute_entry_stop_pct(
     """
     if is_long_term:
         return 1.0 - LONG_TERM_TS_TRAIL_PCT
-    fixed_pct = 1.0 - (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
+    fixed_pct = 1.0 - TS_INIT_PCT
     if not atr_stop_enabled or atr <= 0 or entry_price <= 0:
         return fixed_pct
-    k = CHANDELIER_K_PENNY if is_penny else CHANDELIER_K_NORMAL
-    atr_pct = (k * atr) / entry_price
+    atr_pct = (CHANDELIER_K_NORMAL * atr) / entry_price
     return min(
         max(atr_pct, fixed_pct * ENTRY_STOP_ATR_CLAMP_LOW),
         fixed_pct * ENTRY_STOP_ATR_CLAMP_HIGH,
@@ -167,7 +145,6 @@ def _compute_entry_stop_pct(
 def _compute_locked_floor(
     entry_price: float,
     highest_price: float,
-    is_penny: bool,
     entry_stop_pct: float | None = None,
 ) -> float:
     """
@@ -178,22 +155,18 @@ def _compute_locked_floor(
       포지션) 고정 %를 사용한다 — 라이브 ATR을 여기서 다시 읽지 않는 이유는
       ATR 급변(뉴스 이벤트 등) 시 이미 확보한 방어선이 느슨해지는 것을 막기
       위함이다.
-    - 페니 종목은 +10%(PENNY_BREAKEVEN_TRIGGER), 일반 종목은 +5%(NORMAL_BREAKEVEN_TRIGGER)
-      이상 도달한 이력이 있으면 본전(entry_price)으로 영구 락인된다. highest_price는
-      호출부에서 이미 max()로 단조 갱신되므로, 이 락인 여부를 별도 상태(DB 컬럼/플래그)
-      없이 highest_price만으로 파생할 수 있다.
-      (일반 종목은 과거 이 락인이 없어 ATR 트레일링만으로 고점 근처에서 청산돼 수익이
-      거의 0%까지 반납되는 사례가 있었다 — 2026-07-24 추가)
+    - +5%(NORMAL_BREAKEVEN_TRIGGER) 이상 도달한 이력이 있으면 본전(entry_price)으로
+      영구 락인된다. highest_price는 호출부에서 이미 max()로 단조 갱신되므로, 이
+      락인 여부를 별도 상태(DB 컬럼/플래그) 없이 highest_price만으로 파생할 수 있다.
+      (과거 이 락인이 없어 ATR 트레일링만으로 고점 근처에서 청산돼 수익이 거의 0%까지
+      반납되는 사례가 있었다 — 2026-07-24 추가)
     """
     if entry_stop_pct is not None:
         init_pct = 1.0 - entry_stop_pct
     else:
-        init_pct = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
+        init_pct = TS_INIT_PCT
     static_floor = entry_price * init_pct
-    breakeven_trigger = (
-        PENNY_BREAKEVEN_TRIGGER if is_penny else NORMAL_BREAKEVEN_TRIGGER
-    )
-    if highest_price >= entry_price * breakeven_trigger:
+    if highest_price >= entry_price * NORMAL_BREAKEVEN_TRIGGER:
         return max(static_floor, entry_price)
     return static_floor
 
@@ -203,7 +176,6 @@ def update_reversible_trailing_stop(
     highest_price: float,
     atr_value: float,
     current_smoothed_er: float,
-    is_penny: bool,
     entry_stop_pct: float | None = None,
 ) -> float:
     """
@@ -229,9 +201,7 @@ def update_reversible_trailing_stop(
     k_t = k_min + (k_max - k_min) * current_smoothed_er
     adaptive_stop = highest_price - (k_t * atr_value)
 
-    locked_floor = _compute_locked_floor(
-        entry_price, highest_price, is_penny, entry_stop_pct
-    )
+    locked_floor = _compute_locked_floor(entry_price, highest_price, entry_stop_pct)
     return max(locked_floor, adaptive_stop)
 
 
@@ -270,7 +240,6 @@ class PaperTradingManager:
         # 모듈 상수 대신 인스턴스 속성으로 둬서, checklist.evaluate_improvement_rollback()가
         # REGRESSED 연속 판정 시 프로세스 재시작 없이 즉시 되돌릴 수 있게 한다.
         # 서버 기동 시 system_settings에 저장된 값으로 덮어써진다(app/main.py run_startup_sequence).
-        self.penny_dna_gate = 80
         self.atr_stop_enabled = True
         self.max_daily_trades_per_ticker = MAX_DAILY_TRADES_PER_TICKER
         self.REENTRY_COOLDOWN_MINUTES = self.REENTRY_COOLDOWN_MINUTES
@@ -555,7 +524,6 @@ class PaperTradingManager:
         requested_units = (
             units  # 이번 호출이 청산하려던 원래 전체 수량 (부분체결 판정 기준)
         )
-        is_penny = entry_price <= PENNY_MAX_PRICE
         original_status = pos.get("status") or "HOLD"
 
         # 청산 클레임: status != 'CLOSING'인 행만 'CLOSING'으로 전환.
@@ -582,9 +550,7 @@ class PaperTradingManager:
                 # 브로커 단에서 이미 체결 완료 — 주문 제출 없이 실체결 값만 반영
                 units, fill_price = external_fill
             else:
-                fill_price = _apply_slippage(
-                    signal_price, is_buy=False, is_penny=is_penny
-                )
+                fill_price = _apply_slippage(signal_price, is_buy=False)
                 executed = await self._on_order_sell(
                     ticker, units, fill_price, exit_reason
                 )
@@ -621,9 +587,7 @@ class PaperTradingManager:
             # ── 브로커 하드 스탑(Hard Stop-Loss) 주문 시뮬레이션 (PAPER 전용) ────────
             entry_stop_pct = pos.get("entry_stop_pct")
             hard_stop_init_pct = (
-                (1.0 - entry_stop_pct)
-                if entry_stop_pct is not None
-                else (PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT)
+                (1.0 - entry_stop_pct) if entry_stop_pct is not None else TS_INIT_PCT
             )
             hard_stop_limit = entry_price * hard_stop_init_pct
             if (
@@ -906,7 +870,7 @@ class PaperTradingManager:
     ) -> bool:
         """
         v4 State Machine:
-        1. STRONG BUY (페니 DNA≥65 / 일반 DNA≥75) → 매수 (recommended_weight 비중 or 기본 KELLY_FRACTION)
+        1. STRONG BUY (DNA≥75) → 매수 (recommended_weight 비중 or 기본 KELLY_FRACTION)
            + 관심종목 자동 등록 (HOLDING)
         2. HOLD 중 RSI > 60 → 50% 분할 익절 (SCALE_OUT) & TS 상향 + watchlist stop_loss 동기화
         3. 가격 < TS_Threshold → 전량 청산 (TRAILING_STOP) + 관심종목 EXITED
@@ -924,14 +888,11 @@ class PaperTradingManager:
         atr_pct = round(atr / price * 100, 4) if price else None
 
         # --- 1. 신규 매수 (STRONG BUY & No position) ---
-        is_penny_signal = price <= PENNY_MAX_PRICE
-        # quant_engine.calculate_advanced_signals()의 tier_penny(DNA≥80)/tier2(DNA≥75) 기준과
-        # 정합. Strong_Buy는 DNA 기준(tier1/2/penny) 외에 numba_strong_buy(RSI·RVOL 백분위
-        # 랭크 기반) 경로로도 True가 될 수 있어 DNA_Score가 tier 기준 미만인 신호가 섞여
-        # 들어올 수 있으므로, 이 게이트가 tier 최저선 아래로는 항상 차단해야 한다
-        # (페니주 쓰레기 신호 차단을 위해 65 -> 80으로 대폭 상향 — 2026-07-17).
-        # self.penny_dna_gate: 개선 검증 트래커가 REGRESSED 연속 판정 시 65로 자동 롤백할 수 있음.
-        dna_gate = self.penny_dna_gate if is_penny_signal else 75
+        # quant_engine.calculate_advanced_signals()의 tier2(DNA≥75) 기준과 정합. Strong_Buy는
+        # DNA 기준(tier1/2) 외에 numba_strong_buy(RSI·RVOL 백분위 랭크 기반) 경로로도 True가
+        # 될 수 있어 DNA_Score가 tier 기준 미만인 신호가 섞여 들어올 수 있으므로, 이 게이트가
+        # tier 최저선 아래로는 항상 차단해야 한다.
+        dna_gate = 75
 
         # ── 눌림목 감시 확인 ──────────────────────────────────────────────────
         # 포지션이 없는 티커에 활성 pullback_watches 행이 있으면, 이번 호출의
@@ -989,7 +950,7 @@ class PaperTradingManager:
                     is_extended=is_extended,
                     atr_pct=atr_pct,
                     price=price,
-                    note=f"DNA {dna_score:.1f} < gate {dna_gate} ({'penny' if is_penny_signal else 'normal'})",
+                    note=f"DNA {dna_score:.1f} < gate {dna_gate}",
                 )
                 return
 
@@ -1150,11 +1111,7 @@ class PaperTradingManager:
             # 단기 변동성 필터: ATR/가격 비율이 과도하면(휩쏘성 급변동) 신규 진입 차단
             if atr > 0 and price > 0:
                 volatility_ratio = atr / price
-                vol_cap = (
-                    PENNY_VOLATILITY_MAX_RATIO
-                    if is_penny_signal
-                    else VOLATILITY_MAX_RATIO
-                )
+                vol_cap = VOLATILITY_MAX_RATIO
                 if volatility_ratio > vol_cap:
                     await self._log_decision(
                         ticker=ticker,
@@ -1184,15 +1141,12 @@ class PaperTradingManager:
             # 잊는(stateless) 동작으로 되돌아간다 — 다음 봉에서 STRONG BUY가 재발화해야만
             # 재평가되므로, 가격이 식으면 실제로는 재평가 기회가 거의 오지 않는다.
             if self.spike_guard_enabled and recent_spike_pct > 0:
-                spike_cap = (
-                    SPIKE_GUARD_PCT_PENNY if is_penny_signal else SPIKE_GUARD_PCT_NORMAL
-                )
+                spike_cap = SPIKE_GUARD_PCT_NORMAL
                 if recent_spike_pct > spike_cap:
                     if self.pullback_entry_enabled:
                         await self._register_pullback_watch(
                             ticker=ticker,
                             price=price,
-                            is_penny_signal=is_penny_signal,
                             dna_score=dna_score,
                             atr=atr,
                             recommended_weight=recommended_weight,
@@ -1245,7 +1199,6 @@ class PaperTradingManager:
                 dna_score=dna_score,
                 recommended_weight=recommended_weight,
                 atr=atr,
-                is_penny_signal=is_penny_signal,
                 acc=acc,
                 recent_history_rows=recent_history_rows,
                 rvol=rvol,
@@ -1265,8 +1218,7 @@ class PaperTradingManager:
                 highest_price = max(pos["highest_price"], price)
                 is_scaled_out = pos["is_scaled_out"]
                 ts_threshold = pos["ts_threshold"]
-                is_penny = entry_price <= PENNY_MAX_PRICE
-                is_long_term = PENNY_MAX_PRICE < entry_price <= LONG_TERM_MAX_PRICE
+                is_long_term = entry_price <= LONG_TERM_MAX_PRICE
                 entry_stop_pct = pos.get(
                     "entry_stop_pct"
                 )  # 레거시 포지션은 None → 고정 % 폴백
@@ -1340,9 +1292,7 @@ class PaperTradingManager:
                         ).total_seconds() / 60
                         unrealized_pnl_pct = (price / entry_price - 1) * 100
 
-                        # 페니 종목: 90분 (변동성 높아 방향 형성에 더 오래 걸림)
-                        # 일반 종목: 60분
-                        decay_threshold = 90 if is_penny else 60
+                        decay_threshold = 60
 
                         if (
                             elapsed_minutes > decay_threshold
@@ -1371,7 +1321,7 @@ class PaperTradingManager:
 
                 # A. TS 업데이트 (가역적 스위칭 스탑 적용)
                 # atr<=0(데이터 부족 초기 구간)에도 동일 경로를 타도록 합성 ATR로 폴백한다.
-                # 이전에는 atr<=0 분기에서만 페니 본전 락인(PENNY_BREAKEVEN_TRIGGER)을 체크했는데,
+                # 이전에는 atr<=0 분기에서만 본전 락인(NORMAL_BREAKEVEN_TRIGGER)을 체크했는데,
                 # 실전에서는 atr>0이 상시 공급되므로 그 분기가 사실상 죽은 코드였다 — 통합으로 해결.
                 if not is_scaled_out:
                     if is_long_term:
@@ -1392,7 +1342,6 @@ class PaperTradingManager:
                             highest_price,
                             effective_atr,
                             smoothed_er,
-                            is_penny,
                             entry_stop_pct,
                         )
                 else:
@@ -1410,19 +1359,10 @@ class PaperTradingManager:
 
                 # B. SCALE_OUT 체크
                 profit_pct = price / entry_price - 1
-                if is_penny:
-                    # RSI arm은 최소 +5% 수익 확인 후 허용 (단순 변동성으로 인한 조기 청산 방지)
-                    scale_trigger = (
-                        rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
-                    ) or profit_pct >= PENNY_SCALE_OUT_PROFIT
-                else:
-                    # RSI arm은 최소 +5% 수익 확인 후 허용 (페니 분기와 동일 가드 —
-                    # 그렇지 않으면 근접 손익분기점에서도 RSI만으로 조기 익절돼
-                    # winner를 지나치게 일찍 자르게 된다)
-                    scale_trigger = (
-                        rsi > 52 and profit_pct >= 0.05
-                    ) or profit_pct >= 0.07
-                sell_slip = SLIPPAGE_SELL_PENNY if is_penny else SLIPPAGE_SELL_NORMAL
+                # RSI arm은 최소 +5% 수익 확인 후 허용 — 그렇지 않으면 근접 손익분기점에서도
+                # RSI만으로 조기 익절돼 winner를 지나치게 일찍 자르게 된다
+                scale_trigger = (rsi > 52 and profit_pct >= 0.05) or profit_pct >= 0.07
+                sell_slip = SLIPPAGE_SELL_NORMAL
                 if (
                     scale_trigger
                     and not is_scaled_out
@@ -1432,9 +1372,7 @@ class PaperTradingManager:
                 ):
                     sell_units = units * SCALE_OUT_RATIO
                     # [Guide-3] 매도 슬리피지 적용
-                    fill_sell_price = _apply_slippage(
-                        price, is_buy=False, is_penny=is_penny
-                    )
+                    fill_sell_price = _apply_slippage(price, is_buy=False)
                     executed = await self._on_order_sell(
                         ticker, sell_units, fill_sell_price, "Scale-Out"
                     )
@@ -1452,12 +1390,8 @@ class PaperTradingManager:
                     await self._apply_cash_delta(profit_cash)
 
                     # 포지션 업데이트: 수량 반토막, TS 본절+1% 상향
-                    new_ts_val = (
-                        max(entry_price, highest_price * PENNY_TIGHT_TS_PCT)
-                        if is_penny
-                        else max(
-                            entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
-                        )
+                    new_ts_val = max(
+                        entry_price * SCALE_OUT_TS_PCT, highest_price * TS_TRAIL_PCT
                     )
                     # Scale-Out 봉 진입가가 낮을 때 SCALE_OUT_TS_PCT(+1%)가 현재가를 초과할 수 있음
                     # → TS가 현재가 위에 세팅되면 다음 틱 즉시 강제 청산되므로 클램프
@@ -1481,16 +1415,8 @@ class PaperTradingManager:
                     await self._sync_watchlist_stop_loss(ticker, new_ts_val)
 
                     slip_sell_pct = (fill_sell_price / price - 1) * 100
-                    price_str = (
-                        f"${fill_sell_price:.4f}"
-                        if is_penny
-                        else f"${fill_sell_price:.2f}"
-                    )
-                    ts_desc = (
-                        f"-7% TS ${new_ts_val:.4f}"
-                        if is_penny
-                        else f"본절+1% ${new_ts_val:.2f}"
-                    )
+                    price_str = f"${fill_sell_price:.2f}"
+                    ts_desc = f"본절+1% ${new_ts_val:.2f}"
                     await self.webhook.send_alert(
                         title=f"🟠 [PAPER SCALE-OUT] {ticker}",
                         description=f"50% 분할 익절 완료: {price_str} (슬리피지 {slip_sell_pct:+.2f}%)\n방어선 상향: {ts_desc}",
@@ -1589,7 +1515,6 @@ class PaperTradingManager:
         dna_score: float,
         recommended_weight: float,
         atr: float,
-        is_penny_signal: bool,
         acc: dict,
         recent_history_rows: list[dict],
         order_kind: str = "MARKET",
@@ -1668,7 +1593,7 @@ class PaperTradingManager:
                         note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
                     )
                     return None
-                # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 80% 초과 시 신규 진입 차단
+                # 포트폴리오 집중도 게이트: 총 자산 대비 투입 비중 75%(MAX_CONCENTRATION_PCT) 초과 시 신규 진입 차단
                 invested = await self.calculate_invested_capital()
                 total_equity = acc["cash_available"] + invested
                 if (
@@ -1757,23 +1682,16 @@ class PaperTradingManager:
                     return None
 
                 # [Guide-3] 슬리피지 보정 — 매수는 시장가보다 불리하게 체결 (실주문 전 추정치)
-                est_fill_price = _apply_slippage(
-                    price, is_buy=True, is_penny=is_penny_signal
-                )
+                est_fill_price = _apply_slippage(price, is_buy=True)
                 est_units = buy_budget / est_fill_price
-                # 장기 보유 모드 판정: 진입가가 페니 상한($1)을 넘고 $50 이하인 경우.
-                # is_penny_signal은 price(신호가) 기준이지만 실제 체결가(est_fill_price)로
-                # 재판정한다 — 슬리피지로 체결가가 경계를 넘나드는 극단적 케이스까지
-                # entry_stop_pct 계산과 동일 기준을 쓰기 위함.
-                is_long_term_signal = (
-                    PENNY_MAX_PRICE < est_fill_price <= LONG_TERM_MAX_PRICE
-                )
+                # 장기 보유 모드 판정: 진입가가 $50 이하인 경우. price(신호가)가 아닌 실제
+                # 체결가(est_fill_price) 기준으로 판정해 entry_stop_pct 계산과 동일 기준을 쓴다.
+                is_long_term_signal = est_fill_price <= LONG_TERM_MAX_PRICE
                 # ATR 기반 초기 스탑 폭 — 진입 시점에 1회 계산해 고정한다(_compute_entry_stop_pct
                 # 참고). atr<=0(데이터 부족)이면 기존 고정 %와 동일한 값으로 폴백된다.
                 entry_stop_pct = _compute_entry_stop_pct(
                     est_fill_price,
                     atr,
-                    is_penny_signal,
                     self.atr_stop_enabled,
                     is_long_term_signal,
                 )
@@ -1899,9 +1817,7 @@ class PaperTradingManager:
                 slip_pct = (fill_price / price - 1) * 100
                 report_line = f"\n💡 {ai_report}" if ai_report else ""
                 stop_desc = (
-                    "-5% (장기보유, 최고가 트레일링)"
-                    if is_long_term_signal
-                    else ("-15%" if is_penny_signal else "-10%")
+                    "-5% (장기보유, 최고가 트레일링)" if is_long_term_signal else "-10%"
                 )
                 await self.webhook.send_alert(
                     title=f"🚀 [PAPER BUY] {ticker}",
@@ -1995,7 +1911,6 @@ class PaperTradingManager:
         self,
         ticker: str,
         price: float,
-        is_penny_signal: bool,
         dna_score: float,
         atr: float,
         recommended_weight: float,
@@ -2012,7 +1927,6 @@ class PaperTradingManager:
             now = datetime.now(timezone.utc)
             payload = {
                 "ticker": ticker.upper(),
-                "is_penny": is_penny_signal,
                 "dna_score": dna_score,
                 "atr": atr,
                 "recommended_weight": recommended_weight,
@@ -2080,12 +1994,7 @@ class PaperTradingManager:
         expires_at = datetime.fromisoformat(watch["expires_at"].replace("Z", "+00:00"))
         peak_price = max(float(watch["peak_price"]), price)
         last_price = float(watch["last_price"])
-        is_penny_signal = bool(watch["is_penny"])
-        retrace_min = (
-            PULLBACK_RETRACE_MIN_PCT_PENNY
-            if is_penny_signal
-            else PULLBACK_RETRACE_MIN_PCT_NORMAL
-        )
+        retrace_min = PULLBACK_RETRACE_MIN_PCT_NORMAL
         retrace_pct = (peak_price - price) / peak_price if peak_price > 0 else 0.0
 
         if now > expires_at:
@@ -2183,7 +2092,6 @@ class PaperTradingManager:
             return False
 
         acc = await self.get_account()
-        is_penny_now = price <= PENNY_MAX_PRICE
         executed = await self._execute_entry(
             ticker=ticker,
             price=price,
@@ -2197,7 +2105,6 @@ class PaperTradingManager:
                 else float(watch["recommended_weight"])
             ),
             atr=atr if atr > 0 else float(watch["atr"]),
-            is_penny_signal=is_penny_now,
             acc=acc,
             recent_history_rows=recent_history_rows,
             rvol=rvol,

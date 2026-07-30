@@ -55,9 +55,11 @@ IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items
 # 판단 파라미터가 아님). extension_guard_tighten(확장도 가드 강화 + 급등 스파이크
 # 가드)은 2026-07-20부터 PaperTradingManager.extension_guard_penny_tight_enabled /
 # spike_guard_enabled 두 인스턴스 속성으로 핫스왑 가능해져 이 목록에 포함한다.
+# penny_gate_80은 2026-07-30 페니($1 이하) 포지션 관리 레거시 제거로 되돌릴
+# 파라미터(self.penny_dna_gate)가 engine에서 사라져 목록에서 제외됨 — 아래
+# IMPROVEMENT_ADOPTED/TARGET_PENNY_TRADES 등은 과거 결정의 감사 기록으로 유지한다.
 ROLLBACK_ACTIONABLE_ITEMS = {
     "atr_stop",
-    "penny_gate_80",
     "whipsaw_fix",
     "extension_guard_tighten",
     "pullback_entry",
@@ -806,11 +808,7 @@ def _apply_rollback_action(key: str, engines: list) -> str:
     if key == "atr_stop":
         for e in engines:
             e.atr_stop_enabled = False
-        return "ATR 기반 초기 스탑 비활성화 → 고정 % 스탑(-10%/페니 -15%)으로 롤백"
-    if key == "penny_gate_80":
-        for e in engines:
-            e.penny_dna_gate = 65
-        return "페니 진입 DNA 게이트 80 → 65로 롤백"
+        return "ATR 기반 초기 스탑 비활성화 → 고정 % 스탑(-10%)으로 롤백"
     if key == "whipsaw_fix":
         for e in engines:
             e.max_daily_trades_per_ticker = 1
@@ -833,7 +831,6 @@ async def _persist_rollback_settings(supabase, key: str) -> None:
     run_startup_sequence()가 이 값을 읽어 롤백 상태를 유지하도록 한다."""
     field_map = {
         "atr_stop": {"atr_stop_enabled": False},
-        "penny_gate_80": {"penny_dna_gate": 65},
         "whipsaw_fix": {
             "max_daily_trades_per_ticker": 1,
             "reentry_cooldown_minutes": 60,

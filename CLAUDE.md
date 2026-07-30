@@ -79,7 +79,7 @@ supabase functions deploy
 
 ### Penny Lab 파이프라인 ($1 초과 ~ $50 이하, 2026-07-28부로 스캔 범위 변경 — 하위 "장기 보유 모드 도입" 참고)
 
-**2026-07-28: $1 이하 페니 종목은 스캐닝·watchlist 자동등록 대상에서 완전히 제외됨.** 원인: GSUN/SLGB/INUV/CHAI 등 최악의 손실 사고가 페니 종목에 집중됐던 이력(하위 "과거 수정된 버그" 다수 참고) — 이제 신규 페니 진입 자체가 발생하지 않는다. `PENNY_MAX_PRICE`/`PENNY_TS_*` 등 `paper_engine.py`의 페니 파라미터는 이 변경 이전에 매수된 레거시 포지션의 청산 로직 유지 목적으로만 코드에 남아있다. $50 초과 종목도 함께 스캔 대상에서 제외됨(엔드포인트 이름 `/api/penny/scan`·테이블명 `penny_universe_pool` 등은 레거시 명칭 그대로 유지, 실제 스캔 범위와 무관).
+**2026-07-28: $1 이하 페니 종목은 스캐닝·watchlist 자동등록 대상에서 완전히 제외됨.** 원인: GSUN/SLGB/INUV/CHAI 등 최악의 손실 사고가 페니 종목에 집중됐던 이력(하위 "과거 수정된 버그" 다수 참고) — 이제 신규 페니 진입 자체가 발생하지 않는다. **2026-07-30: `paper_engine.py`의 `PENNY_MAX_PRICE`/`PENNY_TS_*`/`penny_dna_gate` 등 페니 전용 상태머신 자체를 완전히 삭제함** — 열려있던 진입가 $1 이하 레거시 포지션이 0건임을 DB로 확인 후 제거(하위 "페니($1 이하) 포지션 관리 레거시 제거" 참고). $50 초과 종목도 함께 스캔 대상에서 제외됨(엔드포인트 이름 `/api/penny/scan`·테이블명 `penny_universe_pool` 등은 레거시 명칭 그대로 유지, 실제 스캔 범위와 무관).
 
 ```
 [1] POST /api/penny/scan
@@ -245,44 +245,47 @@ REENTRY_COOLDOWN_MINUTES = 15  # 청산 후 재진입 금지 시간
 ENFORCE_PDT_SAFEGUARD = False  # PDT Rule = 마진 계좌 $25k 미만 전용, $100k 가상 계좌에 미적용
 ```
 
-### Penny Lab 전용 상수 (`paper_engine.py` 상단)
+### 페니($1 이하) 포지션 관리 레거시 제거 (2026-07-30)
 
-```python
-PENNY_MAX_PRICE        = 1.0   # 이 가격 이하이면 페니 파라미터 자동 전환
-PENNY_TS_INIT_PCT      = 0.85  # 초기 TS -15%
-PENNY_TS_TRAIL_PCT     = 0.90  # 최고가 추종 TS
-PENNY_BREAKEVEN_TRIGGER= 1.10  # +10% 달성 시 TS 하한 → 진입가
-PENNY_SCALE_OUT_RSI    = 60    # 1차 매도 RSI 기준
-PENNY_SCALE_OUT_PROFIT = 0.10  # 1차 매도 수익률 기준 (+10%)
-PENNY_TIGHT_TS_PCT     = 0.95  # Scale-Out 후 잔여 물량 TS -5%
-```
-
-`is_penny` 판정: `entry_price <= PENNY_MAX_PRICE` — **현재가 기준이 아닌 진입가 기준**이므로 보유 중 주가가 $1 이상으로 오르더라도 페니 파라미터 유지.
+`paper_engine.py`에 있던 페니 전용 상수(`PENNY_MAX_PRICE`/`PENNY_TS_INIT_PCT`/`PENNY_TS_TRAIL_PCT`/
+`PENNY_BREAKEVEN_TRIGGER`/`PENNY_SCALE_OUT_RSI`/`PENNY_SCALE_OUT_PROFIT`/`PENNY_TIGHT_TS_PCT`/
+`CHANDELIER_K_PENNY`/`SLIPPAGE_*_PENNY`/`self.penny_dna_gate`)와 `is_penny`/`is_penny_signal`
+분기 전체를 삭제했다. 2026-07-28부로 스캐너가 $1 이하 종목을 신규 스캔·watchlist 등록
+대상에서 제외한 뒤로 이 경로가 도달 불가능해졌고(paper_positions 전수 확인 결과 진입가
+$1 이하 보유 포지션 0건), 살아있는 코드로 남겨둘 이유가 없었다. `_apply_slippage()`/
+`_compute_entry_stop_pct()`/`_compute_locked_floor()`/`update_reversible_trailing_stop()`
+모두 `is_penny` 파라미터가 제거되고 항상 "일반" 값(TS_INIT_PCT/CHANDELIER_K_NORMAL/
+SLIPPAGE_*_NORMAL/NORMAL_BREAKEVEN_TRIGGER)만 사용한다. `PENNY_MAX_PRICE`는
+`LONG_TERM_MIN_PRICE`(=1.0)로 이름만 남아 장기 보유 모드의 하한 경계로만 쓰인다.
+`live_engine.py`의 저가 종목 체결 폴링 연장(`PENNY_FILL_POLL_TIMEOUT_SEC`)도 같은 이유로
+제거되어 항상 `FILL_POLL_TIMEOUT_SEC`(5초)를 쓴다. `checklist.py`의 `penny_gate_80` 개선
+항목은 감사 기록(IMPROVEMENT_ADOPTED/baseline)으로만 남기고 롤백 액션(`ROLLBACK_ACTIONABLE_ITEMS`)
+에서는 제외했다 — 되돌릴 `self.penny_dna_gate` 자체가 더 이상 존재하지 않기 때문. 이력이
+남아있는 `backtest_harness/run_comparison.py`(9e52902 이전 OLD 전략 재현용 대조 하네스)는
+예외적으로 페니 상수·`is_penny` 분기를 자체 로컬 정의로 보존한다 — production 코드 삭제와
+무관하게 과거 전략의 재현 결과가 그대로 나와야 하기 때문.
 
 ### 장기 보유 모드 전용 상수 (`paper_engine.py` 상단, 2026-07-28)
 
 ```python
-LONG_TERM_MAX_PRICE    = 50.0  # 진입가가 PENNY_MAX_PRICE($1) 초과 ~ 이 값 이하이면 장기 보유 파라미터 자동 전환
+LONG_TERM_MIN_PRICE    = 1.0   # 이 값(구 PENNY_MAX_PRICE) 이하는 스캐너가 애초에 걸러내 도달 불가
+LONG_TERM_MAX_PRICE    = 50.0  # 진입가가 이 값 이하이면 장기 보유 파라미터 자동 전환
 LONG_TERM_TS_TRAIL_PCT = 0.95  # 최고가 추종 TS -5% (진입 시점부터 동일 폭 — ATR/브레이크이븐락인 없음)
 ```
 
-`is_long_term` 판정: `PENNY_MAX_PRICE < entry_price <= LONG_TERM_MAX_PRICE` (진입가 기준, 페니와 동일하게 파생 컬럼 없이 매 호출 시 계산). 진입은 기존 DNA 게이트(일반 75)로 완전 자동, 매도는 최고가 대비 -5% 트레일링 스탑 단 하나만 자동이고 그 외 자동 청산(Scale-Out/Time-Decay/EOD 강제청산)은 전부 스킵 — 사용자가 기존 수동 매도(청산) 버튼으로 익절 시점을 직접 결정하는 것이 의도된 설계. 새 매수 버튼은 없음(기존 자동매수 그대로). **2026-07-28부로 스캐너(`core/quant_scanner.py`)가 $1 이하 페니·$50 초과 종목을 아예 스캔·watchlist 등록 대상에서 제외**하므로, 신규 진입은 사실상 전부 이 장기 보유 모드로만 발생한다 — 페니/일반(구 ATR 트레일링) 경로는 그 이전에 이미 매수된 레거시 포지션이 청산될 때까지만 코드에 남아있는 하위호환 경로다.
+`is_long_term` 판정: `entry_price <= LONG_TERM_MAX_PRICE` (진입가 기준, 매 호출 시 계산). 진입은 기존 DNA 게이트(75)로 완전 자동, 매도는 최고가 대비 -5% 트레일링 스탑 단 하나만 자동이고 그 외 자동 청산(Scale-Out/Time-Decay/EOD 강제청산)은 전부 스킵 — 사용자가 기존 수동 매도(청산) 버튼으로 익절 시점을 직접 결정하는 것이 의도된 설계. 새 매수 버튼은 없음(기존 자동매수 그대로). **2026-07-28부로 스캐너(`core/quant_scanner.py`)가 $1 이하·$50 초과 종목을 아예 스캔·watchlist 등록 대상에서 제외**하므로, 신규 진입은 사실상 전부 이 장기 보유 모드로만 발생한다 — $50 초과 진입가에 적용되는 일반(ATR 트레일링) 경로는 그 이전에 이미 매수된 레거시 포지션이 청산될 때까지만 코드에 남아있는 하위호환 경로다.
 
 ### Scale-Out 조건 (`process_signal()`)
 
 ```python
-# 일반 종목
-scale_trigger = rsi > 55
-
-# 페니 종목 (is_penny=True)
-scale_trigger = rsi > PENNY_SCALE_OUT_RSI or (price/entry_price - 1) >= PENNY_SCALE_OUT_PROFIT
+scale_trigger = (rsi > 52 and profit_pct >= 0.05) or profit_pct >= 0.07
 ```
 
 ### Paper Engine 상태머신 로직 (process_signal)
 
 매 1분봉 데이터가 들어올 때마다 다음 순서로 검증한다:
-1. **신규 진입**: 현재 포지션이 없고, 보유 중인 종목 수가 20개(MAX_CONCURRENT_POSITIONS) 미만이며, 투입 자본이 계좌의 75%(MAX_CONCENTRATION_PCT) 미만일 때 진입. 페니 주식은 DNA≥65, 일반 주식은 DNA≥75 필요 (quant_engine.py의 tier_penny/tier2 기준과 정합). 포지션 수·집중도·예산 산정·진입 클레임 INSERT는 `_entry_lock`으로 직렬화되어 서로 다른 티커의 동시 신호가 상한을 초과해 진입하는 경합을 막는다.
-2. **Time-Decay Exit**: Scale-Out 미완료 포지션 한정. 일반 60분·페니 90분 경과 & 수익률 ±2% 이내(횡보)면 청산. 오버나이트 홀딩은 당일 09:30 ET 기준으로 경과 시간 리셋. **장기 보유 모드(`is_long_term`)는 스킵**.
+1. **신규 진입**: 현재 포지션이 없고, 보유 중인 종목 수가 20개(MAX_CONCURRENT_POSITIONS) 미만이며, 투입 자본이 계좌의 75%(MAX_CONCENTRATION_PCT) 미만일 때 진입. DNA≥75 필요 (quant_engine.py의 tier2 기준과 정합). 포지션 수·집중도·예산 산정·진입 클레임 INSERT는 `_entry_lock`으로 직렬화되어 서로 다른 티커의 동시 신호가 상한을 초과해 진입하는 경합을 막는다.
+2. **Time-Decay Exit**: Scale-Out 미완료 포지션 한정. 60분 경과 & 수익률 ±2% 이내(횡보)면 청산. 오버나이트 홀딩은 당일 09:30 ET 기준으로 경과 시간 리셋. **장기 보유 모드(`is_long_term`)는 스킵**.
 3. **EOD 청산**: 15:30 ET 기준 수익률이 +5% 이하면 강제 청산 (오버나잇 리스크 헷지). **장기 보유 모드는 스킵** — 오버나이트/장기 홀딩이 의도된 동작.
 4. **TS 업데이트**: 최고가 갱신 시 `Highest - k×ATR` 또는 고정 % 방식으로 스탑 상향. **장기 보유 모드는 `highest_price × LONG_TERM_TS_TRAIL_PCT`(-5%) 고정 트레일링만 사용** — ATR·브레이크이븐 락인 없음.
 5. **Scale-Out 발동**: 1차 조건 도달 시 보유 수량의 50% 매도 후 3분간 TS 발동 쿨다운. **장기 보유 모드는 스킵** — 자동 익절 없이 전량 보유, 사용자가 수동 매도로 직접 결정.
@@ -549,3 +552,4 @@ NEXAR_CLIENT_SECRET
 | 개선 검증 트래커의 목표 진행률(n_ts/n_penny/n_ext/n_pullback)이 포지션 승률(pos_wr) 계산과 다른 기준(원본 청산 행수)을 사용 | `routers/checklist.py` | `_calc_metrics_expectancy()`는 Scale-Out 이중 집계 방지를 위해 ticker+진입가로 포지션 그룹핑해 `pos_wr`을 계산하지만, 호출부의 `n_ts`/`n_penny`/`n_ext`/`n_pullback`은 `len(sub_trades)`(원본 청산 행수)를 그대로 써서 서로 다른 분모를 사용. 부분체결 유령 보유 사고(2026-07-25) 복구로 SLGB/MED/CHAI가 같은 진입가로 청산 행 2개씩 남은 잔재 때문에 atr_stop/extension_guard_tighten 항목의 표시 건수가 실제 포지션 수보다 많게 나옴(예: extension_guard_tighten 16건 표시 vs 실제 13포지션) | `_calc_metrics_expectancy()`가 포지션 그룹 수(`pos_trades`)도 함께 반환하도록 변경, 4개 항목 모두 이 값을 목표 진행률에 사용하도록 통일. 원본 행수와 다를 때만 "원본 청산 행수" 메트릭을 별도 표시. 판정 결과(REGRESSED/COLLECTING) 자체는 이번엔 안 바뀜 — 표본이 여전히 5건 이상이라 임계값 통과 여부는 동일 (2026-07-27) |
 | 프리마켓/애프터마켓에 TS 감시 경로가 전무해 갭다운이 무방비로 방치됨(실사례: GSUN, TS $0.3958 대비 현재가 $0.1828까지 프리마켓에서 폭락하는 동안 09:30 정규장 재개 전까지 청산 시도 자체가 없었음) | `schedulers/tasks.py` + `utils/utils.py` | `position_ts_sweeper()`가 1분봉 공백 사각지대를 메우려고 2026-07-17에 추가된 10초 안전망인데(RAYA 사고 대응), 정작 게이트가 정규장 전용 `is_market_hours()`(평일 09:30~16:00 ET)라 가장 위험한 프리마켓/애프터마켓 자체가 커버 대상에서 빠져있었음. 1분봉 스트림도 `stream_scheduler()`가 장마감 시 완전히 끊어 정규장에만 도는 건 동일 | `utils.py`에 `is_extended_market_hours()`(평일 04:00~20:00 ET) 신규 추가, `position_ts_sweeper()`의 게이트를 `is_market_hours()`→`is_extended_market_hours()`로 교체. CLOSING 고착 복구 로직은 같은 루프 안에서 자동으로 확장 시간대까지 커버됨 — 단, EOD 강제청산(`is_eod`)은 게이트 확장에 편승해 15:30~20:00 ET 전체로 같이 넓어지면 애프터마켓 저유동성 가격에 강제 체결되는 부작용이 있어 `dtime(15,30) <= now_et.time() < dtime(16,0)`로 원래 30분 창을 명시적으로 유지(코드 리뷰에서 발견해 즉시 수정). 심야(20:00~04:00 ET)는 Alpaca 체결 데이터가 희박해 여전히 미커버 — LIVE 모드 브로커 사이드 Stop-Market(`ensure_broker_stop`)도 Alpaca `clock.is_open` 기준이라 정규장 외엔 등록되지 않아(`extended_hours` 미설정) 별개 과제로 남음 (2026-07-28) |
 | 저유동성 종목의 전량 청산 시장가 주문이 부분체결(요청 수량 일부만 체결 후 잔여분 타임아웃 취소)되면, 실제로는 일부만 팔렸는데도 시스템이 "전체 포지션 청산 완료"로 기록해 미판매 잔여분이 DB 어디에도 안 잡히는 유령 보유가 됨(실사례: GSUN 2026-07-27, 2,614주 청산 시도 중 극심한 유동성 고갈로 5회 연속 시장가 주문 0주 체결·취소, 마지막 시도에서 373주(14%)만 체결됐는데 `paper_history`엔 전량 청산으로 기록되고 `paper_positions` 행이 삭제됨. 잔여 2,241주가 이틀 가까이(7/27~7/29) TS 감시 대상에서 완전히 이탈해 방치되다 사용자가 Alpaca 대시보드에서 직접 발견해 수동 매도) | `engine/paper_engine.py` | `_close_position()`이 항상 "요청 수량 = 실제 판매 수량"을 가정하고 `_on_order_sell()`(LIVE 모드는 `_submit_alpaca_order`)이 반환한 실체결 수량을 그대로 "전체 청산"으로 처리 — 부분체결이어도 `paper_positions`를 무조건 DELETE. 매수(BUY) 쪽엔 이미 동일 패턴의 phantom 방지 로직이 있었으나(2026-07-25, `_FILLED_STATUSES`에서 `PARTIALLY_FILLED` 제거) 매도(SELL) 쪽엔 대칭 방어가 없었음 | 청산 요청 수량(`requested_units`) 대비 실체결 수량이 1% 넘게 부족하면(`is_partial_close`) `paper_history`엔 실체결분만 `(부분체결 X/Y주)` 표시로 기록하고, `paper_positions`는 삭제 대신 `units`를 잔여분으로 정정해 원래 상태(HOLD)로 유지 — 다음 `position_ts_sweeper` 사이클이 잔여 물량을 계속 청산 시도하도록 함. 정상 예외처리 재시도 경로(cash 반영 후 history/positions 갱신 실패 시 1회 재시도)도 동일하게 분기 처리. Discord에 부분체결 사실과 잔여 수량을 별도 알림 (2026-07-29) |
+| 2026-07-28 스캐너 변경으로 진입가 $1 이하 신규 진입이 완전히 불가능해졌는데도 `paper_engine.py`에 페니 전용 상태머신(진입 게이트·TS·슬리피지·Scale-Out·Chandelier·눌림목 되돌림폭)이 그대로 남아있어, 코드를 처음 보는 사람이 "페니 전략이 아직 살아있다"고 오인하거나 실수로 그 죽은 분기에 새 로직을 얹을 위험이 있었음 | `engine/paper_engine.py` + `live_engine.py` + `schedulers/tasks.py` + `routers/checklist.py` + `engine/portfolio_backtester.py` + 프론트엔드(`TensionGauge.tsx`) | 진입가 $1 이하 오픈 포지션이 0건임을 DB로 확인 후에도 `PENNY_MAX_PRICE`/`PENNY_TS_*`/`penny_dna_gate` 등 관련 상수·`is_penny`/`is_penny_signal` 분기가 계속 유지되고 있었음 — "이전에 매수된 레거시 포지션의 청산 로직 유지 목적"이라는 주석과 달리 실제로 지킬 레거시 포지션이 이미 사라진 상태였음 | 페니 전용 상태머신 전체 삭제(항상 "일반" 값만 사용), `PENNY_MAX_PRICE`→`LONG_TERM_MIN_PRICE`로 개명해 장기 보유 모드 하한 경계로만 재사용. `live_engine.py`의 `PENNY_FILL_POLL_TIMEOUT_SEC`, `checklist.py`의 `penny_gate_80` 롤백 액션(감사 기록은 유지)도 함께 제거. `TensionGauge.tsx`의 페니 전용 DNA 80 게이트 표시(실제로는 이미 75 단일 게이트)도 제거. `backtest_harness/run_comparison.py`(9e52902 이전 OLD 전략 재현 하네스)만 예외적으로 로컬 상수로 페니 파라미터 보존 (2026-07-30) |

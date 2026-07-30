@@ -27,17 +27,14 @@ from alpaca.trading.requests import (
 )
 from alpaca.trading.stream import TradingStream
 
-from engine.paper_engine import PENNY_MAX_PRICE, PaperTradingManager
+from engine.paper_engine import PaperTradingManager
 
 if TYPE_CHECKING:
     from alpaca.trading.client import TradingClient
     from supabase import Client
 
 # 체결 확인 폴링 — 시장가 주문은 보통 초 단위로 체결되므로 짧게 대기.
-# 페니/저유동성 종목은 스프레드가 넓어 5초 안에 체결 확인이 안 되는 경우가 잦아
-# (2026-07-15: UCOP STRONG BUY 5회가 전부 미체결 취소로 유실됨) 더 길게 대기한다.
 FILL_POLL_TIMEOUT_SEC = 5.0
-PENNY_FILL_POLL_TIMEOUT_SEC = 12.0
 FILL_POLL_INTERVAL_SEC = 0.5
 
 # PARTIALLY_FILLED는 종결 상태가 아니다 — 부분체결 시점의 filled_qty를 최종
@@ -293,11 +290,7 @@ class LiveTradingManager(PaperTradingManager):
             # 스트림이 이 주문 체결을 "외부 매도"로 오인해 이중 회계하지 않도록 기록
             self._register_own_order(order.id)
 
-            poll_timeout = (
-                PENNY_FILL_POLL_TIMEOUT_SEC
-                if fallback_price <= PENNY_MAX_PRICE
-                else FILL_POLL_TIMEOUT_SEC
-            )
+            poll_timeout = FILL_POLL_TIMEOUT_SEC
             elapsed = 0.0
             while (
                 order.status not in _FILLED_STATUSES

@@ -5,9 +5,10 @@ interface PositionHealthBarProps {
   currentPrice: number | null;
   highestPrice: number;
   tsThreshold: number;
+  entryPrice?: number | null;
 }
 
-export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold }: PositionHealthBarProps) {
+export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold, entryPrice }: PositionHealthBarProps) {
   if (currentPrice === null) return null;
 
   // 고점~트레일링스탑 구간에서 현재가가 남긴 여유분 (0% = 스탑 근접, 100% = 방금 고점 경신)
@@ -22,10 +23,12 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold }: P
   const isCritical = healthPct <= 15 || isBreached;
   const isDanger = healthPct <= 30;
 
-  let gradient = 'from-emerald-400 to-emerald-300';
-  let glow = 'rgba(16,185,129,0.4)';
-  let label = 'SAFE';
-  let labelColor = 'text-emerald-600';
+  const isRiskFree = entryPrice != null && tsThreshold > entryPrice;
+
+  let gradient = isRiskFree ? 'from-amber-400 to-amber-300' : 'from-emerald-400 to-emerald-300';
+  let glow = isRiskFree ? 'rgba(245,158,11,0.5)' : 'rgba(16,185,129,0.4)';
+  let label = isRiskFree ? 'RISK-FREE 🛡️' : 'SAFE';
+  let labelColor = isRiskFree ? 'text-amber-500' : 'text-emerald-600';
 
   if (isBreached) {
     gradient = 'from-rose-700 to-rose-600';
