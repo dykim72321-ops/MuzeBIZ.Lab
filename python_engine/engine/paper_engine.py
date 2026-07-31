@@ -36,7 +36,15 @@ SCALE_OUT_COOLDOWN_BARS = 3  # Scale-Out 후 최소 3봉(분) 동안 TS 체크 �
 # 대비 -5% 트레일링 스탑만 자동 방어선으로 둔다. 익절(수익 실현)은 자동화하지
 # 않고 사용자가 기존 수동 매도(청산) 버튼으로 직접 결정한다.
 LONG_TERM_MAX_PRICE = 50.0
-LONG_TERM_TS_TRAIL_PCT = 0.95  # 최고가 추종 TS: highest × 95% (-5%). 진입 시점(highest=entry)에도 동일 폭 적용
+LONG_TERM_TS_TRAIL_PCT = 0.97  # 최고가 추종 TS: highest × 97% (-3%). 진입 시점(highest=entry)에도 동일 폭 적용
+# 2026-08-01: 라이브 거래이력 분석 결과 PF가 극소수 대박 거래(YYGH 등)에 전적으로
+# 의존하는 구조임을 확인 — 트레일링을 넓혀 그 대박을 더 오래 태우면 나을 거라는
+# 가설과 반대로, backtest_harness/run_long_term_trail_experiment.py 검증 결과는
+# 정반대(타이트할수록 PF 개선)를 보였다. -15%~-2% 스윕에서 단조 증가(대형주/소형주
+# 유니버스, 무슬리피지/실슬리피지, 전반부/후반부 시간 분할 전부 방향 일치)를 확인한 뒤
+# 극단값(-1%~-2%)은 일봉 근사 백테스트가 분봉 실시간 체결의 휩쏘 비용을 못 담아낼
+# 위험이 있어 제외하고, 검증된 범위 내 보수적인 값인 -5%→-3%로 변경했다.
+# 기존 -5%는 0.95였다.
 LONG_TERM_BREAKEVEN_TRIGGER = (
     1.02  # +2% 도달 이력이 있으면 TS 하한을 본전(entry_price)으로 락인 (2026-07-29)
 )
@@ -125,9 +133,9 @@ def _compute_entry_stop_pct(
     atr_stop_enabled=False면 개선 검증 트래커의 자동 롤백으로 ATR 기반 스탑이
     비활성화된 상태 — 항상 고정 %만 반환한다 (checklist.evaluate_improvement_rollback 참고).
 
-    is_long_term=True(진입가 $1~$50)면 ATR·클램프와 무관하게 항상 고정 -5%를
-    반환한다 — 이후 매 봉 트레일링 폭(LONG_TERM_TS_TRAIL_PCT)과 진입 시점부터
-    동일해야 "최고가 대비 -5%" 규칙이 일관되게 유지된다.
+    is_long_term=True(진입가 $1~$50)면 ATR·클램프와 무관하게 항상
+    LONG_TERM_TS_TRAIL_PCT 기반 고정 %를 반환한다 — 이후 매 봉 트레일링 폭과
+    진입 시점부터 동일해야 "최고가 대비 고정 %" 규칙이 일관되게 유지된다.
     """
     if is_long_term:
         return 1.0 - LONG_TERM_TS_TRAIL_PCT
@@ -1512,13 +1520,13 @@ class PaperTradingManager:
                 # 실전에서는 atr>0이 상시 공급되므로 그 분기가 사실상 죽은 코드였다 — 통합으로 해결.
                 if not is_scaled_out:
                     if is_long_term:
-                        # 장기 보유 모드: ATR/ER 무관, 최고가 대비 고정 -5% 트레일링이
-                        # 기본이나, +2%(LONG_TERM_BREAKEVEN_TRIGGER) 이상 도달한 이력이
-                        # 있으면 하한을 본전(entry_price)으로 영구 락인한다 —
+                        # 장기 보유 모드: ATR/ER 무관, 최고가 대비 고정 %(LONG_TERM_TS_TRAIL_PCT)
+                        # 트레일링이 기본이나, +2%(LONG_TERM_BREAKEVEN_TRIGGER) 이상 도달한
+                        # 이력이 있으면 하한을 본전(entry_price)으로 영구 락인한다 —
                         # highest_price가 단조 증가이므로 별도 상태 없이 매 호출 시
-                        # 파생 가능. 5% 트레일 자체가 +5.26%(=1/0.95) 이상에서는 이미
-                        # 본전 이상을 보장하므로, +2%~+5.26% 구간의 손실 전환만 이 락인이
-                        # 추가로 방어한다 (2026-07-29 추가, LGHL 무손익 왕복 사례 참고)
+                        # 파생 가능 (2026-07-29 추가, LGHL 무손익 왕복 사례 참고). 트레일
+                        # 폭 자체가 좁을수록(예: -3%는 +3.09%=1/0.97 이상에서 이미 본전
+                        # 이상을 보장) 이 락인이 커버해야 하는 구간도 좁아진다.
                         ts_threshold = highest_price * LONG_TERM_TS_TRAIL_PCT
                         if highest_price >= entry_price * LONG_TERM_BREAKEVEN_TRIGGER:
                             ts_threshold = max(ts_threshold, entry_price)

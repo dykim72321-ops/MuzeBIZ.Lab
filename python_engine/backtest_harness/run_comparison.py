@@ -40,6 +40,7 @@ from engine.paper_engine import (
     SLIPPAGE_BUY_NORMAL,
     SLIPPAGE_SELL_NORMAL,
     SLIPPAGE_LOW_VOLUME_THRESHOLD,
+    LONG_TERM_MAX_PRICE,
     update_reversible_trailing_stop,  # NEW
 )
 
@@ -309,6 +310,7 @@ class Portfolio:
         scale_out_enabled: bool = True,
         entry_stop_tight_pct: float | None = None,
         entry: str = "MARKET",
+        long_term_trail_pct: float | None = None,
     ):
         self.variant = variant  # "OLD" | "NEW"
         self.sizing = sizing or variant  # "OLD" | "NEW"
@@ -321,6 +323,13 @@ class Portfolio:
         # 값을 주면(예: 0.07 = -7%) 모든 포지션(일반/페니 공통)의 초기 스탑 폭을
         # 이 값으로 강제 오버라이드 — "초기 스탑 타이트닝" 실험용.
         self.entry_stop_tight_pct = entry_stop_tight_pct
+        # 2026-08-01 트레일링 스탑 폭 실험용 — paper_engine.py의 "장기 보유 모드"
+        # (entry_price<=LONG_TERM_MAX_PRICE)를 재현한다: ATR/Scale-Out을 전부 스킵하고
+        # highest_price 대비 고정 %만 추종한다. 이 하네스는 원래 장기 보유 모드
+        # 도입(2026-07-28) 이전 로직만 갖고 있었다 — 라이브 계좌가 지금 사실상 전부 이
+        # 모드로 운영되는데(스캐너가 $1~$50만 스캔) 이 하네스는 그걸 검증할 수 없었다.
+        # None이면 기존 동작(ATR 기반 OLD/NEW 트레일링 + Scale-Out) 그대로 유지.
+        self.long_term_trail_pct = long_term_trail_pct
         self.cash = INITIAL_CAPITAL
         self.positions = {}  # ticker -> dict
         self.closed_trades = []  # for NEW dynamic kelly rolling history
@@ -464,6 +473,9 @@ class Portfolio:
         else:
             ts_init = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
 
+        is_long_term = (
+            self.long_term_trail_pct is not None and fill_price <= LONG_TERM_MAX_PRICE
+        )
         self.cash -= budget
         self.positions[ticker] = {
             "entry_price": fill_price,
@@ -474,6 +486,7 @@ class Portfolio:
             "units": units,
             "is_scaled_out": False,
             "is_penny": is_penny,
+            "is_long_term": is_long_term,
         }
 
     def update_and_check_exit(self, ticker, row):
@@ -494,7 +507,12 @@ class Portfolio:
         highest_price = pos["highest_price"]
 
         # A. TS 업데이트
-        if not pos["is_scaled_out"]:
+        # 장기 보유 모드(paper_engine.py의 is_long_term 재현): ATR/OLD/NEW 계산을
+        # 전부 건너뛰고 highest_price 대비 고정 % 트레일링만 적용 — 브레이크이븐
+        # 락인도 없다(라이브와 동일).
+        if pos["is_long_term"]:
+            pos["ts_threshold"] = highest_price * self.long_term_trail_pct
+        elif not pos["is_scaled_out"]:
             if self.stop == "OLD":
                 pos["ts_threshold"] = old_update_ts(
                     entry_price,
@@ -519,11 +537,16 @@ class Portfolio:
                 entry_price, highest_price, pos["ts_threshold"], atr, is_penny
             )
 
-        # B. Scale-Out 체크 (미실행 상태에서만, scale_out_enabled=False면 전량 스킵 —
-        # 포지션은 계속 "미실행" 상태로 남아 A 분기의 ATR Trailing Stop이 전량을
+        # B. Scale-Out 체크 (장기 보유 모드는 스킵 — 라이브와 동일하게 자동 익절 없이
+        # 트레일링 스탑 하나로만 청산. scale_out_enabled=False면 전량 스킵 —
+        # 포지션은 계속 "미실행" 상태로 남아 A 분기의 트레일링 스탑이 전량을
         # 계속 추적한다 — Phase 2 "Scale-Out 폐기 + TS 일원화" 실험 스위치)
         profit_pct = close / entry_price - 1
-        if self.scale_out_enabled and not pos["is_scaled_out"]:
+        if (
+            not pos["is_long_term"]
+            and self.scale_out_enabled
+            and not pos["is_scaled_out"]
+        ):
             if is_penny:
                 scale_trigger = (
                     rsi > PENNY_SCALE_OUT_RSI and profit_pct >= 0.05
@@ -557,6 +580,7 @@ def run_variant(
     scale_out_enabled: bool = True,
     entry_stop_tight_pct: float | None = None,
     entry: str = "MARKET",
+    long_term_trail_pct: float | None = None,
 ):
     pf = Portfolio(
         variant,
@@ -565,6 +589,7 @@ def run_variant(
         scale_out_enabled=scale_out_enabled,
         entry_stop_tight_pct=entry_stop_tight_pct,
         entry=entry,
+        long_term_trail_pct=long_term_trail_pct,
     )
     all_dates = sorted(set().union(*[set(d.index) for d in dfs.values()]))
     for date in all_dates:
