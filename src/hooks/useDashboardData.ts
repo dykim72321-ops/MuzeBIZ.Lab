@@ -360,9 +360,9 @@ export function useDashboardData() {
     }
   }, [triggerHunt, loadDashboardData]);
 
-  const handleToggleArm = useCallback(async () => {
+  const handleToggleArm = useCallback(async (targetState?: boolean) => {
     const currentIsArmed = useTradingStore.getState().isArmed;
-    const nextState = !currentIsArmed;
+    const nextState = targetState ?? !currentIsArmed;
     const toastId = toast.loading(nextState ? 'SYSTEM ARMING...' : 'SYSTEM DISARMING...');
     try {
       const result = await toggleSystemArm(nextState);
