@@ -204,6 +204,73 @@ def update_reversible_trailing_stop(
     return max(locked_floor, adaptive_stop)
 
 
+# ── 스프레드 게이트 Shadow 모드 (2026-07-31) ─────────────────────────────────
+# 진입 체결 직전 IEX 최신 호가를 1회 조회해 bid/ask 스프레드를 engine_decisions에
+# 기록만 한다 — 아직 어떤 진입도 차단하지 않는다. GSUN/SLGB/INUV/CHAI 등 과거
+# 대형 손실을 재검토한 결과, 실제 원인은 "진입 시점 스프레드"가 아니라 청산 단계
+# 감시 공백(폴링 갭·부분체결 회계·IEX 데이터 정체)이었고 전부 별도로 이미 수정돼
+# 있다 — 스프레드 게이트는 그 사고들의 재발 방지책이 아니라 새로운 방어선이므로,
+# forward_return과의 실제 상관관계를 표본으로 확인하기 전까지는 차단하지 않는다.
+# IEX는 저유동성 종목에서 호가가 몇 분씩 정체될 수 있음이 이미 확인됐으므로
+# (ZNB 사례, 2026-07-30) quote_stale=True 표본은 분석 시 반드시 제외해야 한다.
+# 매 1분봉·매 감시 종목마다 호출하면 과거 429 사고가 재현될 수 있으므로, 반드시
+# 진입 확정 1회(주문 제출 직전)에만 호출한다 — 다른 곳에서 재사용 금지.
+_SPREAD_QUOTE_STALE_THRESHOLD_SEC = (
+    120  # position_ts_sweeper의 STALE_TRADE_THRESHOLD_SEC와 동일 기준
+)
+_SPREAD_QUOTE_TIMEOUT_SEC = 2.0  # 이 조회가 실주문 제출을 지연시키는 시간 상한
+_spread_data_client = None
+
+
+def _get_spread_data_client():
+    global _spread_data_client
+    if _spread_data_client is None:
+        import os
+        from alpaca.data.historical import StockHistoricalDataClient
+
+        api_key = os.getenv("APCA_API_KEY_ID")
+        api_secret = os.getenv("APCA_API_SECRET_KEY")
+        if not api_key or not api_secret:
+            return None
+        _spread_data_client = StockHistoricalDataClient(api_key, api_secret)
+    return _spread_data_client
+
+
+async def _fetch_quote_spread(ticker: str) -> tuple[float | None, bool | None]:
+    """진입 확정 직전 1회 호출 전용. (spread_pct, quote_stale) 반환.
+
+    실패·타임아웃 시 항상 (None, None)을 반환하고 예외를 던지지 않는다 —
+    이 조회는 Shadow 로깅 전용이므로 실패가 실제 매수를 지연·차단해서는 안 된다.
+    """
+    client = _get_spread_data_client()
+    if client is None:
+        return None, None
+    try:
+        from alpaca.data.enums import DataFeed
+        from alpaca.data.requests import StockLatestQuoteRequest
+
+        req = StockLatestQuoteRequest(symbol_or_symbols=[ticker], feed=DataFeed.IEX)
+        quote_map = await asyncio.wait_for(
+            asyncio.to_thread(client.get_stock_latest_quote, req),
+            timeout=_SPREAD_QUOTE_TIMEOUT_SEC,
+        )
+        quote = quote_map.get(ticker) if quote_map else None
+        if quote is None or not quote.bid_price or not quote.ask_price:
+            return None, None
+        mid = (quote.bid_price + quote.ask_price) / 2
+        if mid <= 0:
+            return None, None
+        spread_pct = (quote.ask_price - quote.bid_price) / mid * 100
+        quote_stale = None
+        if quote.timestamp is not None:
+            age_sec = (datetime.now(timezone.utc) - quote.timestamp).total_seconds()
+            quote_stale = age_sec > _SPREAD_QUOTE_STALE_THRESHOLD_SEC
+        return round(spread_pct, 4), quote_stale
+    except Exception as e:
+        print(f"⚠️ [Spread Shadow] {ticker} 호가 조회 실패(무시, 진입엔 영향 없음): {e}")
+        return None, None
+
+
 class PaperTradingManager:
     # LiveTradingManager가 True로 오버라이드 — _close_position()의 하드 스탑
     # 시뮬레이션처럼 "실제 체결가가 없는 페이퍼 모드에서만" 적용해야 하는 로직을
@@ -288,6 +355,8 @@ class PaperTradingManager:
         macd_diff: float = None,
         is_extended: bool = None,
         atr_pct: float = None,
+        spread_pct: float = None,
+        quote_stale: bool = None,
     ):
         """게이트 통과/차단 결과를 engine_decisions 테이블에 기록.
 
@@ -295,7 +364,10 @@ class PaperTradingManager:
         daily_discovery의 최신 스냅샷(결정 시점과 시간이 안 맞는 근사치)에 의존하지
         않고 결정 시점 값 그대로 DNA_Score 구성 요소의 예측력을 검증할 수 있도록
         추가됐다 — 호출부(_process_signal_locked)가 실제 값을 못 받은 경로(예: HOLD
-        경량 경로)는 None으로 남는다."""
+        경량 경로)는 None으로 남는다.
+
+        spread_pct/quote_stale은 스프레드 게이트 Shadow 모드(2026-07-31) 전용 —
+        진입 EXECUTED 시점에만 채워지고 나머지 gate 호출은 None으로 남는다."""
         try:
             row = {
                 "ticker": ticker,
@@ -311,6 +383,8 @@ class PaperTradingManager:
                 "macd_diff": macd_diff,
                 "is_extended": is_extended,
                 "atr_pct": atr_pct,
+                "spread_pct": spread_pct,
+                "quote_stale": quote_stale,
             }
             await asyncio.to_thread(
                 self.supabase.table("engine_decisions").insert(row).execute
@@ -1793,6 +1867,11 @@ class PaperTradingManager:
                     print(f"⚠️ [{ticker}] 진입 클레임 INSERT가 빈 결과 반환 — 스킵")
                     return None
 
+            # 스프레드 게이트 Shadow 모드: 주문 제출 직전 1회만 호출해 기록용
+            # spread_pct/quote_stale을 확보한다 — 실패해도 진입을 막지 않는다
+            # (_fetch_quote_spread 참고).
+            shadow_spread_pct, shadow_quote_stale = await _fetch_quote_spread(ticker)
+
             # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 (체결 수량, 체결 단가) 반환.
             # 실패 시 클레임 롤백 + DB 기록 차단. order_kind="LIMIT"(눌림목 확인 진입)이면
             # limit_price에 실제 Alpaca 지정가 주문을 제출한다(시장가 폴백은 없음 — 미체결
@@ -1891,6 +1970,10 @@ class PaperTradingManager:
                     ),
                     color=0x2ECC71,
                 )
+                spread_note = ""
+                if shadow_spread_pct is not None:
+                    stale_tag = " [STALE]" if shadow_quote_stale else ""
+                    spread_note = f" | 스프레드 {shadow_spread_pct:.2f}%{stale_tag}"
                 await self._log_decision(
                     ticker=ticker,
                     gate="EXECUTED",
@@ -1903,8 +1986,10 @@ class PaperTradingManager:
                     macd_diff=macd_diff,
                     is_extended=is_extended,
                     atr_pct=atr_pct,
+                    spread_pct=shadow_spread_pct,
+                    quote_stale=shadow_quote_stale,
                     price=fill_price,
-                    note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}",
+                    note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}{spread_note}",
                 )
                 # 관심종목 자동 등록 (STRONG BUY 매수 → HOLDING)
                 await self._sync_watchlist_buy(
