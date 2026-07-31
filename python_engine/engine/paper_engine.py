@@ -302,6 +302,15 @@ class PaperTradingManager:
         self._kelly_cache: dict[str, dict | None] = {}
         self._kelly_cache_updated_at: dict[str, float] = {}
 
+        # OBSERVE_CANDIDATE 로깅 쿨다운(2026-07-31) — DNA>=50이지만 STRONG BUY에
+        # 못 미치는 신호를 매 1분봉마다 그대로 기록하면 티커 하나가 며칠씩 DNA 50대에
+        # 머무를 때 사실상 같은 사건이 수백 행으로 중복 적재된다. 15분은
+        # scripts/run_feature_significance.py의 독립 사건 판정 창(같은 티커 15분 이내
+        # 재등장 시 같은 사건으로 묶음)과 동일하게 맞춰, 로깅 단계에서부터 그 기준에
+        # 맞는 표본만 쌓이도록 한다.
+        self._observe_log_cooldown: dict[str, float] = {}
+        self.OBSERVE_LOG_COOLDOWN_SEC = 15 * 60
+
         # ── 개선 검증 트래커 자동 롤백 대상 파라미터 (2026-07-20) ──────────────
         # 모듈 상수 대신 인스턴스 속성으로 둬서, checklist.evaluate_improvement_rollback()가
         # REGRESSED 연속 판정 시 프로세스 재시작 없이 즉시 되돌릴 수 있게 한다.
@@ -357,6 +366,7 @@ class PaperTradingManager:
         atr_pct: float = None,
         spread_pct: float = None,
         quote_stale: bool = None,
+        efficiency_ratio: float = None,
     ):
         """게이트 통과/차단 결과를 engine_decisions 테이블에 기록.
 
@@ -367,7 +377,11 @@ class PaperTradingManager:
         경량 경로)는 None으로 남는다.
 
         spread_pct/quote_stale은 스프레드 게이트 Shadow 모드(2026-07-31) 전용 —
-        진입 EXECUTED 시점에만 채워지고 나머지 gate 호출은 None으로 남는다."""
+        진입 EXECUTED 시점에만 채워지고 나머지 gate 호출은 None으로 남는다.
+
+        efficiency_ratio(smoothed_er)는 DNA_Score 무용론 확정(2026-07-31, 4중 검증)
+        이후 대안 피처 후보 검증용으로 추가됐다 — trailing stop 레짐 판정에 이미
+        쓰이던 값을 재사용만 하는 것이라 매매 로직에는 아무 영향이 없다."""
         try:
             row = {
                 "ticker": ticker,
@@ -385,6 +399,7 @@ class PaperTradingManager:
                 "atr_pct": atr_pct,
                 "spread_pct": spread_pct,
                 "quote_stale": quote_stale,
+                "efficiency_ratio": efficiency_ratio,
             }
             await asyncio.to_thread(
                 self.supabase.table("engine_decisions").insert(row).execute
@@ -1058,6 +1073,38 @@ class PaperTradingManager:
             if watch_resolved is not None:
                 return watch_resolved
 
+        # ── OBSERVE_CANDIDATE (2026-07-31, 매매 로직과 무관한 관찰 전용 로깅) ──
+        # DNA_Score 무용론이 4중 검증(백테스트 3회 + engine_decisions 실측)으로 확정된
+        # 뒤, 대안 피처(RSI 역상관 등) 검증에 쓸 표본을 더 빨리 쌓기 위한 것.
+        # 기존 DNA_GATE 로깅은 signal_type=="BUY"(=Strong_Buy) 조건에서만 발동해
+        # DNA 50~74대 대부분(Strong_Buy가 아닌 HOLD 신호)이 로그에 전혀 남지 않았다.
+        # 티커당 15분 쿨다운(analysis 스크립트의 독립 사건 판정 창과 동일)을 둬서
+        # 같은 티커가 DNA 50대에 며칠씩 머물러도 수백 행이 중복 적재되지 않게 한다.
+        if (
+            not pos
+            and dna_score >= 50
+            and not (signal_type == "BUY" and strength == "STRONG")
+        ):
+            last_logged = self._observe_log_cooldown.get(ticker, 0.0)
+            if time.time() - last_logged >= self.OBSERVE_LOG_COOLDOWN_SEC:
+                self._observe_log_cooldown[ticker] = time.time()
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="OBSERVE_CANDIDATE",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    rvol=rvol,
+                    adx=adx,
+                    macd_diff=macd_diff,
+                    is_extended=is_extended,
+                    atr_pct=atr_pct,
+                    efficiency_ratio=smoothed_er,
+                    price=price,
+                    note=f"관찰 전용 — DNA {dna_score:.1f} (Strong_Buy 아님, 매매 로직 미관여)",
+                )
+
         # ── Gate: signal 조건 사전 체크 (ARMED 여부 포함) ────────────────────
         if signal_type == "BUY" and strength == "STRONG" and not pos:
             if not is_armed:
@@ -1073,6 +1120,7 @@ class PaperTradingManager:
                     macd_diff=macd_diff,
                     is_extended=is_extended,
                     atr_pct=atr_pct,
+                    efficiency_ratio=smoothed_er,
                     price=price,
                     note="SYSTEM_ARMED=False — 매수 신호 수신했으나 비무장 상태",
                 )
@@ -1090,6 +1138,7 @@ class PaperTradingManager:
                     macd_diff=macd_diff,
                     is_extended=is_extended,
                     atr_pct=atr_pct,
+                    efficiency_ratio=smoothed_er,
                     price=price,
                     note=f"DNA {dna_score:.1f} < gate {dna_gate}",
                 )
@@ -1342,6 +1391,7 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                smoothed_er=smoothed_er,
             )
 
         # --- 2. 기존 포지션 관리 (Trailing Stop & Scale Out) ---
@@ -1660,6 +1710,7 @@ class PaperTradingManager:
         adx: float | None = None,
         macd_diff: float | None = None,
         is_extended: bool | None = None,
+        smoothed_er: float | None = None,
     ) -> bool | None:
         """신규 진입 admission control(포지션 수 상한·재진입 쿨다운·집중도·예산) + 실주문
         제출 + 포지션 확정. 호출자가 이미 DNA 게이트·서킷브레이커·쿨다운·변동성 필터를
@@ -1667,8 +1718,8 @@ class PaperTradingManager:
         분기, order_kind="MARKET")와 눌림목 확인 후 진입 경로(_evaluate_pullback_watch,
         order_kind="LIMIT") 양쪽에서 재사용된다.
 
-        rvol/adx/macd_diff/is_extended는 engine_decisions 로깅 전용이며(2026-07-29),
-        호출부가 없으면 None으로 남는다."""
+        rvol/adx/macd_diff/is_extended/smoothed_er는 engine_decisions 로깅 전용이며
+        (2026-07-29/07-31), 호출부가 없으면 None으로 남는다."""
         atr_pct = round(atr / price * 100, 4) if price else None
         # 매수 락: 이 티커의 신규 진입(admission control ~ 실주문 제출·체결
         # 확인)을 직렬화한다. 청산 락(_get_exit_lock)과 분리되어 있으므로,
@@ -1988,6 +2039,7 @@ class PaperTradingManager:
                     atr_pct=atr_pct,
                     spread_pct=shadow_spread_pct,
                     quote_stale=shadow_quote_stale,
+                    efficiency_ratio=smoothed_er,
                     price=fill_price,
                     note=f"매수 체결 ${buy_budget:.2f} | {units:.2f}주 | TS ${ts_threshold:.4f}{spread_note}",
                 )

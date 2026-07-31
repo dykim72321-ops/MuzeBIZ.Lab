@@ -435,6 +435,7 @@ async def on_minute_bar_closed(bar):
                                     "macd_diff": payload.get("macd_diff"),
                                     "is_extended": payload.get("is_extended"),
                                     "atr_pct": _atr_pct(payload),
+                                    "efficiency_ratio": payload.get("smoothed_er"),
                                 }
                             )
                             .execute

@@ -54,6 +54,7 @@ COLUMNS = [
     "macd_diff",
     "is_extended",
     "atr_pct",
+    "efficiency_ratio",
     "forward_return_30m",
     "forward_return_60m",
     "ts",
@@ -236,7 +237,15 @@ def analyze_feature_correlation(df: pd.DataFrame) -> pd.DataFrame:
     from scipy import stats
 
     records = []
-    for feature in ["rsi", "rvol", "dna_score", "adx", "macd_diff", "atr_pct"]:
+    for feature in [
+        "rsi",
+        "rvol",
+        "dna_score",
+        "adx",
+        "macd_diff",
+        "atr_pct",
+        "efficiency_ratio",
+    ]:
         for window in ["forward_return_30m", "forward_return_60m"]:
             pair = df[[feature, window]].dropna()
             if len(pair) < 3:
