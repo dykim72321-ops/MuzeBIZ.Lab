@@ -8,7 +8,7 @@ import { getSortClass } from '../components/muzepart/muzepartHelpers';
 import { MuzepartFacets } from '../components/muzepart/MuzepartFacets';
 import { 
   Search, ShieldCheck, 
-  LayoutGrid, List, AlertTriangle, RefreshCw
+  LayoutGrid, List, AlertTriangle, RefreshCw, ClipboardCopy, Check
 } from 'lucide-react';
 import type { SortField, ComponentPart } from '../types/muzepart';
 import { ErrorBoundary } from '../components/ui/ErrorBoundary';
@@ -51,6 +51,16 @@ export const MuzepartSearchPage: React.FC = () => {
 
   type ViewMode = 'grid' | 'table';
   const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [isCompact, setIsCompact] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (trackingId) {
+      navigator.clipboard.writeText(trackingId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div className="space-y-6 bg-slate-50 p-4 md:p-8 lg:p-10 min-h-screen">
@@ -264,7 +274,7 @@ export const MuzepartSearchPage: React.FC = () => {
                   <span className="text-sm text-blue-650 font-medium">
                     <strong className="text-blue-900 font-bold">{processedResults.length}</strong> results found
                   </span>
-                  <div className="flex bg-blue-100 p-1 rounded-xl border border-blue-200/60">
+                  <div className="flex bg-blue-100 p-1 rounded-xl border border-blue-200/60 items-center">
                     <button 
                       className={`p-1.5 rounded-lg transition-all cursor-pointer ${viewMode === 'table' ? 'bg-white shadow-sm text-cyan-600 border border-cyan-200/50' : 'text-blue-500 hover:text-blue-900'}`}
                       onClick={() => setViewMode('table')}
@@ -278,6 +288,17 @@ export const MuzepartSearchPage: React.FC = () => {
                       <LayoutGrid className="w-4 h-4" />
                     </button>
                   </div>
+                  {viewMode === 'table' && (
+                    <label className="flex items-center gap-2 text-xs font-bold text-blue-700 cursor-pointer ml-1 bg-white px-3 py-1.5 rounded-lg border border-blue-200 shadow-sm transition-all hover:bg-blue-50">
+                      <input 
+                        type="checkbox" 
+                        checked={isCompact} 
+                        onChange={(e) => setIsCompact(e.target.checked)}
+                        className="rounded border-blue-300 text-cyan-600 focus:ring-cyan-500/20"
+                      />
+                      Compact
+                    </label>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -349,6 +370,7 @@ export const MuzepartSearchPage: React.FC = () => {
                             part={part}
                             handleLock={handleLock}
                             onShowDetails={onShowDetails}
+                            isCompact={isCompact}
                           />
                         ))
                       )}
@@ -439,7 +461,16 @@ export const MuzepartSearchPage: React.FC = () => {
             <h2 className="text-2xl font-black text-blue-900 mb-2 uppercase tracking-tight relative z-10">Inventory Secured</h2>
             <div className="bg-blue-50 p-4 rounded-xl mb-6 border border-blue-200/60 relative z-10">
               <p className="text-xs font-bold text-blue-650 uppercase tracking-widest mb-1 font-mono">Tracking ID</p>
-              <p className="font-mono text-cyan-700 font-bold">{trackingId}</p>
+              <div className="flex items-center justify-center gap-3">
+                <p className="font-mono text-cyan-700 font-bold text-lg">{trackingId}</p>
+                <button 
+                  onClick={handleCopy}
+                  className="p-1.5 hover:bg-blue-100 rounded-md transition-colors text-blue-500"
+                  title="Copy Tracking ID"
+                >
+                  {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <ClipboardCopy className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
             <p className="text-xs text-blue-650 font-bold leading-relaxed mb-8 relative z-10">
               선택한 부품의 수급 동결이 완료되었습니다.<br/>

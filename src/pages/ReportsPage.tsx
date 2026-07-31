@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, CalendarClock, CalendarDays, CalendarRange, Loader2, AlertTriangle } from 'lucide-react';
+import { BarChart3, CalendarClock, CalendarDays, CalendarRange, Loader2, AlertTriangle, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
 import {
   ResponsiveContainer,
@@ -179,7 +179,7 @@ export default function ReportsPage() {
                 
                 <div className="w-full h-[340px] relative z-10" style={{ touchAction: 'pan-y' }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 30, right: 10, left: 10, bottom: 0 }}>
                       {/* 그리드/기준선은 솔리드 헤어라인 — 대시는 시각적 노이즈이며 '예측선'으로 오독됨 */}
                       <CartesianGrid vertical={false} stroke="#e2e8f0" strokeOpacity={0.5} />
                       <XAxis
@@ -410,39 +410,9 @@ export default function ReportsPage() {
 
                 {/* Mobile View (< 768px) */}
                 <div className="block md:hidden p-4 space-y-3">
-                  {reportData.map((row, idx) => {
-                    const netProfit = row.alpaca_net_profit ?? Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
-                    const posWinRate = row.pos_win_rate ?? row.win_rate;
-                    const periodMdd = row.alpaca_period_mdd ?? row.period_mdd ?? row.mdd;
-                    const globalMdd = row.alpaca_mdd ?? row.mdd;
-
-                    return (
-                      <div key={idx} className="p-4 bg-slate-50/70 border border-slate-200/80 rounded-xl space-y-3 shadow-2xs">
-                        <div className="flex justify-between items-center pb-2.5 border-b border-slate-200/60">
-                          <span className="px-2.5 py-1 rounded bg-slate-200/70 font-bold font-mono text-slate-800 text-xs border border-slate-300/60">{row.period_label}</span>
-                          <span className={clsx("text-base font-extrabold font-mono tracking-tight", netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                            {netProfit >= 0 ? '+' : '-'}${Math.abs(netProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div>
-                            <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">체결승률(포지션)</span>
-                            <span className="font-mono font-semibold text-slate-800">{row.win_rate.toFixed(1)}% <span className="text-[10px] text-indigo-600 font-bold">({posWinRate.toFixed(1)}%)</span></span>
-                          </div>
-                          <div>
-                            <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">PF</span>
-                            <span className="font-mono font-semibold text-slate-800">
-                              {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="block text-[10px] font-bold text-rose-500 uppercase mb-0.5">MDD</span>
-                            <span className="font-mono font-semibold text-rose-600">{periodMdd.toFixed(1)}% <span className="text-[10px] text-slate-400">({globalMdd.toFixed(1)}%)</span></span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {reportData.map((row, idx) => (
+                    <MobileReportCard key={idx} row={row} />
+                  ))}
                 </div>
               </div>
 
@@ -473,6 +443,49 @@ export default function ReportsPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function MobileReportCard({ row }: { row: StrategyReportBucket }) {
+  const [expanded, setExpanded] = useState(false);
+  const netProfit = row.alpaca_net_profit ?? Math.round((row.gross_profit - row.gross_loss) * 100) / 100;
+  const posWinRate = row.pos_win_rate ?? row.win_rate;
+  const periodMdd = row.alpaca_period_mdd ?? row.period_mdd ?? row.mdd;
+  const globalMdd = row.alpaca_mdd ?? row.mdd;
+
+  return (
+    <div className="p-4 bg-slate-50/70 border border-slate-200/80 rounded-xl space-y-3 shadow-2xs transition-all">
+      <div 
+        className="flex justify-between items-center pb-2 border-b border-slate-200/60 cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="px-2.5 py-1 rounded bg-slate-200/70 font-bold font-mono text-slate-800 text-xs border border-slate-300/60 flex items-center gap-1.5">
+          {row.period_label}
+          <ChevronDown className={clsx("w-3.5 h-3.5 text-slate-500 transition-transform duration-200", expanded && "rotate-180")} />
+        </span>
+        <span className={clsx("text-base font-extrabold font-mono tracking-tight", netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+          {netProfit >= 0 ? '+' : '-'}${Math.abs(netProfit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </span>
+      </div>
+      {expanded && (
+        <div className="grid grid-cols-3 gap-2 text-xs pt-1 animate-in slide-in-from-top-2 fade-in duration-200">
+          <div>
+            <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">체결승률(포지션)</span>
+            <span className="font-mono font-semibold text-slate-800">{row.win_rate.toFixed(1)}% <span className="text-[10px] text-indigo-600 font-bold">({posWinRate.toFixed(1)}%)</span></span>
+          </div>
+          <div>
+            <span className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">PF</span>
+            <span className="font-mono font-semibold text-slate-800">
+              {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
+            </span>
+          </div>
+          <div>
+            <span className="block text-[10px] font-bold text-rose-500 uppercase mb-0.5">MDD</span>
+            <span className="font-mono font-semibold text-rose-600">{periodMdd.toFixed(1)}% <span className="text-[10px] text-slate-400">({globalMdd.toFixed(1)}%)</span></span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

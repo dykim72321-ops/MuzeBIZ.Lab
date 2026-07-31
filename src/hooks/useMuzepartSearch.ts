@@ -197,8 +197,12 @@ export const useMuzepartSearch = () => {
   // Sync React Query data to Zustand for local mutation (toggleQC, handleLock)
   useEffect(() => {
     if (queryData && !isSearchFetching) {
-      setResults(queryData);
-      setPhase('RESULTS');
+      // Add a minimum delay for the SCOUTING radar animation to provide a stable UX
+      const timer = setTimeout(() => {
+        setResults(queryData);
+        setPhase('RESULTS');
+      }, 1500);
+      return () => clearTimeout(timer);
     }
   }, [queryData, isSearchFetching, setResults, setPhase]);
 

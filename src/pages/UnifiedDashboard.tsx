@@ -125,6 +125,10 @@ export default function UnifiedDashboard() {
               <p className="text-sm text-amber-700 leading-relaxed font-bold">
                 {edgeAlert.message}
               </p>
+              <div className="mt-3 flex items-center gap-2">
+                <button onClick={() => { handleToggleArm(false); setEdgeAlert({ active: false, message: null }); }} className="text-xs font-bold bg-amber-600 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-amber-700 transition-colors cursor-pointer">시스템 정지 (Disarm)</button>
+                <button onClick={() => setIsSettingsOpen(true)} className="text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-lg shadow-sm hover:bg-amber-200 transition-colors cursor-pointer">설정 확인</button>
+              </div>
             </div>
             <button
               onClick={() => setEdgeAlert({ active: false, message: null })}
@@ -245,7 +249,7 @@ export default function UnifiedDashboard() {
               <div className="flex-1 px-5 pb-5 bg-white relative">
                 {chartData.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-xl text-slate-600 font-bold bg-slate-50/50 relative overflow-hidden">
-                    <svg className="absolute inset-0 w-full h-full opacity-10 animate-pulse text-slate-400" preserveAspectRatio="none" viewBox="0 0 1440 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <svg className="absolute inset-0 w-full h-full animate-pulse text-slate-300/30" preserveAspectRatio="none" viewBox="0 0 1440 320" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M0 256L48 245.3C96 235 192 213 288 218.7C384 224 480 256 576 250.7C672 245 768 203 864 192C960 181 1056 203 1152 208C1248 213 1344 203 1392 197.3L1440 192V320H1392C1344 320 1248 320 1152 320C1056 320 960 320 864 320C768 320 672 320 576 320C480 320 384 320 288 320C192 320 96 320 48 320H0V256Z" fill="currentColor"/>
                     </svg>
                     <div className="z-10 flex flex-col items-center gap-3">
@@ -330,7 +334,7 @@ export default function UnifiedDashboard() {
                 {/* Desktop Table View */}
                 <table className="hidden md:table w-full text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-100 text-xs font-mono font-extrabold text-slate-600 uppercase bg-slate-50/50 sticky top-0 shadow-sm z-10">
+                    <tr className="border-b border-slate-100 text-xs font-mono font-extrabold text-slate-600 uppercase bg-slate-50/80 backdrop-blur-md sticky top-0 shadow-sm z-10">
                       <th className="py-3 px-5">종목</th>
                       <th className="py-3 px-3 text-right hidden sm:table-cell">수량</th>
                       <th className="py-3 px-3 text-right">진입가</th>

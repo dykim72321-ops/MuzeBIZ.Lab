@@ -15,15 +15,19 @@ interface MuzepartResultRowProps {
   part: ComponentPart;
   handleLock: (part: ComponentPart) => void;
   onShowDetails: (part: ComponentPart) => void;
+  isCompact?: boolean;
 }
 
 export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
   part,
-  onShowDetails
+  onShowDetails,
+  isCompact = false
 }) => {
+  const tdClass = isCompact ? "px-4 py-2" : "px-4 py-4";
+
   return (
     <tr key={`${part.id}-${part.distributor}`} className="hover:bg-slate-50 transition-all duration-300 group border-b border-slate-100 last:border-0 relative">
-      <td className="px-4 py-4">
+      <td className={tdClass}>
         <div className="flex flex-col gap-1.5">
           <span className={`distributor-badge ${getDistributorBadgeClass(part.distributor)}`}>
             {part.distributor}
@@ -35,7 +39,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
           )}
         </div>
       </td>
-      <td className="px-4 py-4">
+      <td className={tdClass}>
         <div className="flex items-center gap-3.5">
           <div className="p-1.5 bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-300/70 rounded-lg shadow-sm">
             {getBrandIcon(part.manufacturer)}
@@ -49,7 +53,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
           </div>
         </div>
       </td>
-      <td className="px-4 py-4">
+      <td className={tdClass}>
         <div className="flex items-center gap-2">
           {part.stock > 0 ? (
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
@@ -61,7 +65,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
           </span>
         </div>
       </td>
-      <td className="px-4 py-4">
+      <td className={tdClass}>
         <div className="flex flex-col relative group/price">
           <span className={`text-[14px] font-black font-mono tracking-tight text-slate-900 w-fit whitespace-nowrap ${part.priceBreaks && part.priceBreaks.length > 0 ? 'cursor-help border-b border-dashed border-slate-400' : ''}`}>
             {part.price > 0 ? `${part.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${part.currency}` : 'Quote'}
@@ -91,7 +95,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
           )}
         </div>
       </td>
-      <td className="px-4 py-4">
+      <td className={tdClass}>
         <div className="flex flex-col">
           <span className="text-slate-900 text-[13px] font-black">{part.delivery}</span>
           {part.market_notes && (
@@ -101,7 +105,7 @@ export const MuzepartResultRow: React.FC<MuzepartResultRowProps> = ({
           )}
         </div>
       </td>
-      <td className="px-4 py-4">
+      <td className={tdClass}>
         <div className="flex items-center gap-2 relative z-10">
           <div className="flex items-center bg-white border border-slate-200 rounded-lg shadow-sm p-0.5">
             {part.datasheet && (
