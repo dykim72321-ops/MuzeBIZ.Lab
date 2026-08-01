@@ -84,6 +84,8 @@ IMPROVEMENT_ADOPTED_DATES = [
     "2026-07-23",  # pullback_entry (checklist.py에는 있었으나 이 로컬 사본에서 누락됐던 항목)
     "2026-07-24",  # 브로커 사이드 Stop-Market 도입 (갭다운 무방비 방지, checklist.py 미포함)
     "2026-07-25",  # 부분체결 유령 보유 방지 (checklist.py 미포함)
+    "2026-08-01",  # rsi_falling_knife_fix — DNA_Score RSI 컴포넌트 반전(이 스크립트의
+    # 76건 분석에서 RSI r=-0.229, p=0.047 확인 후 조치)
 ]
 DEFAULT_SINCE = max(IMPROVEMENT_ADOPTED_DATES)
 

@@ -194,41 +194,16 @@ def calculate_advanced_signals(
     score = pd.Series(50.0, index=df.index)
     # is_penny_df는 위 Is_Extended 계산부에서 이미 산출됨 (단일 정의로 통합)
 
-    # 일반 주식: 과매도(Mean-Reversion) 전략
-    normal_rsi = np.where(
-        df["RSI"].isna(),
-        0,
-        np.where(
-            df["RSI"] < 30,
-            20,
-            np.where(
-                df["RSI"] < 45,
-                20 - (df["RSI"] - 30) / 15 * 5,
-                np.where(
-                    df["RSI"] < 55,
-                    15 * (55 - df["RSI"]) / 10,
-                    np.where(
-                        df["RSI"] < 65,
-                        np.where(df["RVOL"] >= 3.0, 0, -((df["RSI"] - 55) / 10 * 10)),
-                        np.where(
-                            df["RSI"] < 75,
-                            np.where(
-                                df["RVOL"] >= 3.0, 0, -(10 + (df["RSI"] - 65) / 10 * 10)
-                            ),
-                            np.where(
-                                df["RVOL"] >= 5.0,
-                                -5,
-                                np.where(df["RVOL"] >= 3.0, -10, -20),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    )
-
-    # 페니 주식: 수급 돌파(Momentum) 전략
-    penny_rsi = np.where(
+    # RSI: 수급 돌파(Momentum) 전략 — 일반/페니 공통
+    #
+    # 과거엔 일반 주식에 한해 RSI<30~55 과매도 구간을 "평균회귀 매수 기회"로 보고
+    # 최대 +20점을 부여했었다(페니는 이미 RSI<45를 "떨어지는 칼날"로 보고 -20을
+    # 부여하는 정반대 로직이었음). engine_decisions 실측 76건 분석(2026-08-01)에서
+    # RSI가 forward_return_30m과 유의한 음의 상관(r=-0.229, p=0.047 — 페니 스캔이
+    # 2026-07-28부로 이미 중단돼 이 표본은 사실상 전부 일반 종목)을 보여, 일반
+    # 종목에서도 과매도가 "저가 매수 기회"가 아니라 "떨어지는 칼날"에 더 가깝다는
+    # 것이 확인됐다. 이에 따라 일반 종목도 페니와 동일한 낙폭 방어형 로직으로 통일.
+    rsi_score = np.where(
         df["RSI"].isna(),
         0,
         np.where(
@@ -246,7 +221,7 @@ def calculate_advanced_signals(
         ),  # 초과매수 구간
     )
 
-    score += np.where(is_penny_df, penny_rsi, normal_rsi)
+    score += rsi_score
 
     macd_diff = df["MACD_Diff"]
     macd_diff_prev = df["MACD_Diff"].shift(1).bfill()
@@ -360,35 +335,22 @@ def calculate_dna_score(
     """RSI·MACD·ADX·RVOL을 합성한 0~100 DNA 점수."""
     score = 50.0
     d_rsi = d_macd = d_adx = d_rvol = d_ext = 0.0
-    is_penny = price <= 1.0
 
     if pd.isna(rsi):
         d_rsi = 0.0
     else:
-        if is_penny:
-            # 페니주: 돌파 모멘텀 로직
-            if rsi < 45:
-                d_rsi = -20
-            elif rsi < 60:
-                d_rsi = -10
-            elif rsi < 85:
-                d_rsi = 20 if rvol >= 3.0 else 5
-            else:
-                d_rsi = 10 if rvol >= 3.0 else -10
+        # 수급 돌파(Momentum) 로직 — 일반/페니 공통 (2026-08-01, calculate_advanced_signals()의
+        # rsi_score와 동일 근거로 통일. 과거엔 일반주만 RSI<55 과매도를 반등 매수 기회로
+        # 채점했으나 engine_decisions 실측에서 RSI와 forward_return_30m이 유의한 음의
+        # 상관(r=-0.229, p=0.047)으로 나와 "떨어지는 칼날" 로직으로 교체)
+        if rsi < 45:
+            d_rsi = -20
+        elif rsi < 60:
+            d_rsi = -10
+        elif rsi < 85:
+            d_rsi = 20 if rvol >= 3.0 else 5
         else:
-            # 일반주: 과매도 반등 로직
-            if rsi < 30:
-                d_rsi = 20
-            elif rsi < 45:
-                d_rsi = 20 - (rsi - 30) / 15 * 5
-            elif rsi < 55:
-                d_rsi = 15 * (55 - rsi) / 10
-            elif rsi < 65:
-                d_rsi = 0 if rvol >= 3.0 else -((rsi - 55) / 10 * 10)
-            elif rsi < 75:
-                d_rsi = 0 if rvol >= 3.0 else -(10 + (rsi - 65) / 10 * 10)
-            else:
-                d_rsi = -5 if rvol >= 5.0 else (-10 if rvol >= 3.0 else -20)
+            d_rsi = 10 if rvol >= 3.0 else -10
     score += d_rsi
 
     if pd.isna(macd_diff) or pd.isna(macd_diff_prev):

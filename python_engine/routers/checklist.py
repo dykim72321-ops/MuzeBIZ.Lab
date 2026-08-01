@@ -34,6 +34,9 @@ IMPROVEMENT_ADOPTED = {
     "forward_return_logger": "2026-07-18",  # 신호 30m/60m forward return 자동 기록
     "extension_guard_tighten": "2026-07-20",  # Is_Extended 임계값 강화(페니 타이트화) + 스캔/실시간 정합
     "pullback_entry": "2026-07-23",  # 급등 스파이크 즉시매수 대신 눌림목(되돌림·반등) 대기 후 진입
+    "rsi_falling_knife_fix": "2026-08-01",  # DNA_Score의 RSI 컴포넌트를 과매도=반등매수(일반)에서
+    # 낙폭방어(페니와 동일, 떨어지는 칼날)로 통일 — engine_decisions 실측 76건에서 RSI가
+    # forward_return_30m과 유의한 음의 상관(r=-0.229, p=0.047)으로 확인돼 반전
 }
 # 2026-07-18 수익률 전수분석(198건)에서 산출된 개선 전 기준선 — 효과 비교용
 BASELINE_TS_WIN_RATE = 8.8  # Trailing Stop 청산 승률 (개선 전)
@@ -47,6 +50,7 @@ TARGET_TS_EXITS = 30  # ATR 스탑 효과 판정에 필요한 TS 청산 수
 TARGET_PENNY_TRADES = 20  # 페니 게이트 효과 판정에 필요한 페니 거래 수
 TARGET_EXTENSION_TRADES = 30  # 확장도 가드 효과 판정에 필요한 신규 진입 수
 TARGET_PULLBACK_TRADES = 20  # 눌림목 진입 효과 판정에 필요한 신규 진입 수
+TARGET_RSI_FIX_TRADES = 20  # RSI 낙폭방어 전환 효과 판정에 필요한 신규 진입 수
 WHIPSAW_OBSERVE_DAYS = 14  # whipsaw 재발 감시 기간 (일)
 
 IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items()}
@@ -59,6 +63,10 @@ IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items
 # penny_gate_80은 2026-07-30 페니($1 이하) 포지션 관리 레거시 제거로 되돌릴
 # 파라미터(self.penny_dna_gate)가 engine에서 사라져 목록에서 제외됨 — 아래
 # IMPROVEMENT_ADOPTED/TARGET_PENNY_TRADES 등은 과거 결정의 감사 기록으로 유지한다.
+# rsi_falling_knife_fix도 같은 이유로 제외 — atr_stop 등과 달리 PaperTradingManager의
+# 인스턴스 속성(핫스왑 가능한 bool 플래그)이 아니라 quant_engine.py의 DNA_Score
+# 산식 자체를 바꾼 것이라, 되돌리려면 코드 레벨 git revert가 필요하고 런타임
+# 토글로 되돌릴 파라미터가 없다.
 ROLLBACK_ACTIONABLE_ITEMS = {
     "atr_stop",
     "whipsaw_fix",
@@ -532,6 +540,59 @@ async def compute_improvement_status(supabase) -> dict:
             "progress_pct": min(round(n_pullback / TARGET_PULLBACK_TRADES * 100), 100),
             "metrics": metrics,
             "note": "급등 즉시매수 대신 되돌림·반등 확인 후 진입이 승률 및 Expectancy($E>0) 손실 방지를 달성하는지 검증 중",
+        }
+    )
+
+    # ── 7. RSI 낙폭방어 전환 (DNA_Score 컴포넌트 수정) ──────────────────────
+    # 일반 종목의 RSI 채점을 "과매도=반등 매수 기회"(정방향)에서 페니와 동일한
+    # "낙폭 방어(떨어지는 칼날)"로 전환. forward_return_logger 실측(76건)에서
+    # RSI가 30m 수익률과 유의한 음의 상관(r=-0.229, p=0.047)으로 나온 것이 근거.
+    # extension_guard_tighten/pullback_entry와 동일하게 "도입일 이후 신규 진입
+    # 전체"를 모집단으로 승률·Expectancy를 기존 전체 승률 기준선과 비교한다.
+    rsi_fix_adopted = IMPROVEMENT_ADOPTED["rsi_falling_knife_fix"]
+    rsi_fix_trades = [
+        t
+        for t in trades
+        if t["closed_at"] >= IMPROVEMENT_CUTOFFS["rsi_falling_knife_fix"]
+    ]
+    pos_wr_rsi_fix, exp_rsi_fix, sortino_rsi_fix, n_rsi_fix = _calc_metrics_expectancy(
+        rsi_fix_trades
+    )
+
+    metrics = [
+        {
+            "label": "도입 후 신규 진입(포지션)",
+            "value": f"{n_rsi_fix} / {TARGET_RSI_FIX_TRADES}건",
+        }
+    ]
+    if len(rsi_fix_trades) != n_rsi_fix:
+        metrics.append({"label": "원본 청산 행수", "value": f"{len(rsi_fix_trades)}건"})
+    if n_rsi_fix > 0:
+        metrics.append(
+            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_rsi_fix:.1f}%"}
+        )
+        metrics.append({"label": "거래당 기대값 ($E)", "value": f"{exp_rsi_fix:+.2f}$"})
+        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_rsi_fix:.2f}"})
+    metrics.append(
+        {"label": "개선 전 전체 승률(기준선)", "value": f"{BASELINE_OVERALL_WIN_RATE}%"}
+    )
+
+    rsi_fix_status = _verify_status(
+        n_rsi_fix,
+        TARGET_RSI_FIX_TRADES,
+        pos_wr_rsi_fix,
+        BASELINE_OVERALL_WIN_RATE,
+        expectancy=exp_rsi_fix if n_rsi_fix >= 5 else None,
+    )
+    items.append(
+        {
+            "key": "rsi_falling_knife_fix",
+            "label": "RSI 낙폭방어 전환",
+            "adopted_at": rsi_fix_adopted,
+            "status": rsi_fix_status,
+            "progress_pct": min(round(n_rsi_fix / TARGET_RSI_FIX_TRADES * 100), 100),
+            "metrics": metrics,
+            "note": "RSI 과매도 채점을 반등 매수에서 낙폭 방어로 전환한 것이 승률 및 Expectancy($E>0) 개선을 달성하는지 검증 중",
         }
     )
 
