@@ -168,13 +168,13 @@ export default function UnifiedDashboard() {
               </div>
             </div>
 
-            <div className="sfdc-card flex-1 flex flex-col min-h-[400px]">
+            <div className="sfdc-card flex-1 flex flex-col h-[400px]">
               <div className="sfdc-card-header">
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2">
                     <TestTube className="w-4 h-4 text-slate-900" /> 오늘의 알파 종목
                   </h2>
-                  <p className="text-[11px] text-slate-500 font-bold mt-1">DNA 70점 이상 엄선</p>
+                  <p className="text-[11px] text-slate-500 font-bold mt-1">DNA 75점 이상 엄선</p>
                 </div>
               </div>
               <div className="p-4 flex-1 overflow-y-auto min-h-0 bg-slate-50/50">
