@@ -199,7 +199,7 @@ export const useTradingStore = create<TradingState>((set) => ({
           .not('dna_score', 'is', null)
           .gte('dna_score', 70)
           .order('dna_score', { ascending: false })
-          .limit(8),
+          .limit(16),
         fetchPennyScanStatus(),
         fetchBrokerPositions(),
         fetchClosedTrades(200),
