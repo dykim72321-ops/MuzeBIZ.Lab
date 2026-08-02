@@ -376,6 +376,131 @@ def save_plots(df: pd.DataFrame, output_dir: str):
     print(f"✅ 플롯 저장됨: {box_path}")
 
 
+# ── 5. 시간대 / 요일 / 시장 국면(SPY) 분석 ────────────────────────────────────
+# 2026-08-01: DNA/RSI 단일 지표 검증(위 1~3번)에 이어 "언제(시간대·요일)"와
+# "어떤 국면(SPY 추세)"이 forward_return을 좌우하는지 확인하기 위해 추가.
+# 15분 dedup(dedup_signal_episodes)만으로는 부족하다는 걸 실측으로 확인했다 —
+# GSUN 크래시가 15~25분 간격으로 4행 찍혀 "독립 사건" 4개로 잡히면서 오전·금요일
+# 버킷 평균을 각각 -9%/-8%까지 왜곡시켰다. 이 절의 분석은 그 위에 "같은 티커+같은
+# 날짜는 최초 1건만" 이라는 더 강한 dedup을 추가로 적용한다.
+
+INCIDENT_RETURN_THRESHOLD_PCT = 20.0  # 이 폭 이상의 forward_return_30m은 신호 품질이
+# 아니라 유동성 고갈·체결 실패 등 운영 사고(CLAUDE.md "과거 수정된 버그" 참고)일
+# 가능성이 높아, 시간대/요일/국면처럼 "평균적인 신호 행태"를 보려는 분석에서는
+# 별도 표로 분리해 보여준다(자동 제외는 하지 않음 — 분석자가 직접 확인 후 판단).
+
+
+def dedup_by_ticker_day(df: pd.DataFrame) -> pd.DataFrame:
+    """같은 티커+같은 날짜(ET)는 최초 1건만 남긴다. dedup_signal_episodes(15분
+    간격)보다 강한 버전 — 몇 시간에 걸친 크래시가 여러 '독립 사건'으로 잡혀
+    시간대/요일 버킷을 왜곡하는 걸 막는다."""
+    d = df.copy()
+    d["ts_dt"] = pd.to_datetime(d["ts"])
+    ts_et = d["ts_dt"].dt.tz_convert("America/New_York")
+    d["date_et"] = ts_et.dt.date
+    return (
+        d.sort_values("ts_dt")
+        .drop_duplicates(subset=["ticker", "date_et"], keep="first")
+        .reset_index(drop=True)
+    )
+
+
+def _time_bucket(hour_et: float) -> str:
+    if 9.5 <= hour_et < 10.0:
+        return "개장 30분(9:30-10:00)"
+    elif 10.0 <= hour_et < 11.5:
+        return "오전(10:00-11:30)"
+    elif 11.5 <= hour_et < 14.0:
+        return "점심 횡보(11:30-14:00)"
+    elif 14.0 <= hour_et < 15.0:
+        return "오후(14:00-15:00)"
+    elif 15.0 <= hour_et < 16.0:
+        return "마감 1시간(15:00-16:00)"
+    return "장외(extended)"
+
+
+def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    d["ts_dt"] = pd.to_datetime(d["ts"])
+    ts_et = d["ts_dt"].dt.tz_convert("America/New_York")
+    d["hour_et"] = ts_et.dt.hour + ts_et.dt.minute / 60
+    d["dow"] = ts_et.dt.day_name()
+    d["time_bucket"] = d["hour_et"].apply(_time_bucket)
+    return d
+
+
+def _grouped_return_stats(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
+    g = df.groupby(group_col)["forward_return_30m"]
+    out = g.agg(count="count", mean_30m_pct="mean", median_30m_pct="median")
+    out["winrate_pct"] = g.apply(lambda s: (s > 0).mean() * 100)
+    return out.reset_index()
+
+
+def analyze_time_of_day(df: pd.DataFrame) -> pd.DataFrame:
+    d = add_time_features(df[df["forward_return_30m"].notna()])
+    return _grouped_return_stats(d, "time_bucket").sort_values("mean_30m_pct")
+
+
+def analyze_day_of_week(df: pd.DataFrame) -> pd.DataFrame:
+    d = add_time_features(df[df["forward_return_30m"].notna()])
+    order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    out = _grouped_return_stats(d, "dow")
+    out["dow"] = pd.Categorical(out["dow"], categories=order, ordered=True)
+    return out.sort_values("dow")
+
+
+def analyze_market_regime(df: pd.DataFrame) -> pd.DataFrame | None:
+    """SPY 일봉으로 신호 발생일이 20일선 상단(상승 국면)인지 하단(하락 국면)인지
+    판정해 forward_return_30m을 비교한다. yfinance 다운로드가 필요해 실패 시 None."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        print("  ⚠️ yfinance 미설치로 시장 국면 분석을 건너뜁니다.")
+        return None
+
+    d = add_time_features(df[df["forward_return_30m"].notna()])
+    if d.empty:
+        return None
+    start = (pd.to_datetime(d["ts_dt"].min()) - pd.Timedelta(days=35)).strftime(
+        "%Y-%m-%d"
+    )
+    end = (pd.to_datetime(d["ts_dt"].max()) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    spy = yf.download("SPY", start=start, end=end, progress=False, auto_adjust=True)
+    if spy.empty:
+        print("  ⚠️ SPY 데이터를 가져오지 못했습니다.")
+        return None
+    if isinstance(spy.columns, pd.MultiIndex):
+        spy.columns = spy.columns.get_level_values(0)
+    spy["ma20"] = spy["Close"].rolling(20).mean()
+    spy["above_ma20"] = spy["Close"] > spy["ma20"]
+    spy.index = spy.index.date
+
+    ts_et = d["ts_dt"].dt.tz_convert("America/New_York")
+    d["date_et"] = ts_et.dt.date
+    d["spy_above_ma20"] = d["date_et"].map(spy["above_ma20"])
+    d = d[d["spy_above_ma20"].notna()]
+    if d.empty:
+        return None
+    return _grouped_return_stats(d, "spy_above_ma20")
+
+
+def print_incident_candidates(df: pd.DataFrame):
+    extreme = df[df["forward_return_30m"].abs() > INCIDENT_RETURN_THRESHOLD_PCT]
+    if extreme.empty:
+        print(f"  |forward_return_30m| > {INCIDENT_RETURN_THRESHOLD_PCT}% 표본 없음")
+        return
+    print(
+        f"  |forward_return_30m| > {INCIDENT_RETURN_THRESHOLD_PCT}% 표본 "
+        f"{len(extreme)}건 (아래 시간대/요일/국면 평균을 왜곡할 수 있으니 신호 "
+        "품질 문제인지 운영 사고인지 직접 확인할 것 — CLAUDE.md '과거 수정된 버그' 대조):"
+    )
+    print(
+        extreme[["ticker", "ts", "dna_score", "rsi", "forward_return_30m"]].to_string(
+            index=False
+        )
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=20000, help="최대 조회 행 수")
@@ -515,6 +640,35 @@ def main():
     print(
         "\n해석 가이드: 게이트가 실제로 손실을 방어하고 있다면 BLOCKED 그룹의 "
         "평균 forward return이 EXECUTED보다 낮아야(더 나쁜 신호를 걸러냈어야) 한다."
+    )
+
+    print_section("4. 시간대 / 요일 / 시장 국면(SPY)")
+    df_td = dedup_by_ticker_day(df)
+    print(
+        f"  → 같은 티커+같은 날짜 중복 추가 제거: {len(df)}건 → {len(df_td)}건 "
+        "(15분 dedup만으로는 몇 시간짜리 크래시가 여러 '독립 사건'으로 잡히는 걸 "
+        "못 막아서 여기서만 한 단계 더 강하게 묶음)"
+    )
+    print()
+    print_incident_candidates(df_td)
+
+    print("\n  시간대별 forward_return_30m:")
+    print(analyze_time_of_day(df_td).to_string(index=False))
+
+    print("\n  요일별 forward_return_30m:")
+    print(analyze_day_of_week(df_td).to_string(index=False))
+
+    print("\n  SPY 20일선 국면별 forward_return_30m:")
+    regime_table = analyze_market_regime(df_td)
+    if regime_table is not None:
+        print(regime_table.to_string(index=False))
+
+    print(
+        "\n해석 가이드: 각 셀 표본이 한 자릿수면 통계적으로 아무것도 주장할 수 "
+        "없다(노이즈와 구분 불가). 위 '운영 사고 후보'에 뜬 티커가 특정 버킷에 "
+        "몰려 있으면 그 버킷 평균은 신뢰하지 말 것 — 2026-08-01 실측(n=33, "
+        "GSUN/CHAI 제외)에서는 시간대·요일·SPY 국면 어디서도 유의한 차이를 "
+        "찾지 못했다(t검정 p=0.295). 표본이 100~150건 이상 쌓인 뒤 재실행 권장."
     )
 
     if args.plot:
