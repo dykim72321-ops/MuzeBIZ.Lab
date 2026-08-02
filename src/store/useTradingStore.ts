@@ -30,6 +30,7 @@ import {
 } from '../services/pythonApiService';
 
 import { supabase as supabaseClient } from '../lib/supabase';
+import { DNA_BUY } from '../constants/dnaThresholds';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -197,7 +198,7 @@ export const useTradingStore = create<TradingState>((set) => ({
           .select('*')
           .gte('updated_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
           .not('dna_score', 'is', null)
-          .gte('dna_score', 70)
+          .gte('dna_score', DNA_BUY)
           .order('dna_score', { ascending: false })
           .limit(16),
         fetchPennyScanStatus(),

@@ -168,38 +168,38 @@ export default function UnifiedDashboard() {
               </div>
             </div>
 
-            <div className="sfdc-card flex-1 flex flex-col h-[400px]">
-              <div className="sfdc-card-header">
+            <div className="sfdc-card flex-1 flex flex-col min-h-[300px]">
+              <div className="sfdc-card-header py-3.5 px-4 flex justify-between items-center">
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2">
                     <TestTube className="w-4 h-4 text-slate-900" /> 오늘의 알파 종목
                   </h2>
-                  <p className="text-[11px] text-slate-500 font-bold mt-1">DNA 75점 이상 엄선</p>
+                  <p className="text-[11px] text-slate-500 font-bold mt-0.5">DNA 75점 이상 엄선 (최대 12개)</p>
                 </div>
               </div>
-              <div className="p-4 flex-1 overflow-y-auto min-h-0 bg-slate-50/50">
+              <div className="p-3 pt-1 flex-1 overflow-y-auto min-h-0 bg-slate-50/50 pr-2">
                 {discoveryStocks.length === 0 ? (
                   <div className="text-center py-10 text-slate-600 font-bold text-sm">
                     발굴된 종목이 없습니다.
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {discoveryStocks.map((stock) => {
+                  <div className="space-y-2.5">
+                    {discoveryStocks.slice(0, 12).map((stock) => {
                       const isPenny = (stock.price ?? 0) <= PENNY_ENGINE_THRESHOLD && (stock.price ?? 0) > 0;
                       return (
                       <div
                         key={stock.ticker}
                         onClick={() => handleDeepDive(stock)}
-                        className="bg-white border border-slate-100 hover:border-slate-300 rounded-xl p-4 cursor-pointer transition-colors group shadow-sm hover:shadow-md"
+                        className="bg-white border border-slate-100 hover:border-slate-300 rounded-xl p-3 cursor-pointer transition-colors group shadow-sm hover:shadow-md"
                       >
-                        <div className="flex justify-between items-start mb-3">
+                        <div className="flex justify-between items-start mb-2">
                           <div>
-                            <span className="text-lg font-black text-black block tracking-tight">{stock.ticker}</span>
+                            <span className="text-base font-black text-black block tracking-tight">{stock.ticker}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-black font-mono text-slate-900">{Number(stock.dna_score).toFixed(1)}</span>
-                            <div className="w-7 h-7 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-100 group-hover:bg-slate-100 group-hover:border-slate-200 transition-colors">
-                              <TestTube className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-900 transition-colors" />
+                            <div className="w-6 h-6 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-100 group-hover:bg-slate-100 group-hover:border-slate-200 transition-colors">
+                              <TestTube className="w-3 h-3 text-slate-600 group-hover:text-slate-900 transition-colors" />
                             </div>
                           </div>
                         </div>
