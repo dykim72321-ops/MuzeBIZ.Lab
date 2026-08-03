@@ -37,6 +37,9 @@ IMPROVEMENT_ADOPTED = {
     "rsi_falling_knife_fix": "2026-08-01",  # DNA_Score의 RSI 컴포넌트를 과매도=반등매수(일반)에서
     # 낙폭방어(페니와 동일, 떨어지는 칼날)로 통일 — engine_decisions 실측 76건에서 RSI가
     # forward_return_30m과 유의한 음의 상관(r=-0.229, p=0.047)으로 확인돼 반전
+    "watchlist_universe_expansion": "2026-08-04",  # 실시간 스트림 구독 상한 30→100 +
+    # get_watchlist_tickers() 정렬 기준을 고정 DNA값에서 재스캔 시각(recency) 우선으로 변경
+    "scale_in": "2026-08-04",  # 보유 포지션 +15% 이상 수익 시 1회 한정 추가매수 신규 도입
 }
 # 2026-07-18 수익률 전수분석(198건)에서 산출된 개선 전 기준선 — 효과 비교용
 BASELINE_TS_WIN_RATE = 8.8  # Trailing Stop 청산 승률 (개선 전)
@@ -51,6 +54,10 @@ TARGET_PENNY_TRADES = 20  # 페니 게이트 효과 판정에 필요한 페니 �
 TARGET_EXTENSION_TRADES = 30  # 확장도 가드 효과 판정에 필요한 신규 진입 수
 TARGET_PULLBACK_TRADES = 20  # 눌림목 진입 효과 판정에 필요한 신규 진입 수
 TARGET_RSI_FIX_TRADES = 20  # RSI 낙폭방어 전환 효과 판정에 필요한 신규 진입 수
+TARGET_WATCHLIST_EXPANSION_TRADES = 30  # 구독 확대 효과 판정에 필요한 신규 진입 수
+TARGET_SCALE_IN_TRADES = (
+    15  # Scale-In 효과 판정에 필요한 거래 수 (+15% 트리거라 발생 빈도 낮음)
+)
 WHIPSAW_OBSERVE_DAYS = 14  # whipsaw 재발 감시 기간 (일)
 
 IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items()}
@@ -67,11 +74,17 @@ IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items
 # 인스턴스 속성(핫스왑 가능한 bool 플래그)이 아니라 quant_engine.py의 DNA_Score
 # 산식 자체를 바꾼 것이라, 되돌리려면 코드 레벨 git revert가 필요하고 런타임
 # 토글로 되돌릴 파라미터가 없다.
+# watchlist_universe_expansion도 같은 이유로 제외 — 구독 상한(30→100)과 정렬 기준
+# 변경은 get_watchlist_tickers()의 함수 로직 자체이지 인스턴스 속성이 아니라
+# 런타임 토글이 없다. scale_in은 atr_stop처럼 PaperTradingManager.scale_in_enabled
+# 인스턴스 속성으로 만들어 rollback 가능하게 뒀다(신규 자본 배치 로직이라 다른
+# 항목보다 안전장치가 더 필요하다고 판단).
 ROLLBACK_ACTIONABLE_ITEMS = {
     "atr_stop",
     "whipsaw_fix",
     "extension_guard_tighten",
     "pullback_entry",
+    "scale_in",
 }
 # flip-flop 방지: 같은 상태(REGRESSED)가 이만큼 연속 확인돼야 실제 조치를 실행한다.
 # evaluate_improvement_rollback()은 24시간 주기로 호출되므로 사실상 "이틀 연속" 의미.
@@ -160,7 +173,9 @@ async def compute_improvement_status(supabase) -> dict:
     hist_res, dec_res = await asyncio.gather(
         asyncio.to_thread(
             supabase.table("paper_history")
-            .select("ticker,entry_price,pnl_pct,profit_amt,exit_reason,closed_at")
+            .select(
+                "ticker,entry_price,pnl_pct,profit_amt,exit_reason,closed_at,scaled_in"
+            )
             .gte("closed_at", IMPROVEMENT_CUTOFFS["whipsaw_fix"])
             .order("closed_at", desc=False)
             .execute
@@ -596,6 +611,111 @@ async def compute_improvement_status(supabase) -> dict:
         }
     )
 
+    # ── 8. Watchlist 실시간 구독 유니버스 확대 ──────────────────────────────
+    # 실시간 스트림 구독 상한을 30→100으로 늘리고, get_watchlist_tickers()
+    # 정렬 기준을 고정 initial_dna_score에서 재스캔 시각(recency) 우선으로
+    # 바꿔 낡은 DNA 고정값이 신선한 발굴 종목의 구독 슬롯을 영구 점거하던
+    # 문제를 해결했다(HYFM DNA93이 순위 1,800위 밖에서 3위로 즉시 이동한 것으로
+    # 실측 확인). extension_guard_tighten/pullback_entry와 동일하게 "도입일
+    # 이후 신규 진입 전체"를 모집단으로 승률·Expectancy를 기존 전체 승률
+    # 기준선과 비교한다.
+    wexp_adopted = IMPROVEMENT_ADOPTED["watchlist_universe_expansion"]
+    wexp_trades = [
+        t
+        for t in trades
+        if t["closed_at"] >= IMPROVEMENT_CUTOFFS["watchlist_universe_expansion"]
+    ]
+    pos_wr_wexp, exp_wexp, sortino_wexp, n_wexp = _calc_metrics_expectancy(wexp_trades)
+
+    metrics = [
+        {
+            "label": "도입 후 신규 진입(포지션)",
+            "value": f"{n_wexp} / {TARGET_WATCHLIST_EXPANSION_TRADES}건",
+        }
+    ]
+    if len(wexp_trades) != n_wexp:
+        metrics.append({"label": "원본 청산 행수", "value": f"{len(wexp_trades)}건"})
+    if n_wexp > 0:
+        metrics.append(
+            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_wexp:.1f}%"}
+        )
+        metrics.append({"label": "거래당 기대값 ($E)", "value": f"{exp_wexp:+.2f}$"})
+        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_wexp:.2f}"})
+    metrics.append(
+        {"label": "개선 전 전체 승률(기준선)", "value": f"{BASELINE_OVERALL_WIN_RATE}%"}
+    )
+
+    wexp_status = _verify_status(
+        n_wexp,
+        TARGET_WATCHLIST_EXPANSION_TRADES,
+        pos_wr_wexp,
+        BASELINE_OVERALL_WIN_RATE,
+        expectancy=exp_wexp if n_wexp >= 5 else None,
+    )
+    items.append(
+        {
+            "key": "watchlist_universe_expansion",
+            "label": "Watchlist 실시간 구독 유니버스 확대",
+            "adopted_at": wexp_adopted,
+            "status": wexp_status,
+            "progress_pct": min(
+                round(n_wexp / TARGET_WATCHLIST_EXPANSION_TRADES * 100), 100
+            ),
+            "metrics": metrics,
+            "note": "구독 상한 확대(30→100)+정렬 기준 개선(recency)이 승률 및 Expectancy($E>0) 개선을 달성하는지 검증 중",
+        }
+    )
+
+    # ── 9. Scale-In (보유 승자 추가매수) ────────────────────────────────────
+    # 기존 엔진은 포지션당 최초 진입 이후 추가 매수 로직이 전혀 없어(ANTX 사례),
+    # +15% 이상 수익 중인 포지션에 한해 1회 한정 추가매수를 신규 도입했다.
+    # 다른 항목과 달리 "도입 후 전체 신규 진입"이 아니라 실제로 Scale-In이
+    # 실행된 거래만(paper_history.scaled_in=True) 골라 그 거래들의 최종
+    # 승률·Expectancy를 검증한다 — Scale-In 자체가 그 거래의 결과에 미친
+    # 영향을 다른 거래들의 노이즈 없이 확인하기 위함.
+    scale_in_adopted = IMPROVEMENT_ADOPTED["scale_in"]
+    scale_in_trades = [
+        t
+        for t in trades
+        if t["closed_at"] >= IMPROVEMENT_CUTOFFS["scale_in"] and t.get("scaled_in")
+    ]
+    pos_wr_si, exp_si, sortino_si, n_si = _calc_metrics_expectancy(scale_in_trades)
+
+    metrics = [
+        {
+            "label": "Scale-In 실행 거래(포지션)",
+            "value": f"{n_si} / {TARGET_SCALE_IN_TRADES}건",
+        }
+    ]
+    if n_si > 0:
+        metrics.append(
+            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_si:.1f}%"}
+        )
+        metrics.append({"label": "거래당 기대값 ($E)", "value": f"{exp_si:+.2f}$"})
+        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_si:.2f}"})
+    metrics.append(
+        {"label": "개선 전 전체 승률(기준선)", "value": f"{BASELINE_OVERALL_WIN_RATE}%"}
+    )
+
+    scale_in_status = _verify_status(
+        n_si,
+        TARGET_SCALE_IN_TRADES,
+        pos_wr_si,
+        BASELINE_OVERALL_WIN_RATE,
+        expectancy=exp_si if n_si >= 5 else None,
+    )
+    items.append(
+        {
+            "key": "scale_in",
+            "label": "Scale-In (보유 승자 추가매수)",
+            "adopted_at": scale_in_adopted,
+            "status": scale_in_status,
+            "progress_pct": min(round(n_si / TARGET_SCALE_IN_TRADES * 100), 100),
+            "metrics": metrics,
+            "note": "+15% 이상 수익 포지션에 1회 한정 추가매수가 해당 거래의 승률·Expectancy($E>0)를 개선하는지 검증 중",
+        }
+    )
+
     # ── 자동 롤백 이력 병합 ──────────────────────────────────────────────────
     # evaluate_improvement_rollback()이 이미 조치를 실행한 항목은 대시보드에서
     # "자동 롤백 적용됨" 배지로 보이도록 최신 조치 로그를 items에 붙인다.
@@ -877,6 +997,10 @@ def _apply_rollback_action(key: str, engines: list) -> str:
         for e in engines:
             e.pullback_entry_enabled = False
         return "눌림목 감시(pullback_watches) 비활성화 → Spike Guard 즉시 차단(stateless)으로 롤백"
+    if key == "scale_in":
+        for e in engines:
+            e.scale_in_enabled = False
+        return "Scale-In(추가매수) 비활성화 → 포지션당 최초 진입만 유지"
     return "알 수 없는 항목 — 조치 없음"
 
 
@@ -894,6 +1018,7 @@ async def _persist_rollback_settings(supabase, key: str) -> None:
             "spike_guard_enabled": False,
         },
         "pullback_entry": {"pullback_entry_enabled": False},
+        "scale_in": {"scale_in_enabled": False},
     }
     fields = field_map.get(key)
     if not fields:

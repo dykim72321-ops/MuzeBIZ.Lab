@@ -49,6 +49,15 @@ LONG_TERM_BREAKEVEN_TRIGGER = (
     1.02  # +2% 도달 이력이 있으면 TS 하한을 본전(entry_price)으로 락인 (2026-07-29)
 )
 
+# ── Scale-In (추가 매수, 2026-08-03) ────────────────────────────────────────
+# 기존 엔진은 포지션당 최초 진입 이후 추가 매수 로직이 전혀 없어(process_signal()의
+# 신규 진입 분기가 "포지션 없음"을 전제) ANTX처럼 수익이 계속 좋아지는 승자에도
+# 절대 추가 배팅을 못 하는 구조였다. MAX_CONCENTRATION_PCT/MAX_BUY_BUDGET 상한을
+# 그대로 적용하면서, 포지션당 평생 1회·최소 수익 확인 후에만 추가 매수를 허용한다.
+SCALE_IN_ENABLED = True
+SCALE_IN_PROFIT_TRIGGER = 0.15  # 미실현 수익 +15% 이상일 때만 추가 매수 검토
+SCALE_IN_MAX_BUDGET = MAX_BUY_BUDGET * 0.5  # 추가 매수는 최초 예산 상한의 절반까지만
+
 # ── 오버트레이딩(Whipsaw) 방지 파라미터 ──────────────────────────────────────
 MAX_DAILY_TRADES_PER_TICKER = (
     2  # 종목당 하루 신규 진입(라운드트립) 최대 횟수 — Scale-Out 부분청산은 제외
@@ -336,6 +345,11 @@ class PaperTradingManager:
         # 항목)가 REGRESSED 연속 판정 시 False로 되돌려 기존 Spike Guard(즉시 차단)
         # 동작으로 복귀시킬 수 있다.
         self.pullback_entry_enabled = True
+        # Scale-In(추가매수, 2026-08-04) — 개선 검증 트래커(checklist.py)가 REGRESSED
+        # 연속 판정 시 이 인스턴스 속성을 False로 내려 즉시 비활성화할 수 있다
+        # (atr_stop_enabled 등과 동일 패턴). 모듈 상수 SCALE_IN_ENABLED는 이 속성의
+        # 초기값으로만 쓰인다.
+        self.scale_in_enabled = SCALE_IN_ENABLED
 
     def _get_buy_lock(self, ticker: str) -> asyncio.Lock:
         """티커별 매수 락 — 동일 종목의 신규 진입 처리(실주문 제출·체결 확인 포함)가
@@ -711,6 +725,7 @@ class PaperTradingManager:
                 "pnl_pct": pnl_pct,
                 "profit_amt": profit_amt,
                 "exit_reason": exit_reason,
+                "scaled_in": bool(pos.get("scaled_in", False)),
             }
 
             await self._apply_cash_delta(proceeds)
@@ -1402,6 +1417,36 @@ class PaperTradingManager:
                 smoothed_er=smoothed_er,
             )
 
+        # --- 1.5 기존 포지션 추가 매수 (Scale-In, 포지션당 평생 1회) ---
+        # 청산 락 밖에서 실행 — _execute_entry와 동일한 원칙으로 매수 체결 확인
+        # 대기가 같은 티커의 TS 매도 판정(아래 exit lock 구간)을 지연시키지 않는다.
+        if (
+            pos
+            and self.scale_in_enabled
+            and is_armed
+            and signal_type == "BUY"
+            and strength == "STRONG"
+            and dna_score >= dna_gate
+            and not pos.get("is_scaled_out")
+            and not pos.get("scaled_in")
+            and (price / pos["entry_price"] - 1) >= SCALE_IN_PROFIT_TRIGGER
+        ):
+            scaled_in = await self._execute_scale_in(
+                ticker=ticker,
+                price=price,
+                acc=acc,
+                dna_score=dna_score,
+                rsi=rsi,
+                rvol=rvol,
+                adx=adx,
+                macd_diff=macd_diff,
+                is_extended=is_extended,
+            )
+            if scaled_in:
+                # 이번 틱의 TS 관리가 갱신된 entry_price/units/highest_price를
+                # 쓰도록 재조회 (스케일인 이후 평단가가 바뀌었으므로 필수)
+                pos = await self.get_position(ticker)
+
         # --- 2. 기존 포지션 관리 (Trailing Stop & Scale Out) ---
         if pos:
             # 청산 락: 이 티커의 청산 관련 처리(EOD/Time-Decay/Scale-Out/Trailing
@@ -1700,6 +1745,125 @@ class PaperTradingManager:
 
         return False
 
+    async def _execute_scale_in(
+        self,
+        ticker: str,
+        price: float,
+        acc: dict,
+        dna_score: float,
+        rsi: float | None = None,
+        rvol: float | None = None,
+        adx: float | None = None,
+        macd_diff: float | None = None,
+        is_extended: bool | None = None,
+    ) -> bool:
+        """이미 보유 중인 승자 포지션에 대한 1회 한정 추가 매수.
+
+        매수 락(_get_buy_lock)만 사용하고 청산 락(_get_exit_lock)은 절대 잡지 않는다 —
+        같은 이유(체결 확인 대기가 TS 매도를 지연시키면 안 됨)로 _execute_entry와 동일한
+        원칙을 따른다. paper_positions.scaled_in 컬럼에 대한 CAS(scaled_in=False 조건부
+        UPDATE)로 동시 중복 스케일인과, 그 사이 포지션이 청산된 경우를 함께 방어한다."""
+        async with self._get_buy_lock(ticker):
+            invested = await self.calculate_invested_capital()
+            total_equity = acc["cash_available"] + invested
+            if total_equity <= 0:
+                return False
+            room = max(0.0, total_equity * MAX_CONCENTRATION_PCT - invested)
+            buy_budget = min(acc["cash_available"] * 0.5, SCALE_IN_MAX_BUDGET, room)
+            if buy_budget < MIN_BUY_BUDGET:
+                return False
+
+            est_fill_price = _apply_slippage(price, is_buy=True)
+            est_units = buy_budget / est_fill_price
+
+            # CAS 클레임: scaled_in=False인 동안에만 성공 — 성공 시 이 프로세스가 유일한
+            # 스케일인 실행자임이 보장된다 (다른 코루틴/프로세스가 먼저 선점했으면 0행 반환)
+            claim_res = await asyncio.to_thread(
+                self.supabase.table("paper_positions")
+                .update({"scaled_in": True})
+                .eq("ticker", ticker)
+                .eq("scaled_in", False)
+                .execute
+            )
+            if not claim_res.data:
+                return False
+
+            executed = await self._on_order_buy(
+                ticker, est_units, est_fill_price, "MARKET", None, None
+            )
+            if executed is None:
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .update({"scaled_in": False})
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                return False
+            add_units, fill_price = executed
+
+            # 클레임 이후 실주문 체결까지 사이에 TS/Scale-Out이 먼저 반영됐을 수 있으므로
+            # units/entry_price/highest_price는 반드시 최신 값으로 다시 읽어 병합한다.
+            fresh = await self.get_position(ticker)
+            if not fresh:
+                await self.webhook.send_alert(
+                    title=f"⚠️ [SCALE-IN 경합] {ticker}",
+                    description=(
+                        f"추가 매수 체결({add_units:.4f}주 @ ${fill_price:.4f}) 직후 "
+                        f"기존 포지션을 찾을 수 없음 — 수동 확인 필요"
+                    ),
+                    color=0xE74C3C,
+                )
+                return False
+
+            old_units = fresh["units"]
+            old_entry = fresh["entry_price"]
+            new_units = old_units + add_units
+            new_entry = (old_units * old_entry + add_units * fill_price) / new_units
+
+            await asyncio.to_thread(
+                self.supabase.table("paper_positions")
+                .update(
+                    {
+                        "units": new_units,
+                        "entry_price": new_entry,
+                        "highest_price": max(fresh["highest_price"], fill_price),
+                        "current_price": fill_price,
+                    }
+                )
+                .eq("ticker", ticker)
+                .execute
+            )
+
+            executed_cost = add_units * fill_price
+            await self._apply_cash_delta(-executed_cost)
+
+            await self._log_decision(
+                ticker=ticker,
+                gate="SCALE_IN",
+                outcome="EXECUTED",
+                signal="BUY",
+                dna_score=dna_score,
+                rsi=rsi,
+                rvol=rvol,
+                adx=adx,
+                macd_diff=macd_diff,
+                is_extended=is_extended,
+                price=price,
+                note=(
+                    f"추가매수 체결 ${executed_cost:.2f} | {add_units:.4f}주 @ "
+                    f"${fill_price:.4f} | 평단 ${old_entry:.4f}→${new_entry:.4f}"
+                ),
+            )
+            await self.webhook.send_alert(
+                title=f"➕ [PAPER SCALE-IN] {ticker}",
+                description=(
+                    f"추가 매수 ${executed_cost:.2f} ({add_units:.4f}주 @ ${fill_price:.4f})\n"
+                    f"평단가: ${old_entry:.4f} → ${new_entry:.4f} | 총 보유: {new_units:.4f}주"
+                ),
+                color=0x2ECC71,
+            )
+            return True
+
     async def _execute_entry(
         self,
         ticker: str,
@@ -1910,6 +2074,7 @@ class PaperTradingManager:
                     "units": est_units,
                     "is_scaled_out": False,
                     "scale_out_bar_count": 0,
+                    "scaled_in": False,
                 }
                 try:
                     claim_res = await asyncio.to_thread(

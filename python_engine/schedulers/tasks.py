@@ -26,10 +26,10 @@ async def mtf_cache_scheduler():
             if is_market_hours():
                 held = list(app_state._held_tickers)
                 discovery = await asyncio.to_thread(
-                    app_state.db.get_active_tickers, limit=30
+                    app_state.db.get_active_tickers, limit=100
                 )
                 watching = await asyncio.to_thread(
-                    app_state.db.get_watchlist_tickers, limit=30
+                    app_state.db.get_watchlist_tickers, limit=100
                 )
                 active_tickers = list(set(held) | set(discovery) | set(watching))
 
@@ -97,6 +97,35 @@ async def auto_paper_history_cleanup_scheduler():
                     )
         except Exception as e:
             print(f"⚠️ [Auto-Cleanup] paper_history 정리 오류: {e}")
+
+        await asyncio.sleep(24 * 3600)
+
+
+async def auto_watchlist_pruning_scheduler():
+    """watchlist WATCHING 행 자동 만료 스케줄러 (매일 1회).
+
+    자동 등록된 관심종목이 매수 전환 없이 무기한 쌓이면(2026-08-03 기준
+    WATCHING 1,793건 확인) get_watchlist_tickers()의 실시간 스트림 구독
+    상위 슬롯을 몇 달 전 낡은 DNA 고정값이 영구 점거해, 오늘 재발굴된
+    신선한 종목이 실시간 데이터를 아예 못 받는 문제로 이어진다
+    (HYFM DNA93 사례로 확인). WATCHLIST_RETENTION_DAYS 넘게 재스캔
+    안 된(updated_at 갱신 없는) WATCHING 행을 EXPIRED로 전환한다.
+    """
+    WATCHLIST_RETENTION_DAYS = 21
+    print("🧹 [Scheduler] Watchlist Pruning Scheduler started.")
+
+    while True:
+        try:
+            expired = await asyncio.to_thread(
+                app_state.db.prune_stale_watchlist, WATCHLIST_RETENTION_DAYS
+            )
+            if expired > 0:
+                print(
+                    f"🧹 [Auto-Cleanup] watchlist 정리 완료: {WATCHLIST_RETENTION_DAYS}일 "
+                    f"이상 재스캔 안 된 WATCHING {expired}건 → EXPIRED 전환"
+                )
+        except Exception as e:
+            print(f"⚠️ [Auto-Cleanup] watchlist 정리 오류: {e}")
 
         await asyncio.sleep(24 * 3600)
 
@@ -889,10 +918,10 @@ async def stream_liveness_watchdog():
             # 유발할 수 있었다.
             await _stop_current_stream()
             discovery_tickers = await asyncio.to_thread(
-                app_state.db.get_active_tickers, limit=15
+                app_state.db.get_active_tickers, limit=50
             )
             watchlist_tickers = await asyncio.to_thread(
-                app_state.db.get_watchlist_tickers, limit=15
+                app_state.db.get_watchlist_tickers, limit=50
             )
             active_tickers = list(
                 set(discovery_tickers)

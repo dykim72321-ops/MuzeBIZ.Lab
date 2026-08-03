@@ -16,6 +16,7 @@ from app.state import app_state
 from core.pulse import run_pulse_engine
 from core.indicators import _rsi_atr_er_last
 from utils.utils import is_market_hours
+from engine.paper_engine import SCALE_IN_PROFIT_TRIGGER
 
 # 세션 내 데이터 없음(상장폐지/OTC) 종목 캐시(app_state.yf_no_data_cache) —
 # core/quant_scanner.py와 공유해 매 스트림 콜백마다 재조회하지 않는다.
@@ -339,6 +340,62 @@ async def on_minute_bar_closed(bar):
                         app_state._held_tickers.discard(ticker_symbol)
                 except Exception:
                     pass
+
+            # Scale-In 후보 판정 (2026-08-04, verify 스킬 검증 중 발견한 도달 불가능
+            # 버그의 수정): 이 경량 경로는 HOLD 포지션 전용이라 dna_score를 재계산하지
+            # 않는다(성능 최적화, "HOLD 경량 경로가 봉당 스레드풀 왕복 3회 낭비" 수정
+            # 참고) — 그런데 paper_engine._process_signal_locked()의 Scale-In 게이트는
+            # signal_type=="BUY" and strength=="STRONG"을 요구하고, 이 값은 오직 아래
+            # "전체 DNA 경로"(미보유 종목 전용)에서만 나온다. 즉 이미 보유 중인 포지션은
+            # 이 경량 경로만 타므로 Scale-In이 코드상 존재해도 실전에서는 영원히 발동할
+            # 수 없었다. dna_score 재계산 없이, 이미 신뢰 중인 MomentumValidator(RVOL·
+            # 15분봉 20EMA)로 "여전히 강한 추세인지"만 저비용으로 확인해 대체 게이트로
+            # 쓴다 — RVOL은 이 경량 경로에 이미 있는 candle_state.avg_daily_volume으로
+            # quant_engine.py와 동일한 공식(bar.volume / (avg_daily_volume/390))으로
+            # 계산하므로 스레드풀 호출이 추가되지 않는다.
+            if (
+                app_state.active_engine
+                and app_state.active_engine.scale_in_enabled
+                and app_state.SYSTEM_ARMED
+                and ticker_symbol in app_state._held_tickers
+            ):
+                try:
+                    pos = await app_state.active_engine.get_position(ticker_symbol)
+                    if (
+                        pos
+                        and not pos.get("is_scaled_out")
+                        and not pos.get("scaled_in")
+                        and pos.get("entry_price")
+                        and (current_price / pos["entry_price"] - 1)
+                        >= SCALE_IN_PROFIT_TRIGGER
+                    ):
+                        avg_daily_vol = app_state.candle_state.avg_daily_volume.get(
+                            ticker_symbol, 0.0
+                        )
+                        rvol_val = (
+                            float(bar.volume) / (avg_daily_vol / 390 + 1e-9)
+                            if avg_daily_vol > 0
+                            else 1.0
+                        )
+                        is_valid, _reason = app_state.momentum_validator.validate(
+                            ticker=ticker_symbol,
+                            current_price=current_price,
+                            rvol=rvol_val,
+                            dna_score=0.0,
+                        )
+                        if is_valid:
+                            acc = await app_state.active_engine.get_account()
+                            if acc:
+                                await app_state.active_engine._execute_scale_in(
+                                    ticker=ticker_symbol,
+                                    price=current_price,
+                                    acc=acc,
+                                    dna_score=0.0,
+                                    rsi=rsi_val,
+                                    rvol=rvol_val,
+                                )
+                except Exception as scale_in_err:
+                    print(f"⚠️ [Scale-In Check] {ticker_symbol}: {scale_in_err}")
             return
 
         # ── 전체 DNA 경로 (신규 발굴 / 미보유 종목) ────────────────────────
@@ -533,10 +590,10 @@ async def start_rest_polling(tickers: Optional[List[str]] = None):
     active_tickers = tickers
     if not active_tickers:
         discovery_tickers = await asyncio.to_thread(
-            app_state.db.get_active_tickers, limit=30
+            app_state.db.get_active_tickers, limit=100
         )
         watchlist_tickers = await asyncio.to_thread(
-            app_state.db.get_watchlist_tickers, limit=30
+            app_state.db.get_watchlist_tickers, limit=100
         )
         # HOLD 중인 포지션이 daily_discovery 순위 밖으로 밀려나도 반드시 폴링 대상에
         # 포함해야 한다 — 그렇지 않으면 current_price가 진입가에 고정된다.
@@ -641,10 +698,10 @@ async def start_alpaca_stream(tickers: Optional[List[str]] = None):
     try:
         if not active_tickers:
             discovery_tickers = await asyncio.to_thread(
-                app_state.db.get_active_tickers, limit=30
+                app_state.db.get_active_tickers, limit=100
             )
             watchlist_tickers = await asyncio.to_thread(
-                app_state.db.get_watchlist_tickers, limit=30
+                app_state.db.get_watchlist_tickers, limit=100
             )
             # 현재 HOLD 중인 포지션은 daily_discovery 순위 밖으로 밀려나도
             # 반드시 구독을 유지해야 current_price가 갱신된다 (그렇지 않으면

@@ -201,6 +201,7 @@ from schedulers.tasks import (  # noqa: E402
     mtf_cache_scheduler,
     auto_quant_scan_scheduler,
     auto_paper_history_cleanup_scheduler,
+    auto_watchlist_pruning_scheduler,
     auto_checklist_eval_scheduler,
     auto_improvement_rollback_scheduler,
     _stop_current_stream,
@@ -290,7 +291,7 @@ async def run_startup_sequence():
                     .select(
                         "atr_stop_enabled,max_daily_trades_per_ticker,"
                         "reentry_cooldown_minutes,extension_guard_penny_tight_enabled,"
-                        "spike_guard_enabled,pullback_entry_enabled"
+                        "spike_guard_enabled,pullback_entry_enabled,scale_in_enabled"
                     )
                     .eq("id", 1)
                     .single()
@@ -314,6 +315,8 @@ async def run_startup_sequence():
                         e.spike_guard_enabled = row["spike_guard_enabled"]
                     if row.get("pullback_entry_enabled") is not None:
                         e.pullback_entry_enabled = row["pullback_entry_enabled"]
+                    if row.get("scale_in_enabled") is not None:
+                        e.scale_in_enabled = row["scale_in_enabled"]
                 print(
                     f"📡 [Startup] Runtime rollback params restored: "
                     f"atr_stop_enabled={row.get('atr_stop_enabled')}, "
@@ -321,7 +324,8 @@ async def run_startup_sequence():
                     f"reentry_cooldown_minutes={row.get('reentry_cooldown_minutes')}, "
                     f"extension_guard_penny_tight_enabled={row.get('extension_guard_penny_tight_enabled')}, "
                     f"spike_guard_enabled={row.get('spike_guard_enabled')}, "
-                    f"pullback_entry_enabled={row.get('pullback_entry_enabled')}"
+                    f"pullback_entry_enabled={row.get('pullback_entry_enabled')}, "
+                    f"scale_in_enabled={row.get('scale_in_enabled')}"
                 )
             except Exception as e:
                 print(f"⚠️ [Startup] Could not restore rollback runtime params: {e}")
@@ -352,8 +356,8 @@ async def run_startup_sequence():
         except Exception as e:
             print(f"⚠️ [Guide-2] Could not restore held tickers: {e}")
 
-    active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=15)
-    watching_tickers = await asyncio.to_thread(_db.get_watchlist_tickers, limit=15)
+    active_tickers = await asyncio.to_thread(_db.get_active_tickers, limit=50)
+    watching_tickers = await asyncio.to_thread(_db.get_watchlist_tickers, limit=50)
     active_tickers = list(set(active_tickers) | set(watching_tickers))
 
     # 1. 히스토리 워밍업
@@ -433,6 +437,9 @@ async def run_startup_sequence():
 
     # paper_history 누적 방지 자동 정리 스케줄러 시작
     asyncio.create_task(auto_paper_history_cleanup_scheduler())
+
+    # watchlist WATCHING 누적 방지 자동 만료 스케줄러 시작 (2026-08-03)
+    asyncio.create_task(auto_watchlist_pruning_scheduler())
 
     # 실계좌 전환 체크리스트 매일 검증 스케줄러 시작
     asyncio.create_task(auto_checklist_eval_scheduler())

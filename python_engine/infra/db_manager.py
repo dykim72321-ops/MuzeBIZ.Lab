@@ -111,11 +111,18 @@ class DBManager:
 
         return tickers[:limit]
 
-    def get_watchlist_tickers(self, limit=30):
+    def get_watchlist_tickers(self, limit=100):
         """
         매수 전 관심종목(watchlist status=WATCHING, 엔진 자동 등록분)의 실시간
         구독 대상 목록. daily_discovery 순위 밖으로 밀려도 이 목록으로 스트림
         구독을 보장해야 STRONG BUY 신호를 놓치지 않는다.
+
+        정렬 기준(2026-08-03): initial_dna_score 단독 정렬은 재스캔 안 된 낡은
+        고정값이 오늘 재발굴된 신선한 종목보다 항상 우선하는 문제가 있었다(WATCHING
+        1,793건 중 상위 30위가 전부 몇 달 전 DNA=100 박제값이라 DNA93짜리 당일
+        신규 발굴 종목이 실시간 구독에서 완전히 배제된 사례로 확인). updated_at
+        (재스캔 시각, watchlist 트리거로 자동 갱신)을 1차 기준으로 삼아 "최근에
+        다시 신호가 확인된" 종목을 우선하고, 동시각 재스캔분끼리는 DNA로 2차 정렬한다.
         """
         if not self.supabase:
             return []
@@ -126,6 +133,7 @@ class DBManager:
                 .select("ticker")
                 .eq("status", "WATCHING")
                 .is_("user_id", "null")
+                .order("updated_at", desc=True)
                 .order("initial_dna_score", desc=True)
                 .limit(limit)
                 .execute()
@@ -134,6 +142,35 @@ class DBManager:
         except Exception as e:
             print(f"⚠️ watchlist fetch error: {e}")
             return []
+
+    def prune_stale_watchlist(self, retention_days: int = 21) -> int:
+        """
+        retention_days 넘게 재스캔(updated_at 갱신)되지 않은 WATCHING 행을
+        status="EXPIRED"로 전환한다. HOLDING/EXITED는 절대 건드리지 않는다.
+
+        watchlist가 매수 전환 없이 무기한 쌓이는 문제(2026-08-03 기준 WATCHING
+        1,793건)를 해결하기 위함 — 낡은 행이 get_watchlist_tickers()의 구독
+        상위 슬롯을 영구 점거해 신선한 발굴 종목이 실시간 데이터를 못 받는
+        원인이었다. 삭제 대신 EXPIRED로 전환해 감사 이력은 보존한다.
+        """
+        if not self.supabase:
+            return 0
+        try:
+            threshold = (
+                datetime.now(timezone.utc) - timedelta(days=retention_days)
+            ).isoformat()
+            res = (
+                self.supabase.table("watchlist")
+                .update({"status": "EXPIRED"})
+                .eq("status", "WATCHING")
+                .is_("user_id", "null")
+                .lt("updated_at", threshold)
+                .execute()
+            )
+            return len(res.data) if res and res.data else 0
+        except Exception as e:
+            print(f"⚠️ watchlist prune error: {e}")
+            return 0
 
     def try_acquire_stream_lock(self, owner_id: str, ttl_seconds: int = 240) -> bool:
         """
