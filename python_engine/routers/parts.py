@@ -299,7 +299,8 @@ class SourcingEngine:
             )
         )
 
-        self.search_cache[q_norm] = final_list
+        if final_list:
+            self.search_cache[q_norm] = final_list
         return final_list
 
     async def _fetch_from_local(self, q: str) -> List[StandardPart]:
