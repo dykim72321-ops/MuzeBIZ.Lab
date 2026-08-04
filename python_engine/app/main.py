@@ -345,20 +345,25 @@ async def run_startup_sequence():
         except Exception as e:
             print(f"⚠️ [Startup] Could not initialize paper account: {e}")
 
-    # 0c. 기존 HOLD 포지션을 _held_tickers에 로드
+    # 0c. 기존 보유 포지션을 _held_tickers에 로드
+    # status는 HOLD와 SCALE_OUT 둘 다 "보유 중"이다 — position_ts_sweeper()가 쓰는
+    # .in_("status", ["HOLD","SCALE_OUT"]) 필터와 반드시 일치시켜야 한다. HOLD만
+    # 복원하면 Scale-Out을 거친 포지션이 재기동 후 영구적으로 이 집합에서 빠져,
+    # 경량 모니터 경로(1분봉 TS 관리)와 Scale-In 판정이 통째로 스킵된다
+    # (2026-08-05 ANTX: 7/13 Scale-Out 이후 +51%까지 올랐는데도 추가 매수 미발동).
     if supabase:
         try:
             held_res = await asyncio.to_thread(
                 supabase.table("paper_positions")
                 .select("ticker")
-                .eq("status", "HOLD")
+                .in_("status", ["HOLD", "SCALE_OUT"])
                 .execute
             )
             if held_res.data:
                 for row in held_res.data:
                     app_state._held_tickers.add(row["ticker"])
                 print(
-                    f"📌 [Guide-2] Restored {len(app_state._held_tickers)} HOLD tickers to monitor set: "
+                    f"📌 [Guide-2] Restored {len(app_state._held_tickers)} held tickers (HOLD/SCALE_OUT) to monitor set: "
                     f"{sorted(app_state._held_tickers)}"
                 )
         except Exception as e:

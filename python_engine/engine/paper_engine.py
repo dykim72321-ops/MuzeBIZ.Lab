@@ -685,13 +685,16 @@ class PaperTradingManager:
             # 완료"로 기록되고 나머지는 DB 어디에도 안 잡히는 유령 보유가 된다(2026-07-27
             # GSUN: 2,614주 중 373주만 체결됐는데 전량 청산으로 기록되어 잔여 2,241주가
             # 이틀 가까이 무방비로 방치되다 사용자가 Alpaca에서 직접 발견해 수동 매도함).
-            PARTIAL_CLOSE_TOLERANCE = (
-                0.01  # 1% 미만 잔여는 반올림 오차로 간주하고 완전 종료
-            )
+            # 판정 기준은 "요청 대비 비율"이 아니라 "잔여 1주 이상"이다 — 미국 주식
+            # 시장가 주문은 정수 수량으로 나가므로 1주만 남아도 실제 보유이고, 비율
+            # 기준을 쓰면 요청 수량이 클수록 문턱이 함께 커져 실보유가 반올림 오차로
+            # 오분류된다(2026-08-03 FUSE: 789주 중 782주 체결, 잔여 7주가 1% 문턱
+            # 7.89주에 0.89주 못 미쳐 전량 청산으로 기록 → 7주가 -19%까지 무감시 방치).
+            # 1주 미만(소수점 수량 계좌의 반올림 오차)만 완전 종료로 간주한다.
+            PARTIAL_CLOSE_MIN_UNITS = 1.0
             remaining_units = requested_units - units
             is_partial_close = (
-                external_fill is None
-                and remaining_units > requested_units * PARTIAL_CLOSE_TOLERANCE
+                external_fill is None and remaining_units >= PARTIAL_CLOSE_MIN_UNITS
             )
 
             # ── 브로커 하드 스탑(Hard Stop-Loss) 주문 시뮬레이션 (PAPER 전용) ────────
