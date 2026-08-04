@@ -67,7 +67,6 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
 
           setPulseData(data);
 
-          const prevData = pulseMapRef.current[data.ticker];
           pulseMapRef.current[data.ticker] = data;
 
           setPulseMap((prev) => ({ ...prev, [data.ticker]: data }));

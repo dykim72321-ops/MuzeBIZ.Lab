@@ -38,7 +38,7 @@ const STATUS_BADGE: Record<
   },
 };
 
-const getSubtleMetricStyle = (label: string, value: string) => {
+const getSubtleMetricStyle = (value: string) => {
   const valStr = String(value).trim();
 
   // 1. 음수 손익 / 마이너스 수치 / 악화: 은은한 소프트 로즈 핑크
@@ -167,7 +167,7 @@ export const ImprovementTracker = () => {
                   <td className="py-4 px-4 align-middle">
                     <div className="flex flex-wrap items-center gap-2 font-mono">
                       {item.metrics.map((m) => {
-                        const style = getSubtleMetricStyle(m.label, m.value);
+                        const style = getSubtleMetricStyle(m.value);
                         return (
                           <div
                             key={m.label}
@@ -254,7 +254,7 @@ export const ImprovementTracker = () => {
               </div>
               <div className="text-xs font-mono space-y-1.5 bg-white p-3 rounded-lg border border-slate-100">
                 {item.metrics.map(m => {
-                  const style = getSubtleMetricStyle(m.label, m.value);
+                  const style = getSubtleMetricStyle(m.value);
                   return (
                     <div key={m.label} className={clsx("flex justify-between items-center px-2.5 py-1 rounded text-xs border", style)}>
                       <span className="font-semibold opacity-75">{m.label}</span>
