@@ -38,19 +38,19 @@ const STATUS_BADGE: Record<
   },
 };
 
-const getMetricValueStyle = (label: string, value: string) => {
+const getSubtleMetricStyle = (label: string, value: string) => {
   const valStr = String(value).trim();
-  
-  // 1. 음수 손익 / 마이너스 수치 / 악화: Rose Red 뱃지
+
+  // 1. 음수 손익 / 마이너스 수치 / 악화: 은은한 소프트 로즈 핑크
   if (valStr.includes('-') || valStr.includes('악화')) {
-    return 'bg-rose-50 text-rose-700 border-rose-200/80 font-black';
+    return 'bg-rose-50/80 border-rose-200/80 text-rose-900';
   }
-  // 2. 양수 손익 / 마이너스 없는 % / 플러스 수치: Emerald Green 뱃지
+  // 2. 양수 손익 / 마이너스 없는 % / 플러스 수치: 은은한 민트/에메랄드
   if (valStr.includes('+') || (valStr.includes('%') && !valStr.startsWith('-'))) {
-    return 'bg-emerald-50 text-emerald-700 border-emerald-200/80 font-black';
+    return 'bg-emerald-50/80 border-emerald-200/80 text-emerald-900';
   }
-  // 3. 현재 진행 중인 샘플 / 건수 / 데이터 수치: Indigo Blue 뱃지
-  return 'bg-indigo-50 text-indigo-800 border-indigo-200/80 font-black';
+  // 3. 현재 진행 중인 샘플 / 건수 / 데이터 수치: 은은한 연슬레이트
+  return 'bg-slate-100/90 border-slate-200 text-slate-800';
 };
 
 // 리스크 커버리지 우선순위 순서 정의 (1. 당일 재진입 제한 -> 2. 쿨다운 락 강화 -> 3. DNA 필터 엄격화 -> 4. 슬리피지/수수료 모니터링)
@@ -133,7 +133,7 @@ export const ImprovementTracker = () => {
       </div>
 
       <p className="px-6 md:px-8 pb-3 pt-3 text-[10px] text-slate-400 font-medium border-b border-slate-100/60 bg-white">
-        ※ 최근 적용된 전략 개선 4건의 실거래 성과를 중요도 내림차순(조치 시급 항목 1번행 배치)으로 정렬하여 표시합니다.
+        ※ 최근 적용된 전략 개선 4건의 실거래 성과를 리스크 중요도 순서대로 정렬하여 표시합니다.
       </p>
 
       {/* Desktop / Tablet View (≥ 768px) — 기간별 퀀트 성과 상세 테이블 서식 적용 */}
@@ -141,19 +141,19 @@ export const ImprovementTracker = () => {
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="text-xs font-bold font-mono text-slate-500 uppercase tracking-wider border-b border-slate-200/80 bg-slate-50/80 whitespace-nowrap">
-              <th className="py-3.5 px-6 text-left w-[20%]">개선 항목</th>
-              <th className="py-3.5 px-4 text-left w-[40%]">검증 상세 지표 (실시간 현황)</th>
+              <th className="py-3.5 px-6 text-left w-[18%]">개선 항목</th>
+              <th className="py-3.5 px-4 text-left w-[42%]">검증 상세 지표 (실시간 현황)</th>
               <th className="py-3.5 px-4 text-left w-[16%]">검증 상태 및 진척도</th>
               <th className="py-3.5 px-6 text-left w-[24%]">비고 및 롤백 현황</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {sortedItems.map((item, idx) => {
+            {sortedItems.map((item) => {
               const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.COLLECTING;
               const Icon = badge.icon;
               return (
                 <tr key={item.key} className="group odd:bg-white even:bg-slate-50/40 hover:bg-indigo-50/20 transition-colors duration-150">
-                  {/* 1. 개선 항목 (중요도 내림차순 정렬 적용) */}
+                  {/* 1. 개선 항목 */}
                   <td className="py-4 px-6 text-left align-middle">
                     <span className="text-sm font-black text-slate-900 tracking-tight block">
                       {item.label}
@@ -163,27 +163,28 @@ export const ImprovementTracker = () => {
                     </span>
                   </td>
 
-                  {/* 2. 검증 상세 지표 (42% 폭 대폭 확장 & 현재 실시간 데이터 색상 강렬하게 강조) */}
+                  {/* 2. 검증 상세 지표 (은은한 파스텔 톤 & 시원한 텍스트 가독성 최우선 반영) */}
                   <td className="py-4 px-4 align-middle">
                     <div className="flex flex-wrap items-center gap-2 font-mono">
                       {item.metrics.map((m) => {
-                        const valStyle = getMetricValueStyle(m.label, m.value);
+                        const style = getSubtleMetricStyle(m.label, m.value);
                         return (
                           <div
                             key={m.label}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200/80 text-xs shadow-2xs whitespace-nowrap"
+                            className={clsx(
+                              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs shadow-2xs whitespace-nowrap transition-all',
+                              style
+                            )}
                           >
-                            <span className="text-slate-400 font-medium">{m.label}:</span>
-                            <span className={clsx("px-2 py-0.5 rounded text-xs border tracking-tight", valStyle)}>
-                              {m.value}
-                            </span>
+                            <span className="font-bold opacity-75">{m.label}:</span>
+                            <span className="font-extrabold font-mono tracking-tight">{m.value}</span>
                           </div>
                         );
                       })}
                     </div>
                   </td>
 
-                  {/* 3. 검증 상태 및 진척도 (16% 알맞게 축소) */}
+                  {/* 3. 검증 상태 및 진척도 */}
                   <td className="py-4 px-4 text-left align-middle">
                     <div className="flex flex-col gap-1.5 justify-center">
                       <span
@@ -251,13 +252,16 @@ export const ImprovementTracker = () => {
                 </div>
                 <span className="text-xs font-mono font-bold">{item.progress_pct}%</span>
               </div>
-              <div className="text-xs font-mono space-y-1 bg-white p-2.5 rounded-lg border border-slate-100">
-                {item.metrics.map(m => (
-                  <div key={m.label} className="flex justify-between text-[11px]">
-                    <span className="text-slate-400">{m.label}</span>
-                    <span className="font-bold text-slate-700">{m.value}</span>
-                  </div>
-                ))}
+              <div className="text-xs font-mono space-y-1.5 bg-white p-3 rounded-lg border border-slate-100">
+                {item.metrics.map(m => {
+                  const style = getSubtleMetricStyle(m.label, m.value);
+                  return (
+                    <div key={m.label} className={clsx("flex justify-between items-center px-2.5 py-1 rounded text-xs border", style)}>
+                      <span className="font-semibold opacity-75">{m.label}</span>
+                      <span className="font-extrabold">{m.value}</span>
+                    </div>
+                  );
+                })}
               </div>
               <p className="text-[11px] text-slate-500 leading-snug">{item.note}</p>
             </div>
