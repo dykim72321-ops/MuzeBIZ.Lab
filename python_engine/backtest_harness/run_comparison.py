@@ -311,6 +311,7 @@ class Portfolio:
         entry_stop_tight_pct: float | None = None,
         entry: str = "MARKET",
         long_term_trail_pct: float | None = None,
+        long_term_atr_k: float | None = None,
     ):
         self.variant = variant  # "OLD" | "NEW"
         self.sizing = sizing or variant  # "OLD" | "NEW"
@@ -330,6 +331,13 @@ class Portfolio:
         # 모드로 운영되는데(스캐너가 $1~$50만 스캔) 이 하네스는 그걸 검증할 수 없었다.
         # None이면 기존 동작(ATR 기반 OLD/NEW 트레일링 + Scale-Out) 그대로 유지.
         self.long_term_trail_pct = long_term_trail_pct
+        # 2026-08-04 추가 — 장기 보유 모드의 고정 % 트레일이 종목 변동성을 반영
+        # 못 한다는 문제 제기(ISOU 사례: 당일 변동폭이 -3% 트레일보다 넓어 정상
+        # 노이즈에도 조기 청산)에 대한 대안 실험. 값을 주면 highest_price 대비
+        # 고정 %(long_term_trail_pct) 대신 Chandelier 스타일 `highest - k*ATR`을
+        # 쓴다 — 변동성 큰 종목은 스탑이 자동으로 넓어지고, 잔잔한 종목은 좁아짐.
+        # long_term_trail_pct와 동시에 주면 이쪽이 우선한다.
+        self.long_term_atr_k = long_term_atr_k
         self.cash = INITIAL_CAPITAL
         self.positions = {}  # ticker -> dict
         self.closed_trades = []  # for NEW dynamic kelly rolling history
@@ -474,8 +482,8 @@ class Portfolio:
             ts_init = PENNY_TS_INIT_PCT if is_penny else TS_INIT_PCT
 
         is_long_term = (
-            self.long_term_trail_pct is not None and fill_price <= LONG_TERM_MAX_PRICE
-        )
+            self.long_term_trail_pct is not None or self.long_term_atr_k is not None
+        ) and fill_price <= LONG_TERM_MAX_PRICE
         self.cash -= budget
         self.positions[ticker] = {
             "entry_price": fill_price,
@@ -508,10 +516,17 @@ class Portfolio:
 
         # A. TS 업데이트
         # 장기 보유 모드(paper_engine.py의 is_long_term 재현): ATR/OLD/NEW 계산을
-        # 전부 건너뛰고 highest_price 대비 고정 % 트레일링만 적용 — 브레이크이븐
-        # 락인도 없다(라이브와 동일).
+        # 전부 건너뛰고 highest_price 대비 고정 %(또는 ATR 적응형, long_term_atr_k)
+        # 트레일링만 적용 — 브레이크이븐 락인도 없다(라이브와 동일).
         if pos["is_long_term"]:
-            pos["ts_threshold"] = highest_price * self.long_term_trail_pct
+            if self.long_term_atr_k is not None:
+                effective_atr = atr if atr > 0 else entry_price * 0.02
+                candidate = highest_price - self.long_term_atr_k * effective_atr
+                # 라쳇(ratchet): 스탑은 절대 내려가지 않는다 — 변동성이 순간적으로
+                # 커져도(ATR 급등) 이미 확보한 스탑선 아래로 완화되지 않도록.
+                pos["ts_threshold"] = max(pos["ts_threshold"], candidate)
+            else:
+                pos["ts_threshold"] = highest_price * self.long_term_trail_pct
         elif not pos["is_scaled_out"]:
             if self.stop == "OLD":
                 pos["ts_threshold"] = old_update_ts(
@@ -581,6 +596,7 @@ def run_variant(
     entry_stop_tight_pct: float | None = None,
     entry: str = "MARKET",
     long_term_trail_pct: float | None = None,
+    long_term_atr_k: float | None = None,
 ):
     pf = Portfolio(
         variant,
@@ -590,6 +606,7 @@ def run_variant(
         entry_stop_tight_pct=entry_stop_tight_pct,
         entry=entry,
         long_term_trail_pct=long_term_trail_pct,
+        long_term_atr_k=long_term_atr_k,
     )
     all_dates = sorted(set().union(*[set(d.index) for d in dfs.values()]))
     for date in all_dates:
