@@ -498,7 +498,8 @@ export interface ImprovementStatusResponse {
 }
 
 /**
- * 4대 개선 항목(Forward Return 로거/ATR 스탑/페니 게이트/Whipsaw) 검증 진행 현황
+ * 개선 항목(Forward Return 로거/ATR 스탑/Whipsaw 수정/확장도 가드 등) 검증 진행 현황
+ * ※ 페니 게이트 80 항목은 2026-07-30 레거시 제거(DNA 게이트 75 통일)로 백엔드에서 삭제됨
  */
 export async function fetchImprovementStatus(): Promise<ImprovementStatusResponse | null> {
   try {

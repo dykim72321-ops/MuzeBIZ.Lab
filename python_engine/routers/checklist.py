@@ -70,10 +70,11 @@ IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items
 # penny_gate_80은 2026-07-30 페니($1 이하) 포지션 관리 레거시 제거로 되돌릴
 # 파라미터(self.penny_dna_gate)가 engine에서 사라져 목록에서 제외됨 — 아래
 # IMPROVEMENT_ADOPTED/TARGET_PENNY_TRADES 등은 과거 결정의 감사 기록으로 유지한다.
-# rsi_falling_knife_fix도 같은 이유로 제외 — atr_stop 등과 달리 PaperTradingManager의
-# 인스턴스 속성(핫스왑 가능한 bool 플래그)이 아니라 quant_engine.py의 DNA_Score
-# 산식 자체를 바꾼 것이라, 되돌리려면 코드 레벨 git revert가 필요하고 런타임
-# 토글로 되돌릴 파라미터가 없다.
+# rsi_falling_knife_fix는 quant_engine.py의 DNA_Score 산식 자체를 바꾼 것이라 처음엔
+# PaperTradingManager 인스턴스 속성이 아니라는 이유로 제외돼 있었으나(도입 3일 만에
+# REGRESSED 확정되고도 git revert 없이는 못 되돌리는 공백이 실제로 발견됨), 2026-08-04
+# quant_engine._rsi_mean_reversion_mode 모듈 레벨 플래그(set_rsi_mean_reversion_mode())를
+# 추가해 atr_stop과 동일한 방식으로 핫스왑 가능해져 이 목록에 포함했다.
 # watchlist_universe_expansion도 같은 이유로 제외 — 구독 상한(30→100)과 정렬 기준
 # 변경은 get_watchlist_tickers()의 함수 로직 자체이지 인스턴스 속성이 아니라
 # 런타임 토글이 없다. scale_in은 atr_stop처럼 PaperTradingManager.scale_in_enabled
@@ -85,6 +86,7 @@ ROLLBACK_ACTIONABLE_ITEMS = {
     "extension_guard_tighten",
     "pullback_entry",
     "scale_in",
+    "rsi_falling_knife_fix",
 }
 # flip-flop 방지: 같은 상태(REGRESSED)가 이만큼 연속 확인돼야 실제 조치를 실행한다.
 # evaluate_improvement_rollback()은 24시간 주기로 호출되므로 사실상 "이틀 연속" 의미.
@@ -153,8 +155,9 @@ async def get_checklist(api_key: str = Security(get_api_key)):
 
 @router.get("/improvements")
 async def get_improvement_status(api_key: str = Security(get_api_key)):
-    """4대 개선 항목의 검증 진행 현황 조회 엔드포인트. 실계산은 compute_improvement_status()에 위임
-    (evaluate_improvement_rollback() 스케줄러도 동일 함수를 재사용해 판정 로직을 단일화한다)."""
+    """개선 항목의 검증 진행 현황 조회 엔드포인트. 실계산은 compute_improvement_status()에 위임
+    (evaluate_improvement_rollback() 스케줄러도 동일 함수를 재사용해 판정 로직을 단일화한다).
+    ※ 페니 게이트 80 항목은 2026-07-30 레거시 제거(DNA 게이트 75 통일)로 삭제됨."""
     supabase = app_state.supabase
     if not supabase:
         raise HTTPException(
@@ -164,8 +167,9 @@ async def get_improvement_status(api_key: str = Security(get_api_key)):
 
 
 async def compute_improvement_status(supabase) -> dict:
-    """4대 개선 항목(Forward Return 로거 / ATR 초기 스탑 / 페니 게이트 80 /
-    Whipsaw 수정 / 확장도 가드)의 검증 진행 현황을 퀀트 정밀 지표(포지션 승률, Expectancy E)로 자동 분석.
+    """개선 항목(Forward Return 로거 / ATR 초기 스탑 / Whipsaw 수정 / 확장도 가드 등)의
+    검증 진행 현황을 퀀트 정밀 지표(포지션 승률, Expectancy E)로 자동 분석.
+    ※ 페니 게이트 80 항목은 2026-07-30 레거시 제거(DNA 게이트 75 통일)로 삭제됨.
     """
     now_utc = datetime.now(timezone.utc)
 
@@ -357,62 +361,10 @@ async def compute_improvement_status(supabase) -> dict:
         }
     )
 
-    # ── 3. 페니 게이트 80 ────────────────────────────────────────────────────
-    penny_adopted = IMPROVEMENT_ADOPTED["penny_gate_80"]
-    penny_trades = [
-        t
-        for t in trades
-        if (t.get("entry_price") or 0) <= 1.0
-        and t["closed_at"] >= IMPROVEMENT_CUTOFFS["penny_gate_80"]
-    ]
-    pos_wr_penny, exp_penny, sortino_penny, n_penny = _calc_metrics_expectancy(
-        penny_trades
-    )
-    blocked_penny = sum(
-        1
-        for d in decisions
-        if d["gate"] == "DNA_GATE" and "penny" in (d.get("note") or "")
-    )
-
-    metrics = [
-        {
-            "label": "도입 후 페니 거래(포지션)",
-            "value": f"{n_penny} / {TARGET_PENNY_TRADES}건",
-        }
-    ]
-    if len(penny_trades) != n_penny:
-        metrics.append({"label": "원본 청산 행수", "value": f"{len(penny_trades)}건"})
-    if n_penny > 0:
-        metrics.append(
-            {"label": "포지션 라운드트립 승률", "value": f"{pos_wr_penny:.1f}%"}
-        )
-        metrics.append({"label": "거래당 기대값 ($E)", "value": f"{exp_penny:+.2f}$"})
-        metrics.append({"label": "Sortino Ratio", "value": f"{sortino_penny:.2f}"})
-    metrics.append(
-        {"label": "게이트 차단된 저품질 신호", "value": f"{blocked_penny}건"}
-    )
-    metrics.append(
-        {"label": "개선 전 페니 승률(기준선)", "value": f"{BASELINE_PENNY_WIN_RATE}%"}
-    )
-
-    penny_status = _verify_status(
-        n_penny,
-        TARGET_PENNY_TRADES,
-        pos_wr_penny,
-        BASELINE_PENNY_WIN_RATE,
-        expectancy=exp_penny if n_penny >= 5 else None,
-    )
-    items.append(
-        {
-            "key": "penny_gate_80",
-            "label": "페니 게이트 80",
-            "adopted_at": penny_adopted,
-            "status": penny_status,
-            "progress_pct": min(round(n_penny / TARGET_PENNY_TRADES * 100), 100),
-            "metrics": metrics,
-            "note": "DNA 65~79 저품질 페니 신호 차단이 승률 및 Expectancy($E>0) 손실 방지를 달성하는지 검증 중",
-        }
-    )
+    # ── 3. (삭제됨) 페니 게이트 80 ─────────────────────────────────────────────
+    # 2026-07-30 페니($1 이하) 포지션 관리 레거시 제거로 DNA 게이트가 75 단일값으로
+    # 통일됨 — 더 이상 별도 검증 항목으로 추적할 의미가 없어 대시보드에서 제거.
+    # IMPROVEMENT_ADOPTED["penny_gate_80"] 등 감사 기록 상수는 유지한다.
 
     # ── 4. Whipsaw 수정 ──────────────────────────────────────────────────────
     whip_adopted = IMPROVEMENT_ADOPTED["whipsaw_fix"]
@@ -1001,6 +953,11 @@ def _apply_rollback_action(key: str, engines: list) -> str:
         for e in engines:
             e.scale_in_enabled = False
         return "Scale-In(추가매수) 비활성화 → 포지션당 최초 진입만 유지"
+    if key == "rsi_falling_knife_fix":
+        from services import quant_engine
+
+        quant_engine.set_rsi_mean_reversion_mode(True)
+        return "DNA_Score RSI 채점을 낙폭방어형 → 평균회귀형(2026-08-01 이전)으로 롤백"
     return "알 수 없는 항목 — 조치 없음"
 
 
@@ -1019,6 +976,7 @@ async def _persist_rollback_settings(supabase, key: str) -> None:
         },
         "pullback_entry": {"pullback_entry_enabled": False},
         "scale_in": {"scale_in_enabled": False},
+        "rsi_falling_knife_fix": {"rsi_mean_reversion_mode": True},
     }
     fields = field_map.get(key)
     if not fields:

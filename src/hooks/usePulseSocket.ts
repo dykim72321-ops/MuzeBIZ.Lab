@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { toast } from 'sonner';
+
 
 // 백엔드 Pulse Engine에서 방출하는 데이터의 인터페이스
 export interface PulseData {
@@ -77,23 +77,6 @@ export const usePulseSocket = (url: string = 'ws://127.0.0.1:8000/ws/pulse') => 
 
           console.log(`💓 Pulse received for ${data.ticker}:`, data);
 
-          const isTransition = !prevData ||
-            prevData.signal !== data.signal ||
-            prevData.strength !== data.strength;
-
-          if (isTransition && data.strength === 'STRONG') {
-            if (data.signal === 'BUY') {
-              toast.success(`🚀 [STRONG BUY] ${data.ticker} 포착!`, {
-                description: `RSI: ${data.rsi} | MACD 확인 완료`,
-                duration: 5000,
-              });
-            } else if (data.signal === 'SELL') {
-              toast.error(`⚠️ [STRONG SELL] ${data.ticker} 주의!`, {
-                description: `RSI: ${data.rsi} | MACD 하락세`,
-                duration: 5000,
-              });
-            }
-          }
         } catch (e) {
           console.error('❌ Failed to parse pulse message:', e);
         }

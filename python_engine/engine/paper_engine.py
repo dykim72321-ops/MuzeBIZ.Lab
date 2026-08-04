@@ -1427,7 +1427,6 @@ class PaperTradingManager:
             and signal_type == "BUY"
             and strength == "STRONG"
             and dna_score >= dna_gate
-            and not pos.get("is_scaled_out")
             and not pos.get("scaled_in")
             and (price / pos["entry_price"] - 1) >= SCALE_IN_PROFIT_TRIGGER
         ):
@@ -1820,6 +1819,14 @@ class PaperTradingManager:
             new_units = old_units + add_units
             new_entry = (old_units * old_entry + add_units * fill_price) / new_units
 
+            # Scale-Out으로 이미 방어 모드(고정 타이트 TS, k=1.2 ATR)였던 포지션에
+            # Scale-In이 들어오면 새로 태운 자금까지 그 좁은 TS를 그대로 물려받아
+            # 정상적인 되돌림에도 쉽게 털린다 — is_scaled_out을 해제해 일반 포지션과
+            # 동일한 가역적 스위칭 스탑(ATR/ER 적응형)으로 복귀시킨다. 이미 실현된
+            # Scale-Out 수익은 paper_history에 별도 행으로 남아있어 손실 없음. 대신
+            # 이제부터는 이 포지션도 다시 Scale-Out 대상이 될 수 있다 — 재차 커진
+            # 포지션이 추가로 오르면 재차 일부 익절할 수 있어야 하므로 의도된 동작.
+            new_status = "HOLD" if fresh.get("is_scaled_out") else fresh.get("status")
             await asyncio.to_thread(
                 self.supabase.table("paper_positions")
                 .update(
@@ -1828,6 +1835,8 @@ class PaperTradingManager:
                         "entry_price": new_entry,
                         "highest_price": max(fresh["highest_price"], fill_price),
                         "current_price": fill_price,
+                        "is_scaled_out": False,
+                        "status": new_status,
                     }
                 )
                 .eq("ticker", ticker)

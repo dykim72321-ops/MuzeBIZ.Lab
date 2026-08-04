@@ -781,16 +781,38 @@ async def forward_return_logger():
     포함하는 이유는 게이트를 낮췄으면 어땠을지까지 사후 검증하기 위함 — 이
     로거가 없으면 게이트 임계값 조정이 항상 추측에 의존하게 된다.
 
-    티커 목록을 모아 배치 1요청으로 최신가를 조회하므로, 결정 건수가 많아져도
-    Alpaca 요청 수는 증가하지 않는다(position_ts_sweeper와 동일 패턴).
+    [2026-08-04 측정 버그 수정] 원래 구현은 "신호+30/60분 시점의 가격"이 아니라
+    "이 폴링 사이클이 도는 그 순간의 최신 체결가"(get_stock_latest_trade)를 썼다.
+    폴링이 밀리면(장마감·재시작·백로그) 30분·60분 두 창이 같은 순간의 같은
+    가격으로 채워진다 — 실측 결과 620건 중 570건(91.9%)이 forward_return_30m
+    == forward_return_60m으로 오염돼 있었고, Alpaca SIP 분봉으로 재계산한
+    "진짜" 라벨과 부호가 38.5% 어긋났다(FCUV -30.56% 같은 극단값이 대표 사례 —
+    실제로는 관찰 전용 신호로 매수된 적도 없는데, 늦게 처리된 시점의 우연한
+    저가가 30분치·60분치 손실로 동시에 찍혔다). 이제 신호 시각 + N분 시점에
+    가장 가까운 분봉 종가를 Alpaca SIP 과거 분봉(get_stock_bars)으로 직접
+    조회한다 — SIP 구독이 최근 ~15분 데이터 조회를 막아두므로(subscription
+    does not permit querying recent SIP data, 실측 확인) SIP_EMBARGO_MINUTES
+    만큼 더 기다린 후에만 조회한다. 목표 시점 근처(허용오차 이내)에 봉이 없으면
+    (저유동성 등) 이번 사이클엔 라벨링을 보류하고 다음 폴링에 재시도하며,
+    24시간이 지나도 못 채우면 기존과 동일하게 포기 처리한다.
+
+    티커 목록을 모아 배치 1요청(get_stock_bars)으로 조회하므로, 결정 건수가
+    많아져도 Alpaca 요청 수는 증가하지 않는다(position_ts_sweeper와 동일 패턴).
     """
+    from alpaca.data.enums import DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockLatestTradeRequest
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
 
     CHECK_INTERVAL_SEC = 300
     # 30분/60분이 훨씬 지나도록(장 마감 등으로) 확인 못한 건은 무한정 미확인
     # 상태로 남겨두지 않고 backlog 방지를 위해 24시간 후 포기 처리한다.
     GIVE_UP_AFTER_HOURS = 24
+    # SIP 과거 분봉 구독이 "최근" 데이터 조회를 막는 임베고 구간. 15분에서
+    # 실패가 관측돼 여유를 두고 20분으로 설정(실측: sip_lag_test 참고).
+    SIP_EMBARGO_MINUTES = 20
+    # 목표 시점(신호+N분) 근처에 봉이 없을 때(저유동성/장외) 허용할 최대 간극.
+    MAX_BAR_GAP_MINUTES = 15
     print("📐 [Forward Return] Signal outcome logger started.")
 
     api_key = os.getenv("APCA_API_KEY_ID")
@@ -805,18 +827,20 @@ async def forward_return_logger():
     async def _process_window(column_prefix: str, minutes: int):
         checked_col = f"forward_{column_prefix}_checked"
         return_col = f"forward_return_{column_prefix}"
-        due_before = (
-            datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        now = datetime.now(timezone.utc)
+        # 목표 시점(신호ts + minutes)이 SIP 임베고보다 더 지난 신호만 조회 대상으로
+        # 삼는다 — due_before(=now-minutes)만 쓰면 목표 시점이 "지금 막 지난"
+        # 임베고 구간에 걸려 있는 신호까지 섞여 재현되는 옛 버그가 재발한다.
+        fetch_before = (
+            now - timedelta(minutes=minutes + SIP_EMBARGO_MINUTES)
         ).isoformat()
-        give_up_before = (
-            datetime.now(timezone.utc) - timedelta(hours=GIVE_UP_AFTER_HOURS)
-        ).isoformat()
+        give_up_before = (now - timedelta(hours=GIVE_UP_AFTER_HOURS)).isoformat()
 
         res = await asyncio.to_thread(
             app_state.supabase.table("engine_decisions")
             .select("id,ticker,price,ts")
             .eq(checked_col, False)
-            .lte("ts", due_before)
+            .lte("ts", fetch_before)
             .limit(300)
             .execute
         )
@@ -825,7 +849,7 @@ async def forward_return_logger():
             return
 
         expired = [r for r in rows if r["ts"] < give_up_before]
-        pending = [r for r in rows if r["ts"] >= give_up_before]
+        pending = [r for r in rows if r["ts"] >= give_up_before and r.get("price")]
 
         if expired:
             await asyncio.to_thread(
@@ -841,26 +865,49 @@ async def forward_return_logger():
         if not pending or client is None:
             return
 
-        tickers = sorted({r["ticker"] for r in pending if r.get("price")})
-        if not tickers:
-            return
+        targets = {
+            r["id"]: datetime.fromisoformat(r["ts"].replace("Z", "+00:00"))
+            + timedelta(minutes=minutes)
+            for r in pending
+        }
+        lo = min(targets.values()) - timedelta(minutes=1)
+        hi = min(
+            max(targets.values()) + timedelta(minutes=MAX_BAR_GAP_MINUTES),
+            now - timedelta(minutes=SIP_EMBARGO_MINUTES),
+        )
+        tickers = sorted({r["ticker"] for r in pending})
+
         try:
-            trades = await asyncio.to_thread(
-                client.get_stock_latest_trade,
-                StockLatestTradeRequest(symbol_or_symbols=tickers),
+            bar_set = await asyncio.to_thread(
+                client.get_stock_bars,
+                StockBarsRequest(
+                    symbol_or_symbols=tickers,
+                    timeframe=TimeFrame.Minute,
+                    start=lo,
+                    end=hi,
+                    feed=DataFeed.SIP,
+                ),
             )
         except Exception as e:
-            print(f"⚠️ [Forward Return] {column_prefix}: latest trade fetch failed: {e}")
+            print(f"⚠️ [Forward Return] {column_prefix}: SIP bars fetch failed: {e}")
             return
 
+        bars_by_ticker = {
+            sym: sorted(blist, key=lambda b: b.timestamp)
+            for sym, blist in bar_set.data.items()
+        }
+
         for r in pending:
-            trade = trades.get(r["ticker"])
-            if not trade or not r.get("price"):
-                continue
-            current_price = float(trade.price)
-            if current_price <= 0:
-                continue
-            forward_return = (current_price / r["price"] - 1) * 100
+            bars = bars_by_ticker.get(r["ticker"])
+            if not bars:
+                continue  # 이번 구간에 분봉 없음(장외 등) — 다음 폴링에 재시도
+            target = targets[r["id"]]
+            match = next((b for b in bars if b.timestamp >= target), None)
+            if match is None or (match.timestamp - target) > timedelta(
+                minutes=MAX_BAR_GAP_MINUTES
+            ):
+                continue  # 목표 시점 근처 봉 없음(저유동성) — 다음 폴링에 재시도, 24h 후 포기
+            forward_return = (float(match.close) / r["price"] - 1) * 100
             try:
                 await asyncio.to_thread(
                     app_state.supabase.table("engine_decisions")

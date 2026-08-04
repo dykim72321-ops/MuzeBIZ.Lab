@@ -55,6 +55,29 @@ VCP_SQUEEZE_MIN_SAMPLES = 20  # percentile 계산에 필요한 최소 표본(거
 VCP_BREAKOUT_RVOL_MIN = 2.0  # 돌파 트리거로 인정할 최소 RVOL 배수
 
 
+# ── RSI 채점 모드 런타임 토글 (2026-08-04) ────────────────────────────────────
+# rsi_falling_knife_fix(2026-08-01, c900554)가 일반 종목 RSI 채점을 "과매도=반등
+# 매수"(mean-reversion)에서 페니와 동일한 "낙폭 방어"(falling-knife) 로직으로
+# 통일했는데, 도입 당시엔 되돌릴 파라미터가 없어 routers/checklist.py의
+# ROLLBACK_ACTIONABLE_ITEMS에서 제외되고 REGRESSED가 확정돼도 git revert 없이는
+# 되돌릴 수 없었다. atr_stop_enabled 등과 동일한 패턴으로 모듈 레벨 플래그를 둬서
+# checklist.evaluate_improvement_rollback()이 코드 배포 없이 즉시 되돌릴 수 있게
+# 한다. 기본값 False(=현재 낙폭방어 로직 유지) — True로 전환하면 c900554 이전의
+# 평균회귀 채점식(RSI<30~55 구간에 +점, 페니는 영향 없음)으로 복귀한다.
+_rsi_mean_reversion_mode = False
+
+
+def set_rsi_mean_reversion_mode(enabled: bool) -> None:
+    """True: rsi_falling_knife_fix 도입 이전(평균회귀) 채점식으로 롤백.
+    False(기본): 현재 낙폭방어 채점식 유지."""
+    global _rsi_mean_reversion_mode
+    _rsi_mean_reversion_mode = enabled
+
+
+def get_rsi_mean_reversion_mode() -> bool:
+    return _rsi_mean_reversion_mode
+
+
 # ── DNA Signal Engine (DataFrame 버전) ────────────────────────────────────────
 
 
@@ -221,6 +244,44 @@ def calculate_advanced_signals(
         ),  # 초과매수 구간
     )
 
+    if _rsi_mean_reversion_mode:
+        # rsi_falling_knife_fix 롤백(2026-08-04) — c900554 이전 평균회귀 채점식
+        rsi_score = np.where(
+            df["RSI"].isna(),
+            0,
+            np.where(
+                df["RSI"] < 30,
+                20,
+                np.where(
+                    df["RSI"] < 45,
+                    20 - (df["RSI"] - 30) / 15 * 5,
+                    np.where(
+                        df["RSI"] < 55,
+                        15 * (55 - df["RSI"]) / 10,
+                        np.where(
+                            df["RSI"] < 65,
+                            np.where(
+                                df["RVOL"] >= 3.0, 0, -((df["RSI"] - 55) / 10 * 10)
+                            ),
+                            np.where(
+                                df["RSI"] < 75,
+                                np.where(
+                                    df["RVOL"] >= 3.0,
+                                    0,
+                                    -(10 + (df["RSI"] - 65) / 10 * 10),
+                                ),
+                                np.where(
+                                    df["RVOL"] >= 5.0,
+                                    -5,
+                                    np.where(df["RVOL"] >= 3.0, -10, -20),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
     score += rsi_score
 
     macd_diff = df["MACD_Diff"]
@@ -338,6 +399,20 @@ def calculate_dna_score(
 
     if pd.isna(rsi):
         d_rsi = 0.0
+    elif _rsi_mean_reversion_mode:
+        # rsi_falling_knife_fix 롤백(2026-08-04) — c900554 이전 평균회귀 채점식
+        if rsi < 30:
+            d_rsi = 20
+        elif rsi < 45:
+            d_rsi = 20 - (rsi - 30) / 15 * 5
+        elif rsi < 55:
+            d_rsi = 15 * (55 - rsi) / 10
+        elif rsi < 65:
+            d_rsi = 0 if rvol >= 3.0 else -((rsi - 55) / 10 * 10)
+        elif rsi < 75:
+            d_rsi = 0 if rvol >= 3.0 else -(10 + (rsi - 65) / 10 * 10)
+        else:
+            d_rsi = -5 if rvol >= 5.0 else (-10 if rvol >= 3.0 else -20)
     else:
         # 수급 돌파(Momentum) 로직 — 일반/페니 공통 (2026-08-01, calculate_advanced_signals()의
         # rsi_score와 동일 근거로 통일. 과거엔 일반주만 RSI<55 과매도를 반등 매수 기회로

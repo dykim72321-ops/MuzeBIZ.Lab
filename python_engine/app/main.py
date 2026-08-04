@@ -291,13 +291,20 @@ async def run_startup_sequence():
                     .select(
                         "atr_stop_enabled,max_daily_trades_per_ticker,"
                         "reentry_cooldown_minutes,extension_guard_penny_tight_enabled,"
-                        "spike_guard_enabled,pullback_entry_enabled,scale_in_enabled"
+                        "spike_guard_enabled,pullback_entry_enabled,scale_in_enabled,"
+                        "rsi_mean_reversion_mode"
                     )
                     .eq("id", 1)
                     .single()
                     .execute
                 )
                 row = res.data or {}
+                if row.get("rsi_mean_reversion_mode") is not None:
+                    from services import quant_engine
+
+                    quant_engine.set_rsi_mean_reversion_mode(
+                        row["rsi_mean_reversion_mode"]
+                    )
                 for e in engines:
                     if row.get("atr_stop_enabled") is not None:
                         e.atr_stop_enabled = row["atr_stop_enabled"]
@@ -325,7 +332,8 @@ async def run_startup_sequence():
                     f"extension_guard_penny_tight_enabled={row.get('extension_guard_penny_tight_enabled')}, "
                     f"spike_guard_enabled={row.get('spike_guard_enabled')}, "
                     f"pullback_entry_enabled={row.get('pullback_entry_enabled')}, "
-                    f"scale_in_enabled={row.get('scale_in_enabled')}"
+                    f"scale_in_enabled={row.get('scale_in_enabled')}, "
+                    f"rsi_mean_reversion_mode={row.get('rsi_mean_reversion_mode')}"
                 )
             except Exception as e:
                 print(f"⚠️ [Startup] Could not restore rollback runtime params: {e}")

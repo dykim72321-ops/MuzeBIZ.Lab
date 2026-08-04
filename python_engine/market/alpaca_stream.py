@@ -363,7 +363,6 @@ async def on_minute_bar_closed(bar):
                     pos = await app_state.active_engine.get_position(ticker_symbol)
                     if (
                         pos
-                        and not pos.get("is_scaled_out")
                         and not pos.get("scaled_in")
                         and pos.get("entry_price")
                         and (current_price / pos["entry_price"] - 1)
