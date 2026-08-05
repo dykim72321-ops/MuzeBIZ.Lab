@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Security, status
+from scipy import stats as scipy_stats
 
 from api.deps import get_api_key
 from app.state import app_state
@@ -40,6 +41,9 @@ IMPROVEMENT_ADOPTED = {
     "watchlist_universe_expansion": "2026-08-04",  # 실시간 스트림 구독 상한 30→100 +
     # get_watchlist_tickers() 정렬 기준을 고정 DNA값에서 재스캔 시각(recency) 우선으로 변경
     "scale_in": "2026-08-04",  # 보유 포지션 +15% 이상 수익 시 1회 한정 추가매수 신규 도입
+    "alpha_zscore_mean_reversion": "2026-08-05",  # 평균회귀 가설: (Close-MA20)/STD20
+    "alpha_ma20_momentum": "2026-08-05",  # 모멘텀 가설: (Close-MA20)/MA20 이격도
+    "alpha_breakout_volatility": "2026-08-05",  # 변동성 돌파 가설: 목표가 대비 괴리율
 }
 # 2026-07-18 수익률 전수분석(198건)에서 산출된 개선 전 기준선 — 효과 비교용
 BASELINE_TS_WIN_RATE = 8.8  # Trailing Stop 청산 승률 (개선 전)
@@ -58,6 +62,10 @@ TARGET_WATCHLIST_EXPANSION_TRADES = 30  # 구독 확대 효과 판정에 필요�
 TARGET_SCALE_IN_TRADES = (
     15  # Scale-In 효과 판정에 필요한 거래 수 (+15% 트리거라 발생 빈도 낮음)
 )
+# 신규 알파 팩터 가설 검증에 필요한 최소 독립 표본 수 — 매수 체결 여부와 무관하게
+# OBSERVE_CANDIDATE(DNA≥50)부터 모든 신호에 기록되므로 거래 기반 항목보다 훨씬
+# 빨리 채워질 것으로 예상해 forward_return_logger(100)보다 낮게 잡는다.
+TARGET_ALPHA_FACTOR_SAMPLES = 60
 WHIPSAW_OBSERVE_DAYS = 14  # whipsaw 재발 감시 기간 (일)
 
 IMPROVEMENT_CUTOFFS = {k: f"{v}T00:00:00Z" for k, v in IMPROVEMENT_ADOPTED.items()}
@@ -187,7 +195,8 @@ async def compute_improvement_status(supabase) -> dict:
         asyncio.to_thread(
             supabase.table("engine_decisions")
             .select(
-                "ticker,gate,outcome,dna_score,price,note,forward_return_30m,forward_30m_checked,ts"
+                "ticker,gate,outcome,dna_score,price,note,forward_return_30m,forward_30m_checked,"
+                "z_score_20,ma20_deviation_pct,breakout_deviation_pct,ts"
             )
             .gte("ts", IMPROVEMENT_CUTOFFS["penny_gate_80"])
             .order("ts", desc=False)
@@ -667,6 +676,118 @@ async def compute_improvement_status(supabase) -> dict:
             "note": "+15% 이상 수익 포지션에 1회 한정 추가매수가 해당 거래의 승률·Expectancy($E>0)를 개선하는지 검증 중",
         }
     )
+
+    # ── 10. 신규 알파 팩터 가설 검증 (평균회귀/모멘텀/변동성 돌파) ──────────────
+    # 2026-08-05 도입: DNA_Score(합성값) 자체의 예측력 부재가 확인된 뒤(위 rsi_falling_
+    # knife_fix 참고), 매수 타이밍의 새 후보 팩터 3개의 raw 값을 engine_decisions에
+    # 기록하기 시작했다. 이 항목들은 "이미 채택된 파라미터"의 사후 검증이 아니라
+    # "아직 채택 안 한 후보"의 탐색적 상관분석이라 다른 항목과 판정 방식이 다르다 —
+    # 승률/Expectancy 대신 forward_return_30m과의 Pearson 상관계수(r)·유의확률(p)을
+    # 쓰고, VERIFIED는 "유의미한 상관관계 확인"(p<0.05)을, REGRESSED는 "표본은
+    # 충분히 쌓였으나 유의미한 관계 없음"(p>=0.05)을 의미한다 — 다른 항목의
+    # REGRESSED(악화·롤백 필요)와는 뉘앙스가 다르므로 note에 매번 명시한다.
+    alpha_adopted_ts = IMPROVEMENT_CUTOFFS["alpha_zscore_mean_reversion"]
+    alpha_rows_raw = [d for d in decisions if d["ts"] >= alpha_adopted_ts]
+    alpha_rows = _dedup_signal_episodes(alpha_rows_raw)
+    alpha_collected = [
+        d
+        for d in alpha_rows
+        if d.get("forward_30m_checked") and d.get("forward_return_30m") is not None
+    ]
+    n_alpha = len(alpha_collected)
+
+    def _factor_correlation(field: str) -> tuple[float | None, float | None, int]:
+        pairs = [
+            (d[field], d["forward_return_30m"])
+            for d in alpha_collected
+            if d.get(field) is not None
+        ]
+        if len(pairs) < 5:
+            return None, None, len(pairs)
+        xs = np.array([p[0] for p in pairs], dtype=float)
+        ys = np.array([p[1] for p in pairs], dtype=float)
+        if np.std(xs) == 0 or np.std(ys) == 0:
+            return None, None, len(pairs)
+        r, p = scipy_stats.pearsonr(xs, ys)
+        return round(float(r), 4), round(float(p), 4), len(pairs)
+
+    # expected_sign: 가설이 맞다면 상관계수가 어느 부호여야 하는지.
+    # 평균회귀는 "낮은 Z(과매도)일수록 forward_return이 높다" → 음의 상관.
+    # 모멘텀/변동성 돌파는 "이격·돌파폭이 클수록 forward_return도 높다" → 양의 상관.
+    # 부호와 무관하게 p<0.05만 보면 반대 방향으로 유의미한(=가설을 반증하는)
+    # 결과도 VERIFIED로 잘못 표시되므로 반드시 함께 확인해야 한다.
+    alpha_factor_specs = [
+        (
+            "alpha_zscore_mean_reversion",
+            "평균회귀 (Z-Score)",
+            "z_score_20",
+            "negative",
+            "Z-Score와 forward_return_30m의 상관관계 — 음의 상관(과매도일수록 반등)이면 평균회귀 가설 지지",
+        ),
+        (
+            "alpha_ma20_momentum",
+            "모멘텀 (MA20 이격도)",
+            "ma20_deviation_pct",
+            "positive",
+            "MA20 이격도와 forward_return_30m의 상관관계 — 양의 상관(이격 클수록 상승 지속)이면 모멘텀 가설 지지",
+        ),
+        (
+            "alpha_breakout_volatility",
+            "변동성 돌파 (목표가 괴리율)",
+            "breakout_deviation_pct",
+            "positive",
+            "돌파 목표가 대비 괴리율과 forward_return_30m의 상관관계 — 양의 상관이면 변동성 돌파 가설 지지",
+        ),
+    ]
+    for key, label, field, expected_sign, hypothesis_note in alpha_factor_specs:
+        r, p, n_field = _factor_correlation(field)
+        # 진행률/판정 게이트는 반드시 이 팩터 자체의 유효 표본(n_field) 기준이어야 한다.
+        # n_alpha(에피소드 전체)로 게이트하면, 예컨대 breakout_deviation_pct처럼 라이브
+        # 스트림 첫날엔 전일 데이터 부재로 자주 None인 팩터가 "표본 부족" 상태인데도
+        # 다른 팩터 덕에 채워진 n_alpha만으로 목표 도달 판정을 받아, 실제로는 데이터가
+        # 모자란 것을 "유의미한 관계 없음(REGRESSED)"으로 오판정하게 된다.
+        metrics = [
+            {
+                "label": "유효 표본(이 팩터)",
+                "value": f"{n_field} / {TARGET_ALPHA_FACTOR_SAMPLES}건",
+            },
+            {
+                "label": "관찰 에피소드 전체",
+                "value": f"{n_alpha}건",
+            },
+        ]
+        if r is not None:
+            metrics.append({"label": "상관계수 (r)", "value": f"{r:+.3f}"})
+            metrics.append({"label": "유의확률 (p)", "value": f"{p:.4f}"})
+        if n_field >= TARGET_ALPHA_FACTOR_SAMPLES:
+            sign_ok = r is not None and (
+                (r < 0) if expected_sign == "negative" else (r > 0)
+            )
+            if r is not None and p < 0.05 and sign_ok:
+                factor_status = "VERIFIED"
+                note = f"{hypothesis_note} — 유의미한 상관관계 확인(p<0.05, 가설 방향 일치)"
+            elif r is not None and p < 0.05 and not sign_ok:
+                factor_status = "REGRESSED"
+                note = f"{hypothesis_note} — 유의미하지만 가설과 반대 방향(p<0.05) — 가설 반증. 채택된 개선이 아니라 후보 탐색 결과이며 되돌릴 파라미터도 없음"
+            else:
+                factor_status = "REGRESSED"
+                note = f"{hypothesis_note} — 목표 표본 도달, 유의미한 관계 없음(p≥0.05). 채택된 개선이 아니라 후보 탐색 결과이며 되돌릴 파라미터도 없음"
+        else:
+            factor_status = "ON_TRACK" if n_field >= 5 else "COLLECTING"
+            note = f"{hypothesis_note} — 표본 축적 중"
+        items.append(
+            {
+                "key": key,
+                "label": label,
+                "adopted_at": IMPROVEMENT_ADOPTED[key],
+                "status": factor_status,
+                "progress_pct": min(
+                    round(n_field / TARGET_ALPHA_FACTOR_SAMPLES * 100), 100
+                ),
+                "metrics": metrics,
+                "note": note,
+            }
+        )
 
     # ── 자동 롤백 이력 병합 ──────────────────────────────────────────────────
     # evaluate_improvement_rollback()이 이미 조치를 실행한 항목은 대시보드에서

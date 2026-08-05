@@ -394,6 +394,9 @@ class PaperTradingManager:
         spread_pct: float = None,
         quote_stale: bool = None,
         efficiency_ratio: float = None,
+        z_score_20: float = None,
+        ma20_deviation_pct: float = None,
+        breakout_deviation_pct: float = None,
     ):
         """게이트 통과/차단 결과를 engine_decisions 테이블에 기록.
 
@@ -427,6 +430,9 @@ class PaperTradingManager:
                 "spread_pct": spread_pct,
                 "quote_stale": quote_stale,
                 "efficiency_ratio": efficiency_ratio,
+                "z_score_20": z_score_20,
+                "ma20_deviation_pct": ma20_deviation_pct,
+                "breakout_deviation_pct": breakout_deviation_pct,
             }
             await asyncio.to_thread(
                 self.supabase.table("engine_decisions").insert(row).execute
@@ -1008,15 +1014,20 @@ class PaperTradingManager:
         adx: float | None = None,
         macd_diff: float | None = None,
         is_extended: bool | None = None,
+        z_score_20: float | None = None,
+        ma20_deviation_pct: float | None = None,
+        breakout_deviation_pct: float | None = None,
     ) -> bool:
         """진입/청산 처리 — 매수는 _get_buy_lock, 청산은 _get_exit_lock으로 각각
         직렬화한다 (_process_signal_locked 내부에서 분기별로 락을 잡는다). 두 락을
         분리한 이유는 매수 체결 확인 대기(최대 5초, LIVE 모드)가 같은 티커의
         트레일링 스탑/수동매도를 지연시키지 않도록 하기 위함이다.
 
-        rvol/adx/macd_diff/is_extended는 매매 로직에 관여하지 않고 engine_decisions
+        rvol/adx/macd_diff/is_extended/z_score_20/ma20_deviation_pct/
+        breakout_deviation_pct는 매매 로직에 관여하지 않고 engine_decisions
         로깅 전용이다 (2026-07-29, feature_significance 분석용 — 호출부가 없으면
-        None으로 남아 로그에도 null로 기록된다)."""
+        None으로 남아 로그에도 null로 기록된다). z_score_20 이하 3개는 신규 알파
+        팩터 가설(평균회귀/모멘텀/변동성 돌파) 검증용으로 2026-08-05 추가."""
         return await self._process_signal_locked(
             ticker,
             price,
@@ -1034,6 +1045,9 @@ class PaperTradingManager:
             adx=adx,
             macd_diff=macd_diff,
             is_extended=is_extended,
+            z_score_20=z_score_20,
+            ma20_deviation_pct=ma20_deviation_pct,
+            breakout_deviation_pct=breakout_deviation_pct,
         )
 
     async def _process_signal_locked(
@@ -1054,6 +1068,9 @@ class PaperTradingManager:
         adx: float | None = None,
         macd_diff: float | None = None,
         is_extended: bool | None = None,
+        z_score_20: float | None = None,
+        ma20_deviation_pct: float | None = None,
+        breakout_deviation_pct: float | None = None,
     ) -> bool:
         """
         v4 State Machine:
@@ -1100,6 +1117,9 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                z_score_20=z_score_20,
+                ma20_deviation_pct=ma20_deviation_pct,
+                breakout_deviation_pct=breakout_deviation_pct,
             )
             if watch_resolved is not None:
                 return watch_resolved
@@ -1130,6 +1150,9 @@ class PaperTradingManager:
                     adx=adx,
                     macd_diff=macd_diff,
                     is_extended=is_extended,
+                    z_score_20=z_score_20,
+                    ma20_deviation_pct=ma20_deviation_pct,
+                    breakout_deviation_pct=breakout_deviation_pct,
                     atr_pct=atr_pct,
                     efficiency_ratio=smoothed_er,
                     price=price,
@@ -1150,6 +1173,9 @@ class PaperTradingManager:
                     adx=adx,
                     macd_diff=macd_diff,
                     is_extended=is_extended,
+                    z_score_20=z_score_20,
+                    ma20_deviation_pct=ma20_deviation_pct,
+                    breakout_deviation_pct=breakout_deviation_pct,
                     atr_pct=atr_pct,
                     efficiency_ratio=smoothed_er,
                     price=price,
@@ -1168,6 +1194,9 @@ class PaperTradingManager:
                     adx=adx,
                     macd_diff=macd_diff,
                     is_extended=is_extended,
+                    z_score_20=z_score_20,
+                    ma20_deviation_pct=ma20_deviation_pct,
+                    breakout_deviation_pct=breakout_deviation_pct,
                     atr_pct=atr_pct,
                     efficiency_ratio=smoothed_er,
                     price=price,
@@ -1225,6 +1254,9 @@ class PaperTradingManager:
                             adx=adx,
                             macd_diff=macd_diff,
                             is_extended=is_extended,
+                            z_score_20=z_score_20,
+                            ma20_deviation_pct=ma20_deviation_pct,
+                            breakout_deviation_pct=breakout_deviation_pct,
                             atr_pct=atr_pct,
                             price=price,
                             note="Global Circuit Breaker Activated",
@@ -1289,6 +1321,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note="당일 손실/손절 청산 이력 존재 (Whipsaw 방지)",
@@ -1314,6 +1349,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note=f"당일 거래 {daily_trade_count}건 ≥ 한도 {self.max_daily_trades_per_ticker}건",
@@ -1341,6 +1379,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note=f"ATR/가격비 {volatility_ratio*100:.1f}% > 상한 {vol_cap*100:.1f}%",
@@ -1391,6 +1432,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note=note,
@@ -1422,6 +1466,9 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                z_score_20=z_score_20,
+                ma20_deviation_pct=ma20_deviation_pct,
+                breakout_deviation_pct=breakout_deviation_pct,
                 smoothed_er=smoothed_er,
             )
 
@@ -1448,6 +1495,9 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                z_score_20=z_score_20,
+                ma20_deviation_pct=ma20_deviation_pct,
+                breakout_deviation_pct=breakout_deviation_pct,
             )
             if scaled_in:
                 # 이번 틱의 TS 관리가 갱신된 entry_price/units/highest_price를
@@ -1763,6 +1813,9 @@ class PaperTradingManager:
         adx: float | None = None,
         macd_diff: float | None = None,
         is_extended: bool | None = None,
+        z_score_20: float | None = None,
+        ma20_deviation_pct: float | None = None,
+        breakout_deviation_pct: float | None = None,
     ) -> bool:
         """이미 보유 중인 승자 포지션에 대한 1회 한정 추가 매수.
 
@@ -1865,6 +1918,9 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                z_score_20=z_score_20,
+                ma20_deviation_pct=ma20_deviation_pct,
+                breakout_deviation_pct=breakout_deviation_pct,
                 price=price,
                 note=(
                     f"추가매수 체결 ${executed_cost:.2f} | {add_units:.4f}주 @ "
@@ -1899,6 +1955,9 @@ class PaperTradingManager:
         adx: float | None = None,
         macd_diff: float | None = None,
         is_extended: bool | None = None,
+        z_score_20: float | None = None,
+        ma20_deviation_pct: float | None = None,
+        breakout_deviation_pct: float | None = None,
         smoothed_er: float | None = None,
     ) -> bool | None:
         """신규 진입 admission control(포지션 수 상한·재진입 쿨다운·집중도·예산) + 실주문
@@ -1943,6 +2002,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note=f"동시 포지션 {pos_count_res.count}개 ≥ 한도 {MAX_CONCURRENT_POSITIONS}개",
@@ -1965,6 +2027,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note=f"청산 후 {self.REENTRY_COOLDOWN_MINUTES}분 쿨다운 중",
@@ -1992,6 +2057,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note=f"투입 비중 {conc_pct:.1f}% ≥ 한도 {MAX_CONCENTRATION_PCT*100:.0f}%",
@@ -2065,6 +2133,9 @@ class PaperTradingManager:
                         adx=adx,
                         macd_diff=macd_diff,
                         is_extended=is_extended,
+                        z_score_20=z_score_20,
+                        ma20_deviation_pct=ma20_deviation_pct,
+                        breakout_deviation_pct=breakout_deviation_pct,
                         atr_pct=atr_pct,
                         price=price,
                         note=f"매수 예산 ${buy_budget:.2f} < 최소 ${MIN_BUY_BUDGET}",
@@ -2160,6 +2231,9 @@ class PaperTradingManager:
                     adx=adx,
                     macd_diff=macd_diff,
                     is_extended=is_extended,
+                    z_score_20=z_score_20,
+                    ma20_deviation_pct=ma20_deviation_pct,
+                    breakout_deviation_pct=breakout_deviation_pct,
                     atr_pct=atr_pct,
                     price=price,
                     note="실주문 제출/체결확인 실패 — Alpaca가 거절했거나 제한시간 내 미체결 (Discord 알림 참고)",
@@ -2239,6 +2313,9 @@ class PaperTradingManager:
                     adx=adx,
                     macd_diff=macd_diff,
                     is_extended=is_extended,
+                    z_score_20=z_score_20,
+                    ma20_deviation_pct=ma20_deviation_pct,
+                    breakout_deviation_pct=breakout_deviation_pct,
                     atr_pct=atr_pct,
                     spread_pct=shadow_spread_pct,
                     quote_stale=shadow_quote_stale,
@@ -2365,6 +2442,9 @@ class PaperTradingManager:
         adx: float | None = None,
         macd_diff: float | None = None,
         is_extended: bool | None = None,
+        z_score_20: float | None = None,
+        ma20_deviation_pct: float | None = None,
+        breakout_deviation_pct: float | None = None,
     ) -> bool | None:
         """활성 눌림목 감시 행을 평가한다.
 
@@ -2416,6 +2496,9 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                z_score_20=z_score_20,
+                ma20_deviation_pct=ma20_deviation_pct,
+                breakout_deviation_pct=breakout_deviation_pct,
                 atr_pct=atr_pct,
                 price=price,
                 note=f"눌림목 감시 {PULLBACK_MAX_WAIT_MINUTES}분 경과 — 만료",
@@ -2441,6 +2524,9 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                z_score_20=z_score_20,
+                ma20_deviation_pct=ma20_deviation_pct,
+                breakout_deviation_pct=breakout_deviation_pct,
                 atr_pct=atr_pct,
                 price=price,
                 note=f"고점 대비 하락폭 {retrace_pct*100:.1f}% > 상한 {PULLBACK_RETRACE_MAX_PCT*100:.0f}% — 추세 붕괴로 무효화",
@@ -2486,6 +2572,9 @@ class PaperTradingManager:
                 adx=adx,
                 macd_diff=macd_diff,
                 is_extended=is_extended,
+                z_score_20=z_score_20,
+                ma20_deviation_pct=ma20_deviation_pct,
+                breakout_deviation_pct=breakout_deviation_pct,
                 atr_pct=atr_pct,
                 price=price,
                 note="되돌림·반등 확인됐으나 재진입 쿨다운 중 — 무효화",
@@ -2512,6 +2601,9 @@ class PaperTradingManager:
             adx=adx,
             macd_diff=macd_diff,
             is_extended=is_extended,
+            z_score_20=z_score_20,
+            ma20_deviation_pct=ma20_deviation_pct,
+            breakout_deviation_pct=breakout_deviation_pct,
             # 되돌림·반등이 확인된 현재가를 지정가로 제출 — LIVE 모드는 이 가격에
             # 실제 Alpaca 지정가 주문을 걸고(paper 모드는 봉 종가 단위라 이 가격에
             # 즉시 체결한 것으로 근사), 시장가 추격 매수보다 불리한 체결을 방지한다.

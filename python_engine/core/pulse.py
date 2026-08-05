@@ -105,6 +105,23 @@ def run_pulse_engine(ticker: str, df_raw: pd.DataFrame):
         "strength": strength,
         "timestamp": datetime.now().isoformat(),
         "smoothed_er": round(float(latest.get("smoothed_er", 0.5)), 4),
+        "z_score_20": (
+            round(float(latest["Z_Score_20"]), 4)
+            if "Z_Score_20" in latest and not pd.isna(latest["Z_Score_20"])
+            else None
+        ),
+        "ma20_deviation_pct": (
+            round(float(latest["Ma20_Deviation_Pct"]), 4)
+            if "Ma20_Deviation_Pct" in latest
+            and not pd.isna(latest["Ma20_Deviation_Pct"])
+            else None
+        ),
+        "breakout_deviation_pct": (
+            round(float(latest["Breakout_Deviation_Pct"]), 4)
+            if "Breakout_Deviation_Pct" in latest
+            and not pd.isna(latest["Breakout_Deviation_Pct"])
+            else None
+        ),
     }
 
     macd_diff_cur = (

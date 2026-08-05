@@ -33,6 +33,12 @@ EXTENSION_PREV_CLOSE_PCT_PENNY = 1.15
 EXTENSION_MA20_PCT_NORMAL = 1.30
 EXTENSION_MA20_PCT_PENNY = 1.20
 
+# ── 신규 알파 팩터 원자재 로깅 전용 상수 (2026-08-05) ──────────────────────────
+# 매매 로직에는 관여하지 않고 engine_decisions에 raw 값을 남겨 평균회귀/변동성
+# 돌파 가설을 별도로 검증하기 위한 것 (calculate_advanced_signals()의
+# Z_Score_20/Ma20_Deviation_Pct/Breakout_Deviation_Pct 산출부 참고).
+BREAKOUT_TARGET_K = 0.5  # 래리 윌리엄스 변동성 돌파 모델의 관례적 계수
+
 # ── 직전 N봉 급등 폭(Spike Guard) 판정 상수 ───────────────────────────────────
 # "돌파 확인 봉 자체"를 바로 사는 대신, 최근 lookback 구간 저점 대비 얼마나 수직으로
 # 튀었는지를 별도로 산출해 paper_engine.py의 신규 진입 게이트가 차단 기준으로 쓴다.
@@ -199,6 +205,35 @@ def calculate_advanced_signals(
         (df["Close"] > day_open * day_open_pct)
         | (df["Close"] > df["Close"].shift(1) * prev_close_pct)
         | (df["Close"] > ma20 * ma20_pct)
+    )
+
+    # ── 신규 알파 팩터 원자재 (2026-08-05, 매매 로직 미관여 — engine_decisions 로깅 전용) ──
+    # 사용자가 제안한 3개 팩터 가설(평균회귀/모멘텀/변동성 돌파)을 검증하려면 각각의
+    # raw 값이 신호 시점마다 기록돼야 한다 — 지금까지는 DNA_Score(합성값)만 로깅돼
+    # 어느 팩터가 실제 예측력을 갖는지 분해할 수 없었다.
+    df["Ma20"] = ma20  # 이미 계산된 값을 컬럼으로도 노출 (재사용)
+    std20 = df["Close"].rolling(window=20, min_periods=2).std()
+    # 평균회귀 (Z-Score): 가격이 20봉 이동평균 대비 표준편차 몇 배 이탈했는지.
+    # std20이 0/NaN이면(초반 구간·거래 정지 등) NaN으로 남겨 잘못된 극단값을 방지한다.
+    df["Z_Score_20"] = (df["Close"] - ma20) / std20.replace(0, np.nan)
+    # 모멘텀 (MA 이격도): Is_Extended가 쓰는 boolean 대신 연속값으로 기록해
+    # 이격 정도와 forward_return의 관계를 회귀분석할 수 있게 한다.
+    df["Ma20_Deviation_Pct"] = (df["Close"] - ma20) / ma20.replace(0, np.nan) * 100
+
+    # 변동성 돌파 (래리 윌리엄스 모델): 목표가 = 당일 시가 + 전일 진폭(고가-저가) × K.
+    # 이 df는 라이브 스트림에서 최근 150봉(약 반나절 미만)만 유지되므로, 전일 데이터가
+    # 창 안에 없으면(수집 초반 등) 자연히 NaN으로 남아 잘못된 값을 만들지 않는다.
+    _daily_stats = df.groupby(_dates).agg(
+        _day_high=("High", "max"), _day_low=("Low", "min")
+    )
+    _daily_stats_prev = _daily_stats.shift(1)
+    _date_series = pd.Series(_dates, index=df.index)
+    prev_day_high = _date_series.map(_daily_stats_prev["_day_high"])
+    prev_day_low = _date_series.map(_daily_stats_prev["_day_low"])
+    breakout_target = day_open + (prev_day_high - prev_day_low) * BREAKOUT_TARGET_K
+    df["Breakout_Target"] = breakout_target
+    df["Breakout_Deviation_Pct"] = (
+        (df["Close"] - breakout_target) / breakout_target.replace(0, np.nan) * 100
     )
 
     # ── Kaufman Efficiency Ratio (ER) ──────────────────────────────────────────

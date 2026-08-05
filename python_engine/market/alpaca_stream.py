@@ -440,6 +440,11 @@ async def on_minute_bar_closed(bar):
                                 "macd_diff": payload.get("macd_diff"),
                                 "is_extended": payload.get("is_extended"),
                                 "atr_pct": _atr_pct(payload),
+                                "z_score_20": payload.get("z_score_20"),
+                                "ma20_deviation_pct": payload.get("ma20_deviation_pct"),
+                                "breakout_deviation_pct": payload.get(
+                                    "breakout_deviation_pct"
+                                ),
                             }
                         )
                         .execute
@@ -492,6 +497,13 @@ async def on_minute_bar_closed(bar):
                                     "is_extended": payload.get("is_extended"),
                                     "atr_pct": _atr_pct(payload),
                                     "efficiency_ratio": payload.get("smoothed_er"),
+                                    "z_score_20": payload.get("z_score_20"),
+                                    "ma20_deviation_pct": payload.get(
+                                        "ma20_deviation_pct"
+                                    ),
+                                    "breakout_deviation_pct": payload.get(
+                                        "breakout_deviation_pct"
+                                    ),
                                 }
                             )
                             .execute
@@ -532,6 +544,9 @@ async def on_minute_bar_closed(bar):
                 adx=payload.get("adx"),
                 macd_diff=payload.get("macd_diff"),
                 is_extended=payload.get("is_extended"),
+                z_score_20=payload.get("z_score_20"),
+                ma20_deviation_pct=payload.get("ma20_deviation_pct"),
+                breakout_deviation_pct=payload.get("breakout_deviation_pct"),
             )
             if buy_executed:
                 app_state._held_tickers.add(ticker_symbol)
