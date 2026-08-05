@@ -32,10 +32,10 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold, ent
 
   const isRiskFree = entryPrice != null && tsThreshold > entryPrice;
 
-  let gradient = isRiskFree ? 'from-amber-400 to-amber-300' : 'from-emerald-400 to-emerald-300';
-  let glow = isRiskFree ? 'rgba(245,158,11,0.5)' : 'rgba(16,185,129,0.4)';
+  let gradient = isRiskFree ? 'from-cyan-400 to-blue-500' : 'from-emerald-400 to-emerald-300';
+  let glow = isRiskFree ? 'rgba(6,182,212,0.4)' : 'rgba(16,185,129,0.4)';
   let label = isRiskFree ? 'RISK-FREE' : 'SAFE';
-  let labelColor = isRiskFree ? 'text-amber-500' : 'text-emerald-600';
+  let labelColor = isRiskFree ? 'text-cyan-600 font-black' : 'text-emerald-600 font-black';
 
   if (isBreached) {
     gradient = 'from-rose-700 to-rose-600';
@@ -46,17 +46,17 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold, ent
     gradient = 'from-rose-600 to-rose-500';
     glow = 'rgba(244,63,94,0.7)';
     label = '청산임박';
-    labelColor = 'text-rose-600';
+    labelColor = 'text-rose-600 font-black';
   } else if (isDanger) {
-    gradient = 'from-rose-500 to-rose-400';
-    glow = 'rgba(244,63,94,0.6)';
+    gradient = 'from-orange-500 to-rose-500';
+    glow = 'rgba(249,115,22,0.6)';
     label = 'DANGER';
-    labelColor = 'text-rose-600';
-  } else if (healthPct <= 60) {
-    gradient = 'from-amber-400 to-amber-300';
+    labelColor = 'text-orange-600 font-black';
+  } else if (healthPct <= 60 && !isRiskFree) {
+    gradient = 'from-amber-400 to-yellow-400';
     glow = 'rgba(251,191,36,0.4)';
     label = 'WATCH';
-    labelColor = 'text-amber-600';
+    labelColor = 'text-amber-600 font-black';
   }
 
   const displayText = isBreached
@@ -64,8 +64,8 @@ export function PositionHealthBar({ currentPrice, highestPrice, tsThreshold, ent
     : `-${distanceToStopPct.toFixed(1)}%`;
 
   return (
-    <div className="w-full flex flex-col gap-1.5 mt-1" title={`Health: ${healthPct.toFixed(1)}% / 스탑까지 ${distanceToStopPct.toFixed(1)}%`}>
-      <div className="flex justify-between items-center text-xs font-mono font-black px-0.5 whitespace-nowrap">
+    <div className="w-full flex flex-col gap-1.5 mt-1 px-1.5" title={`Health: ${healthPct.toFixed(1)}% / 스탑까지 ${distanceToStopPct.toFixed(1)}%`}>
+      <div className="flex justify-between items-center text-xs font-mono font-black whitespace-nowrap">
         <span className={clsx('uppercase tracking-widest transition-colors duration-500', labelColor)}>
           {label}
         </span>

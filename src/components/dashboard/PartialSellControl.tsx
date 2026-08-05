@@ -12,19 +12,19 @@ export function PartialSellControl({ onSell }: PartialSellControlProps) {
   const clamp = (value: number) => Math.min(100, Math.max(1, Math.round(value) || 1));
 
   return (
-    <div className="grid grid-cols-2 gap-1 w-full">
+    <div className="grid grid-cols-2 gap-1.5 w-full">
       <input
         type="number"
         min={1}
         max={100}
         value={percentage}
         onChange={(e) => setPercentage(clamp(Number(e.target.value)))}
-        className="w-full text-[11px] font-mono font-bold text-center border border-slate-200 rounded px-1 py-1.5"
+        className="w-full min-w-0 text-[11px] font-mono font-bold text-center border border-slate-200 rounded px-1 py-1.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         aria-label="매도 비중(%)"
       />
       <button
         onClick={() => onSell(percentage)}
-        className="btn-ghost-rose text-[11px] font-bold px-2 py-1.5 w-full"
+        className="btn-ghost-rose text-[11px] font-bold px-2 py-1.5 w-full min-w-0 text-center whitespace-nowrap"
       >
         매도
       </button>
