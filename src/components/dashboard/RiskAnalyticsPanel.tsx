@@ -168,17 +168,19 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, ava
         <ShieldCheck className="w-4 h-4 text-blue-700" />
       </div>
 
-      <div className="p-4 grid grid-cols-2 gap-3">
+      <div className="p-3 grid grid-cols-2 gap-2">
         {cards.map(card => (
           <div key={card.label} className={clsx("relative rounded-md overflow-hidden border", card.borderColor)}>
             {/* 1. 배경 애니메이션 레이어 (투명도 조절로 깜빡임 구현, 글씨에는 영향 없음) */}
             <div className={clsx("absolute inset-0", card.bgAnimClass)}></div>
             
             {/* 2. 글씨 레이어 (z-index 10으로 위로 올림) */}
-            <div className="relative z-10 p-3">
-              <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest block">{card.label}</span>
-              <span className="text-[11px] font-bold text-slate-500 block mb-1.5">{card.koLabel}</span>
-              <span className={clsx('text-lg font-black font-mono block', card.color)}>{card.value}</span>
+            <div className="relative z-10 p-2.5">
+              <span className="text-[9px] font-black text-slate-800 uppercase tracking-widest block mb-0.5">{card.label}</span>
+              <div className="flex items-end justify-between mt-1">
+                <span className="text-[10px] font-bold text-slate-500 leading-none">{card.koLabel}</span>
+                <span className={clsx('text-sm font-black font-mono leading-none', card.color)}>{card.value}</span>
+              </div>
             </div>
           </div>
         ))}

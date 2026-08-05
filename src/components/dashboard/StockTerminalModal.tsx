@@ -478,7 +478,7 @@ export const StockTerminalModal = ({
                                         stopPrice={displayData.stopPrice}
                                         ohlcData={displayData.ohlcData}
                                     />
-                                    <div className="grid grid-cols-3 gap-3 mt-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
                                         <div className="bg-blue-50 p-3.5 rounded-xl border border-blue-200 font-mono">
                                             <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest block mb-1 font-sans">현재가</span>
                                             <span className="text-lg font-black text-slate-900">{formatPrice(displayData.price || 0)}</span>
@@ -541,7 +541,7 @@ export const StockTerminalModal = ({
                                         <Fingerprint className="w-24 h-24 text-blue-900" />
                                     </div>
                                     <div className="relative z-10">
-                                        <div className="flex justify-between items-end mb-6">
+                                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-6">
                                             <div>
                                                 <h3 className="text-xs font-black text-blue-600 uppercase tracking-widest mb-1 font-sans">퀀트 분석 매트릭스</h3>
                                                 <p className="text-[11px] text-blue-500 font-bold tracking-tight font-sans">RSI · MACD · ADX · RVOL 실측 기반</p>

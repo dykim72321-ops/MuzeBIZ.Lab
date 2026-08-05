@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import clsx from 'clsx';
 
 interface TensionGaugeProps {
@@ -23,58 +22,46 @@ export function TensionGauge({ score, rvol }: TensionGaugeProps) {
 
   const normalized = Math.max(0, Math.min(100, score));
 
-  let gradient = 'from-blue-500 to-cyan-400';
-  let glow = 'rgba(6,182,212,0.4)';
-  let label = '관찰중';
-  let labelColor = 'text-blue-600';
+  let statusText = 'STANDBY';
+  let statusColor = 'text-slate-600'; // 진하게
+  let barColor = 'bg-slate-400';
 
   if (ready) {
-    gradient = 'from-rose-500 to-rose-400';
-    glow = 'rgba(244,63,94,0.6)';
-    label = '매수신호';
-    labelColor = 'text-rose-600';
+    statusText = 'STRONG BUY';
+    statusColor = 'text-rose-700'; // 진하게
+    barColor = 'bg-rose-500';
   } else if (gatePassed) {
-    // DNA 게이트는 통과했지만 MomentumValidator(RVOL) 미확인 — 거래량 폭증 대기
-    gradient = 'from-amber-500 to-amber-400';
-    glow = 'rgba(245,158,11,0.4)';
-    label = 'RVOL 대기';
-    labelColor = 'text-amber-600';
+    statusText = 'VOL WAIT';
+    statusColor = 'text-amber-700'; // 진하게
+    barColor = 'bg-amber-400';
   }
 
+  // 전문 금융 화면에 어울리는 분절형(Segmented) 강도 미터
+  const totalBlocks = 12;
+  const activeBlocks = Math.round((normalized / 100) * totalBlocks);
+
   return (
-    <div className="w-full flex flex-col gap-1 items-end" title={`DNA ${score.toFixed(1)} / RVOL ${rvol != null ? rvol.toFixed(1) + 'x' : '-'}`}>
-      <span className={clsx('text-xs font-mono font-black uppercase tracking-widest transition-colors duration-500', labelColor)}>
-        {label}
-      </span>
-      <div className="w-full h-1.5 bg-slate-200/70 rounded-full relative">
-        
-        {/* Background Highlight Zone (75~80) */}
-        <div
-          className="absolute top-0 bottom-0 bg-amber-200/60"
-          style={{ left: `${DNA_GATE_STANDARD}%`, right: `${100 - MOMENTUM_SKIP_DNA}%` }}
-          title="Volume Dependent Zone (75~80)"
-        />
-
-        {/* Gate Markers */}
-        <div className="absolute -top-0.5 -bottom-0.5 w-[2px] bg-slate-400/80 z-10" style={{ left: `${DNA_GATE_STANDARD}%` }} />
-        <div className="absolute -top-0.5 -bottom-0.5 w-[2px] bg-slate-400/80 z-10" style={{ left: `${MOMENTUM_SKIP_DNA}%` }} />
-
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{
-            width: `${normalized}%`,
-            boxShadow: ready
-              ? [`0px 0px 4px ${glow}`, `0px 0px 14px ${glow}`, `0px 0px 4px ${glow}`]
-              : `0px 0px 6px ${glow}`,
-          }}
-          transition={{
-            width: { duration: 1, ease: 'easeOut' },
-            boxShadow: ready ? { repeat: Infinity, duration: 1.5, ease: 'easeInOut' } : { duration: 1 },
-          }}
-          className={clsx('absolute left-0 top-0 bottom-0 rounded-full bg-gradient-to-r z-20', gradient)}
-        >
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-2 h-2 bg-white rounded-full shadow-[0_1px_3px_rgba(0,0,0,0.3)] border border-slate-100" />
-        </motion.div>
+    <div className="w-full flex flex-col gap-1.5 items-end" title={`DNA ${score.toFixed(1)} / RVOL ${rvol != null ? rvol.toFixed(1) + 'x' : '-'}`}>
+      <div className="flex items-center gap-1.5">
+        {ready && <div className="w-1.5 h-1.5 bg-rose-500 rounded-sm animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.6)] flex-shrink-0" />}
+        <span className={clsx('text-[8.5px] font-mono font-black uppercase tracking-widest leading-none whitespace-nowrap', statusColor)}>
+          {statusText}
+        </span>
+      </div>
+      
+      <div className="flex gap-[1.5px] w-full h-2">
+        {Array.from({ length: totalBlocks }).map((_, i) => {
+          const isActive = i < activeBlocks;
+          return (
+            <div 
+              key={i} 
+              className={clsx(
+                "flex-1 h-full transition-colors duration-300", 
+                isActive ? barColor : "bg-slate-200"
+              )} 
+            />
+          );
+        })}
       </div>
     </div>
   );

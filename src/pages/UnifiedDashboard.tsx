@@ -150,7 +150,7 @@ export default function UnifiedDashboard() {
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
 
           {/* ── LEFT COLUMN: Alpha Discovery & Status (Span 3) ── */}
-          <div className="xl:col-span-3 flex flex-col gap-5">
+          <div className="xl:col-span-3 flex flex-col gap-5 min-w-0">
 
             <div className="sfdc-card">
               <div className="sfdc-card-header">
@@ -181,7 +181,7 @@ export default function UnifiedDashboard() {
                   <h2 className="text-sm font-black flex items-center gap-2">
                     <TestTube className="w-4 h-4 text-slate-900" /> 오늘의 알파 종목
                   </h2>
-                  <p className="text-[11px] text-slate-500 font-bold mt-0.5">DNA 75점 이상 엄선 (최대 12개)</p>
+                  <p className="text-[11px] text-slate-500 font-bold mt-0.5">DNA 75점 이상 엄선 (최대 20개)</p>
                 </div>
               </div>
               <div className="p-3 pt-1 flex-1 overflow-y-auto min-h-0 bg-slate-50/50 pr-2">
@@ -191,34 +191,35 @@ export default function UnifiedDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {discoveryStocks.slice(0, 12).map((stock) => {
+                    {discoveryStocks.slice(0, 20).map((stock) => {
                       const isPenny = (stock.price ?? 0) <= PENNY_ENGINE_THRESHOLD && (stock.price ?? 0) > 0;
                       return (
                       <div
                         key={stock.ticker}
                         onClick={() => handleDeepDive(stock)}
-                        className="bg-white border border-slate-100 hover:border-slate-300 rounded-xl p-3 cursor-pointer transition-colors group shadow-sm hover:shadow-md"
+                        className="group relative bg-white border border-slate-200 hover:border-indigo-300 rounded-lg py-3.5 px-3 cursor-pointer transition-all shadow-sm hover:shadow-md overflow-hidden"
                       >
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <span className="text-base font-black text-black block tracking-tight">{stock.ticker}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-black font-mono text-slate-900">{Number(stock.dna_score).toFixed(1)}</span>
-                            <div className="w-6 h-6 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-100 group-hover:bg-slate-100 group-hover:border-slate-200 transition-colors">
-                              <TestTube className="w-3 h-3 text-slate-600 group-hover:text-slate-900 transition-colors" />
+                        {/* Status Indicator Bar */}
+                        <div className={clsx("absolute left-0 top-0 bottom-0 w-1 transition-colors", Number(stock.change_percent ?? 0) >= 0 ? "bg-emerald-500" : "bg-rose-500")} />
+                        
+                        <div className="flex justify-between items-center pl-2">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-black text-slate-900 tracking-tight">{stock.ticker}</span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded uppercase tracking-wider">DNA {Number(stock.dna_score).toFixed(1)}</span>
                             </div>
                           </div>
-                        </div>
-                        <div className="flex justify-between items-end">
-                          <div>
-                            <span className="text-sm font-extrabold text-black font-mono block">${Number(stock.price).toFixed(isPenny ? 4 : 2)}</span>
-                            <span className={clsx("text-xs font-bold font-mono block", Number(stock.change_percent ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                              {Number(stock.change_percent ?? 0) >= 0 ? '+' : ''}{Number(stock.change_percent ?? 0).toFixed(2)}%
-                            </span>
-                          </div>
-                          <div className="w-20 flex flex-col gap-1 items-end">
-                            <TensionGauge score={stock.dna_score} rvol={stock.rvol} />
+                          
+                          <div className="flex items-center gap-3">
+                            <div className="w-16 opacity-80 group-hover:opacity-100 transition-opacity hidden sm:block">
+                              <TensionGauge score={stock.dna_score} rvol={stock.rvol} />
+                            </div>
+                            <div className="text-right min-w-[65px]">
+                              <span className="text-sm font-black text-slate-900 font-mono block leading-none mb-1">${Number(stock.price).toFixed(isPenny ? 4 : 2)}</span>
+                              <span className={clsx("text-[10px] font-bold font-mono block leading-none", Number(stock.change_percent ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                                {Number(stock.change_percent ?? 0) >= 0 ? '▲' : '▼'} {Math.abs(Number(stock.change_percent ?? 0)).toFixed(2)}%
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -231,7 +232,7 @@ export default function UnifiedDashboard() {
           </div>
 
           {/* ── CENTER COLUMN: Portfolio Chart & Active Positions (Span 6) ── */}
-          <div className="xl:col-span-6 flex flex-col gap-5">
+          <div className="xl:col-span-6 flex flex-col gap-5 min-w-0">
             
             <div className="sfdc-card flex flex-col h-[320px]">
               <div className="sfdc-card-header flex justify-between items-center pb-3 border-b-0">
@@ -268,20 +269,21 @@ export default function UnifiedDashboard() {
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 10, right: 0, left: 10, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 25, right: 0, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#2962ff" stopOpacity={0.2}/>
                           <stop offset="95%" stopColor="#2962ff" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="2 2" vertical={true} stroke="#e2e8f0" />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis 
                         dataKey="ts" 
                         type="number"
                         domain={['dataMin', 'dataMax']}
-                        stroke="#64748b" 
-                        fontSize={10} 
+                        stroke="#94a3b8" 
+                        fontSize={10}
+                        fontWeight="bold"
                         tickLine={false} 
                         axisLine={false} 
                         tickFormatter={(val) => {
@@ -296,10 +298,14 @@ export default function UnifiedDashboard() {
                         domain={['auto', 'auto']} 
                         stroke="#64748b" 
                         fontSize={10} 
+                        fontWeight="bold"
                         tickLine={false} 
                         axisLine={false} 
                         tickFormatter={(val) => `$${(val/1000).toFixed(1)}k`}
-                        tickMargin={5}
+                        mirror={true}
+                        dx={5}
+                        dy={-10}
+                        tickMargin={0}
                       />
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '12px', color: '#0f172a', fontWeight: 'bold', padding: '8px 12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
@@ -464,7 +470,7 @@ export default function UnifiedDashboard() {
           </div>
 
           {/* ── RIGHT COLUMN: Risk & Analytics & Logs (Span 3) ── */}
-          <div className="xl:col-span-3 flex flex-col gap-5">
+          <div className="xl:col-span-3 flex flex-col gap-5 min-w-0">
             <RiskAnalyticsPanel 
               history={slicedHistory} 
               portfolioHistory={slicedPortfolioHistory} 
