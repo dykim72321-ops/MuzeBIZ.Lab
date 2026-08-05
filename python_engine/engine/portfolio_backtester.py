@@ -289,6 +289,7 @@ class DNAValidator:
                     formatted_trades,
                     current_atr=effective_atr,
                     current_price=current_close,
+                    bars_per_day=1,  # 일봉 데이터 — KellySizer 기본값(1분봉 390) 오적용 방지
                 )
 
                 if k_frac is None:

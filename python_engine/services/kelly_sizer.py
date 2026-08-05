@@ -37,6 +37,8 @@ class KellySizer:
         max_weight: float = 0.15,
         min_weight: float = 0.02,
         min_trades: int = 10,
+        target_vol: float = 0.15,
+        bars_per_day: int = 390,
     ):
         self.kappa = kappa
         self.mu_global_win_pct = mu_global_win_pct
@@ -45,6 +47,12 @@ class KellySizer:
         self.max_weight = max_weight
         self.min_weight = min_weight
         self.min_trades = min_trades
+        # services/quant_engine.py의 calculate_position_sizing()과 동일한
+        # 연율화 변동성 타겟팅(target_vol/ann_vol) 공식·상수를 공유한다 —
+        # 두 모듈이 서로 다른 타겟/하한을 가지면 어느 쪽이 실제 라이브
+        # 사이징을 결정하는지 추적 불가능해지므로 반드시 정합을 유지할 것.
+        self.target_vol = target_vol
+        self.bars_per_day = bars_per_day  # 1분봉 기본(390) — 일봉 호출자는 1 전달
 
     # ── 포지션 단위 그룹핑 ────────────────────────────────────────────────────
 
@@ -136,13 +144,22 @@ class KellySizer:
         stats: dict | None,
         current_atr: float = 0.0,
         current_price: float = 1.0,
+        bars_per_day: int | None = None,
     ) -> tuple[float | None, float, float]:
         """
-        compute_stats() 결과에 "지금 이 순간"의 ATR 변동성 페널티를 적용한다.
+        compute_stats() 결과에 "지금 이 순간"의 변동성 타겟팅을 적용한다.
 
         stats는 캐시된 값이어도 되지만, current_atr/current_price는 반드시
         호출 시점의 최신 값을 넘겨야 한다 — 그래야 캐시된 승률/손익비를 써도
         포지션 사이징이 현재 변동성에 맞게 조정된다.
+
+        quant_engine.calculate_position_sizing()과 동일하게 ATR을 연율화해
+        target_vol과 비교한 뒤, Kelly 비중과 min()으로 결합한다(보수적 결합 —
+        두 리스크 모델 중 작은 쪽 채택. 산술평균은 서로 다른 차원의 비중을
+        의미 없이 평균해 이론적 근거가 없다). 원시 ATR/price 비율을 직접
+        페널티로 곱하면 min_weight 하한이 즉시 그 비율 차이를 삼켜버리고,
+        일봉/1분봉처럼 타임프레임이 다른 호출자 사이에서 같은 절대값이
+        전혀 다른 변동성을 의미하게 된다 — 그래서 반드시 연율화를 거친다.
         """
         if stats is None:
             return None, 0.0, 0.0
@@ -154,16 +171,19 @@ class KellySizer:
         if raw_kelly <= 0:
             return 0.0, p, b
 
-        # 4. ATR 변동성 페널티 오버레이 (호출 시점 값 — 캐싱 금지)
-        if current_atr > 0 and current_price > 0:
-            volatility_ratio = current_atr / current_price
-            penalty_factor = 1.0 / (1.0 + 10.0 * volatility_ratio)
-        else:
-            penalty_factor = 1.0
-
-        # 5. Half/Full Kelly 적용
         kelly_multiplier = 0.5 if self.half_kelly else 1.0
-        dynamic_fraction = raw_kelly * kelly_multiplier * penalty_factor
+        kelly_fraction = raw_kelly * kelly_multiplier
+
+        bpd = bars_per_day if bars_per_day is not None else self.bars_per_day
+        if current_atr > 0 and current_price > 0:
+            atr_pct = current_atr / current_price
+            ann_vol = atr_pct * np.sqrt(252 * bpd)
+            # 변동성이 극심하더라도 최소 5% 비중은 보장 (파편화 소액 거래 방지)
+            # — quant_engine.calculate_position_sizing()과 동일한 하한
+            vol_weight = max(0.05, self.target_vol / (ann_vol + 1e-9))
+            dynamic_fraction = min(vol_weight, kelly_fraction)
+        else:
+            dynamic_fraction = kelly_fraction
 
         final_weight = max(self.min_weight, min(self.max_weight, dynamic_fraction))
         return final_weight, p, b
@@ -173,6 +193,7 @@ class KellySizer:
         trade_records: list[dict],
         current_atr: float = 0.0,
         current_price: float = 1.0,
+        bars_per_day: int | None = None,
     ) -> tuple[float | None, float, float]:
         """
         통합 Kelly 비중을 계산한다 (compute_stats + apply_volatility_penalty 조합).
@@ -187,9 +208,15 @@ class KellySizer:
         trade_records : list[dict]
             paper_history 행 리스트. 각 dict에 ticker/entry_price/pnl_pct/profit_amt 키.
         current_atr : float
-            현재 ATR 값 (변동성 페널티 오버레이용). 0이면 페널티 미적용.
+            현재 ATR 값 (변동성 타겟팅용). 0이면 미적용(순수 Kelly 비중 반환).
         current_price : float
             현재 가격 (ATR→변동성비율 환산용).
+        bars_per_day : int | None
+            ATR을 연율화할 때 쓸 하루당 봉 수. None이면 인스턴스 기본값
+            (bars_per_day=390, 1분봉) 사용 — 일봉 데이터로 호출할 때는
+            반드시 1을 명시적으로 넘겨야 한다.
         """
         stats = self.compute_stats(trade_records)
-        return self.apply_volatility_penalty(stats, current_atr, current_price)
+        return self.apply_volatility_penalty(
+            stats, current_atr, current_price, bars_per_day=bars_per_day
+        )

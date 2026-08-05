@@ -465,7 +465,10 @@ class Portfolio:
                 for idx, t in enumerate(ticker_trades)
             ]
             frac, _, _ = sizer.compute(
-                formatted_trades, current_atr=safe_atr, current_price=price
+                formatted_trades,
+                current_atr=safe_atr,
+                current_price=price,
+                bars_per_day=1,  # 일봉 데이터 — KellySizer 기본값(1분봉 390) 오적용 방지
             )
             if frac is None:
                 frac = 0.05

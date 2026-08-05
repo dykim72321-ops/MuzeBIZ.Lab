@@ -19,6 +19,11 @@ MIN_BUY_BUDGET = (
     100.0  # 최소 주문 금액 (달러) - 초소형 파편화 거래 방지 (기존 10.0에서 상향)
 )
 MAX_BUY_BUDGET = 1000.0  # 종목당 최대 매수 금액 (달러) — MAX_BUY_BUDGET × MAX_CONCURRENT = 총 배포 상한
+# recommended_weight(quant_engine.calculate_position_sizing 반환)를 이 값으로 나눠
+# "최대 확신(full conviction)" 대비 비율로 정규화한다. 아래 buy_budget 계산의
+# effective_fraction 상한(min(recommended_weight/100, 0.25))과 반드시 같은 값이어야
+# weight=상한일 때 정확히 MAX_BUY_BUDGET 전액이 나간다 (2026-08-05).
+FULL_CONVICTION_FRACTION = 0.25
 MAX_CONCURRENT_POSITIONS = 20  # 동시 보유 최대 종목 수 (실질 도달 가능 상한)
 MAX_CONCENTRATION_PCT = 0.75  # 총 자산 대비 투입 비중 상한 (75%)
 TS_INIT_PCT = 0.90  # 초기 트레일링 스탑: 진입가 × 90% (-10%, 손실 포지션 빠른 탈출)
@@ -2026,14 +2031,27 @@ class PaperTradingManager:
                     )
 
                     effective_fraction = weight if weight is not None else 0.05
+                    # 이 분기는 KellySizer 자체 상한(_kelly_sizer.max_weight, 기본 0.15)이
+                    # "최대 확신"의 기준이다 — 위 분기의 0.25(FULL_CONVICTION_FRACTION)와
+                    # 스케일이 달라 정규화 기준도 따로 잡아야 한다.
+                    conviction_ref = _kelly_sizer.max_weight
                     print(
                         f"⚠️ [{ticker}] Kelly 동적 폴백: {effective_fraction*100:.1f}% 적용"
                     )
                 else:
                     effective_fraction = min(recommended_weight / 100.0, 0.25)
+                    conviction_ref = FULL_CONVICTION_FRACTION
+                # 계좌 잔고가 커질수록(현재 cash_available ~$77k) cash*effective_fraction이
+                # 항상 MAX_BUY_BUDGET을 상회해, weight가 0.02든 0.15든 실제 주문액은
+                # 매번 동일한 $1,000로 뭉개지는 문제가 있었다 — 변동성 타겟팅이 계산은
+                # 되지만 라이브 주문 크기에는 전혀 반영되지 않았다(2026-08-05 리뷰에서
+                # 발견). weight를 conviction_ref(해당 분기의 최대 비중) 대비 비율로
+                # MAX_BUY_BUDGET에 곱해, 확신/변동성에 비례해 $1,000 이하로 실제
+                # 축소되도록 한다. cash_available 기준 상한은 계좌가 작아지는 경우를
+                # 대비해 그대로 병존.
                 buy_budget = min(
                     acc["cash_available"] * effective_fraction,
-                    MAX_BUY_BUDGET,
+                    MAX_BUY_BUDGET * (effective_fraction / conviction_ref),
                 )
                 if buy_budget < MIN_BUY_BUDGET:
                     await self._log_decision(
