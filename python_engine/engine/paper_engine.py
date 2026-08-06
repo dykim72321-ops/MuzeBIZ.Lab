@@ -226,17 +226,32 @@ def update_reversible_trailing_stop(
     return max(locked_floor, adaptive_stop)
 
 
-# ── 스프레드 게이트 Shadow 모드 (2026-07-31) ─────────────────────────────────
-# 진입 체결 직전 IEX 최신 호가를 1회 조회해 bid/ask 스프레드를 engine_decisions에
-# 기록만 한다 — 아직 어떤 진입도 차단하지 않는다. GSUN/SLGB/INUV/CHAI 등 과거
-# 대형 손실을 재검토한 결과, 실제 원인은 "진입 시점 스프레드"가 아니라 청산 단계
-# 감시 공백(폴링 갭·부분체결 회계·IEX 데이터 정체)이었고 전부 별도로 이미 수정돼
-# 있다 — 스프레드 게이트는 그 사고들의 재발 방지책이 아니라 새로운 방어선이므로,
-# forward_return과의 실제 상관관계를 표본으로 확인하기 전까지는 차단하지 않는다.
+# ── 스프레드 게이트 (2026-07-31 Shadow 모드 도입 → 2026-08-06 실제 차단 게이트로 승격) ──
+# 진입 체결 직전 IEX 최신 호가를 1회 조회해 bid/ask 스프레드를 확인한다.
+# GSUN/SLGB/INUV/CHAI 등 과거 대형 손실을 재검토한 결과, 실제 원인은 "진입 시점
+# 스프레드"가 아니라 청산 단계 감시 공백(폴링 갭·부분체결 회계·IEX 데이터 정체)이었고
+# 전부 별도로 이미 수정돼 있어, 도입 당시엔 forward_return과의 실제 상관관계를
+# 표본으로 확인하기 전까지 차단하지 않는 Shadow(기록 전용) 모드로 시작했다.
+#
+# 2026-08-06: engine_decisions.spread_pct 실측 42건(7/31~8/5)을 분석한 결과, 스프레드
+# 자체는 forward_return과 무상관(방향성 문제 아님)이지만 확정 비용으로서는 심각했다 —
+# 매수 체결 종목 중 SCYX 31.6%·INFU 30.6%·ISOU 29.75%·TSAT 28.9%·VOYG 27.7% 등 왕복
+# 스프레드만으로 20~30%를 깎아먹는 종목이 다수 포함됨(스프레드>2% 비율 38.1%). 같은 날
+# 먼저 시도한 스캔 유동성 하한(SCAN_MIN_DOLLAR_VOLUME, core/quant_scanner.py) 상향은
+# 이 문제의 간접 대리지표였는데, 신호 발생 당일의 실제 일봉 거래대금으로 소급 검증한
+# 결과 TSAT($13.9M)·VOYG($72.3M)·TTAN($81.2M)·AMIX($174.5M)·TPG($187.7M)처럼 일
+# 거래대금이 매우 큰데도 순간 스프레드가 10~29%인 종목이 다수 있어(일 누적거래량과
+# 특정 순간의 스프레드는 별개), 대리지표로는 이 표본의 35.7%(스프레드>3% 기준)밖에
+# 못 걸렀다. 이미 실측되고 있는 spread_pct 자체를 직접 게이트로 쓰면 같은 기준에서
+# 생존분 평균 스프레드가 0.51%까지 떨어져(대리지표 방식은 6.08%) 훨씬 정밀하다 —
+# 그래서 대리지표(달러볼륨) 대신/추가로 이 실측값을 실제 차단 게이트로 승격한다.
+#
 # IEX는 저유동성 종목에서 호가가 몇 분씩 정체될 수 있음이 이미 확인됐으므로
-# (ZNB 사례, 2026-07-30) quote_stale=True 표본은 분석 시 반드시 제외해야 한다.
+# (ZNB 사례, 2026-07-30) quote_stale=True는 신뢰할 수 없는 스냅샷으로 간주해 차단
+# 판단에 쓰지 않는다(다른 실패 경로와 동일하게 "확인 불가 시 차단하지 않음" 원칙).
 # 매 1분봉·매 감시 종목마다 호출하면 과거 429 사고가 재현될 수 있으므로, 반드시
 # 진입 확정 1회(주문 제출 직전)에만 호출한다 — 다른 곳에서 재사용 금지.
+SPREAD_GATE_MAX_PCT = 3.0  # 이 값 초과(비-stale) 스프레드는 진입 차단
 _SPREAD_QUOTE_STALE_THRESHOLD_SEC = (
     120  # position_ts_sweeper의 STALE_TRADE_THRESHOLD_SEC와 동일 기준
 )
@@ -406,8 +421,9 @@ class PaperTradingManager:
         추가됐다 — 호출부(_process_signal_locked)가 실제 값을 못 받은 경로(예: HOLD
         경량 경로)는 None으로 남는다.
 
-        spread_pct/quote_stale은 스프레드 게이트 Shadow 모드(2026-07-31) 전용 —
-        진입 EXECUTED 시점에만 채워지고 나머지 gate 호출은 None으로 남는다.
+        spread_pct/quote_stale은 스프레드 게이트(2026-07-31 Shadow 모드 도입, 2026-08-06
+        차단 게이트로 승격) 전용 — 진입 EXECUTED 또는 SPREAD_TOO_WIDE로 BLOCKED된
+        시점에만 채워지고 나머지 gate 호출은 None으로 남는다.
 
         efficiency_ratio(smoothed_er)는 DNA_Score 무용론 확정(2026-07-31, 4중 검증)
         이후 대안 피처 후보 검증용으로 추가됐다 — trailing stop 레짐 판정에 이미
@@ -2192,10 +2208,46 @@ class PaperTradingManager:
                     print(f"⚠️ [{ticker}] 진입 클레임 INSERT가 빈 결과 반환 — 스킵")
                     return None
 
-            # 스프레드 게이트 Shadow 모드: 주문 제출 직전 1회만 호출해 기록용
-            # spread_pct/quote_stale을 확보한다 — 실패해도 진입을 막지 않는다
-            # (_fetch_quote_spread 참고).
+            # 스프레드 게이트: 주문 제출 직전 1회만 호출(429 방지, 클래스 상단 주석
+            # 참고). 조회 실패(None)나 stale 판정이면 확인 불가로 간주해 차단하지
+            # 않는다 — 이 조회 자체가 실주문 지연·차단의 원인이 되면 안 된다.
             shadow_spread_pct, shadow_quote_stale = await _fetch_quote_spread(ticker)
+            if (
+                shadow_spread_pct is not None
+                and not shadow_quote_stale
+                and shadow_spread_pct > SPREAD_GATE_MAX_PCT
+            ):
+                print(
+                    f"⛔ [{ticker}] 스프레드 {shadow_spread_pct:.2f}% > "
+                    f"{SPREAD_GATE_MAX_PCT}% — 진입 차단, 클레임 롤백"
+                )
+                await asyncio.to_thread(
+                    self.supabase.table("paper_positions")
+                    .delete()
+                    .eq("ticker", ticker)
+                    .execute
+                )
+                await self._log_decision(
+                    ticker=ticker,
+                    gate="SPREAD_TOO_WIDE",
+                    outcome="BLOCKED",
+                    signal=signal_type,
+                    dna_score=dna_score,
+                    rsi=rsi,
+                    rvol=rvol,
+                    adx=adx,
+                    macd_diff=macd_diff,
+                    is_extended=is_extended,
+                    z_score_20=z_score_20,
+                    ma20_deviation_pct=ma20_deviation_pct,
+                    breakout_deviation_pct=breakout_deviation_pct,
+                    atr_pct=atr_pct,
+                    spread_pct=shadow_spread_pct,
+                    quote_stale=shadow_quote_stale,
+                    price=price,
+                    note=f"스프레드 {shadow_spread_pct:.2f}% > {SPREAD_GATE_MAX_PCT}% 초과 — 진입 차단",
+                )
+                return None
 
             # 실거래 훅: LiveTradingManager에서 Alpaca 주문 제출, 실제 (체결 수량, 체결 단가) 반환.
             # 실패 시 클레임 롤백 + DB 기록 차단. order_kind="LIMIT"(눌림목 확인 진입)이면
