@@ -37,6 +37,20 @@ SCAN_MAX_PRICE = 50.0  # 이 값 초과는 스캔 제외
 SCAN_DATA_LOOKBACK = "2mo"
 SCAN_TOP_N = 10
 
+# 최소 일 달러볼륨 필터 (2026-08-06, $200,000 → $20,000,000 상향)
+# 스프레드 게이트 Shadow 모드(paper_engine.py의 _fetch_quote_spread, 2026-07-31 도입)가
+# 진입 직전 실제 bid/ask를 42건 기록한 결과, 매수 체결된 종목 중 SCYX 31.6%·INFU
+# 30.6%·ISOU 29.75%·TSAT 28.9%·VOYG 27.7% 등 왕복 스프레드만으로 20~30%를 깎아먹는
+# 종목이 다수 포함돼 있었다(스프레드>2%인 표본이 38.1%) — paper_engine.py의 슬리피지
+# 모델(왕복 1.0~2.0% 가정)이 이 종목들의 실제 체결 비용을 크게 과소평가하고 있었다.
+# 진입 신호 성분(RSI/RVOL/ADX/MACD/ATR%) 전부가 forward_return과 무상관(2026-08-06
+# scripts/run_feature_significance.py 실측, n=1,361)으로 확인된 상태에서, 이런 초저유동
+# 종목을 스캔 대상에 남겨두면 신호 품질과 무관하게 스프레드만으로 손실이 확정된다.
+# $200,000는 페니 스캐너 시절(2026-07-17) 전체 유니버스를 최대한 넓게 훑기 위한
+# 값이었을 뿐 스프레드 방어 목적이 아니었음 — 목적을 스프레드 방어로 명시적으로
+# 전환한다.
+SCAN_MIN_DOLLAR_VOLUME = 20_000_000
+
 # 자동 스캔 주기(초) — schedulers/tasks.py의 auto_quant_scan_scheduler와
 # routers/penny.py의 next_scan_in_seconds 계산이 공유하는 단일 소스.
 # 2026-07-16: 4시간 → 2시간으로 단축. 원래 2시간이었던 것을 RAM 누적 문제로
@@ -185,7 +199,7 @@ async def run_quant_scan_internal(
                     volume = float(bar.volume)
                     if (
                         SCAN_MIN_PRICE < price <= max_price
-                        and (price * volume) > 200000
+                        and (price * volume) > SCAN_MIN_DOLLAR_VOLUME
                     ):
                         candidates.append((sym, price * volume))
 
