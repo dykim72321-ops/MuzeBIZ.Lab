@@ -204,6 +204,7 @@ from schedulers.tasks import (  # noqa: E402
     auto_watchlist_pruning_scheduler,
     auto_checklist_eval_scheduler,
     auto_improvement_rollback_scheduler,
+    spread_gate_readout_scheduler,
     _stop_current_stream,
     stream_scheduler,
     paper_portfolio_updater,
@@ -459,6 +460,10 @@ async def run_startup_sequence():
 
     # 개선 검증 트래커 자동 롤백 스케줄러 시작 (REGRESSED 연속 판정 시 파라미터 자동 되돌림)
     asyncio.create_task(auto_improvement_rollback_scheduler())
+
+    # 스프레드 게이트 배포(2026-08-06) 전/후 판독 리포트 스케줄러 시작
+    # (READOUT_TARGET_DATE=2026-08-22 이전에는 스스로 건너뛴다)
+    asyncio.create_task(spread_gate_readout_scheduler())
 
     # 실거래 모드: Alpaca Trade Update 스트림 기동
     # DISABLE_ALPACA_STREAM=true(로컬 개발 전용 standby)인 인스턴스는 여기서도

@@ -49,17 +49,6 @@ SPIKE_GUARD_LOOKBACK = 5
 SPIKE_GUARD_PCT_NORMAL = 0.05
 SPIKE_GUARD_PCT_PENNY = 0.08
 
-# ── VCP 스퀴즈+RVOL 돌파 (섀도우/로깅 전용 실험 팩터, 2026-07-30) ──────────────
-# DNA_Score(RSI/MACD/ADX/RVOL 후행지표 합성)의 forward return 예측력이 실거래
-# 데이터에서 반복 확인되지 않아(PF 0.34, 로또성 이상치 제외 시 0.11) 대안 팩터로
-# 도입. 변동성이 극도로 수축된 구간(ATR14/MA20 비율이 자체 과거 분포 하위 20%)에서
-# 거래량을 동반한 20일선 상향 돌파가 나오면 engine_decisions에 gate="VCP_SQUEEZE_SHADOW"로
-# 기록만 하고 매수 게이트에는 관여하지 않는다 — forward_return_logger가 자동
-# 수집하는 30m/60m 수익률로 표본이 쌓인 뒤 별도로 유효성을 검증한다.
-VCP_SQUEEZE_PERCENTILE_MAX = 0.20  # 하위 20% = 압축 상태로 판정
-VCP_SQUEEZE_MIN_SAMPLES = 20  # percentile 계산에 필요한 최소 표본(거래일) 수
-VCP_BREAKOUT_RVOL_MIN = 2.0  # 돌파 트리거로 인정할 최소 RVOL 배수
-
 
 # ── RSI 채점 모드 런타임 토글 (2026-08-04) ────────────────────────────────────
 # rsi_falling_knife_fix(2026-08-01, c900554)가 일반 종목 RSI 채점을 "과매도=반등
@@ -535,55 +524,6 @@ def calculate_dynamic_kelly(
         min_trades=min_trades,
     )
     return sizer.compute(recent_trades)
-
-
-# ── VCP 스퀴즈+RVOL 돌파 (섀도우 팩터) ─────────────────────────────────────────
-
-
-def compute_squeeze_signal(df: pd.DataFrame) -> dict | None:
-    """변동성 수축(Squeeze) 상태 + 20일선 상향 돌파 여부를 산출.
-
-    df는 Open/High/Low/Close/Volume 컬럼을 가진 일봉 DataFrame이면 되고,
-    calculate_advanced_signals()가 이미 붙인 파생 컬럼(RSI 등)은 필요 없다 —
-    quant_scanner.py가 스캔 단계에서 이미 들고 있는 df를 그대로 재사용하기 위한
-    완전히 독립된 순수 함수다. 표본이 부족하면 percentile 판정을 신뢰할 수 없으므로
-    None을 반환한다.
-
-    압축(squeeze) 판정은 반드시 돌파 전일(직전 봉) 기준으로 해야 한다 — 돌파 당일
-    캔들은 그 자체로 레인지가 커져 ATR이 급등하므로, 당일 값으로 판정하면 "막 터진
-    뒤"를 "여전히 압축 중"으로 오판하게 된다.
-    """
-    if len(df) < VCP_SQUEEZE_MIN_SAMPLES + 2:
-        return None
-
-    prior = df.iloc[:-1]
-    atr = ta.volatility.AverageTrueRange(
-        high=prior["High"], low=prior["Low"], close=prior["Close"], window=14
-    ).average_true_range()
-    prior_ma20 = prior["Close"].rolling(window=20, min_periods=1).mean()
-    squeeze_ratio = atr / prior_ma20
-
-    squeeze_series = squeeze_ratio.dropna()
-    if len(squeeze_series) < VCP_SQUEEZE_MIN_SAMPLES:
-        return None
-
-    current_squeeze = float(squeeze_series.iloc[-1])
-    squeeze_percentile = float((squeeze_series <= current_squeeze).mean())
-
-    ma20 = df["Close"].rolling(window=20, min_periods=1).mean()
-    crossed_ma20 = bool(
-        len(df) >= 2
-        and not pd.isna(ma20.iloc[-1])
-        and not pd.isna(ma20.iloc[-2])
-        and df["Close"].iloc[-1] > ma20.iloc[-1]
-        and df["Close"].iloc[-2] <= ma20.iloc[-2]
-    )
-
-    return {
-        "squeeze_ratio": current_squeeze,
-        "squeeze_percentile": squeeze_percentile,
-        "crossed_ma20": crossed_ma20,
-    }
 
 
 # ── Position Sizing Engine ────────────────────────────────────────────────────

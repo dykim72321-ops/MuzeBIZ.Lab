@@ -164,6 +164,33 @@ async def auto_improvement_rollback_scheduler():
         await asyncio.sleep(86400)
 
 
+async def spread_gate_readout_scheduler():
+    """매일 1회 실행: 스프레드 게이트 배포(2026-08-06) 전/후 판독 리포트를 Discord 발송.
+
+    services/spread_gate_readout.py에 위임한다. READOUT_TARGET_DATE(2026-08-22)
+    이전에는 run_and_notify()가 스스로 건너뛰므로 그때까지는 아무것도 발송되지
+    않는다 — 표본이 부족한 상태의 숫자가 결론처럼 읽히는 것을 막기 위함이다.
+    조기 확인이 필요하면 CLI(`python -m services.spread_gate_readout`)를 쓴다.
+
+    읽기 전용(DB SELECT + Discord POST)이라 엔진 파라미터를 mutate하지 않으므로
+    auto_improvement_rollback_scheduler와 달리 standby 가드는 두지 않는다. 다만
+    로컬 standby와 Railway가 동시에 켜져 있으면 같은 리포트가 두 번 갈 수 있다.
+    """
+    from services.spread_gate_readout import run_and_notify
+
+    while True:
+        try:
+            result = await run_and_notify()
+            if result:
+                print(
+                    f"📐 [SpreadGateReadout] 판독 발송 완료 — verdict={result['verdict']}"
+                )
+        except Exception as e:
+            print(f"❌ [SpreadGateReadout Error] {e}")
+
+        await asyncio.sleep(86400)
+
+
 async def stream_scheduler():
     """개장 시간을 감지해 Alpaca 스트림을 자동 시작/종료하는 스케줄러."""
     was_market_open = False

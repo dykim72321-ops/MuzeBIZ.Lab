@@ -12,15 +12,12 @@ import yfinance as yf
 from app.state import app_state
 from services.quant_engine import (
     calculate_dna_score,
-    compute_squeeze_signal,
     EXTENSION_DAY_OPEN_PCT_NORMAL,
     EXTENSION_DAY_OPEN_PCT_PENNY,
     EXTENSION_PREV_CLOSE_PCT_NORMAL,
     EXTENSION_PREV_CLOSE_PCT_PENNY,
     EXTENSION_MA20_PCT_NORMAL,
     EXTENSION_MA20_PCT_PENNY,
-    VCP_SQUEEZE_PERCENTILE_MAX,
-    VCP_BREAKOUT_RVOL_MIN,
 )
 from utils.utils import is_market_hours
 from market.alpaca_stream import start_alpaca_stream, _stop_current_stream
@@ -421,8 +418,6 @@ async def run_quant_scan_internal(
                     | (df["Close"] > ma20 * ma20_pct)
                 )
 
-                squeeze = compute_squeeze_signal(df)
-
                 latest = df.iloc[-1]
                 prev = df.iloc[-2] if len(df) >= 2 else latest
 
@@ -533,42 +528,6 @@ async def run_quant_scan_internal(
                         )
                     except Exception:
                         pass
-
-                # ── VCP 스퀴즈+RVOL 돌파 섀도우 로깅 (매수 게이트에는 관여하지 않음) ──
-                if (
-                    supabase
-                    and squeeze
-                    and squeeze["squeeze_percentile"] <= VCP_SQUEEZE_PERCENTILE_MAX
-                    and squeeze["crossed_ma20"]
-                    and rvol >= VCP_BREAKOUT_RVOL_MIN
-                ):
-                    try:
-                        await asyncio.to_thread(
-                            supabase.table("engine_decisions")
-                            .insert(
-                                {
-                                    "ticker": ticker,
-                                    "gate": "VCP_SQUEEZE_SHADOW",
-                                    "outcome": "SHADOW_LOGGED",
-                                    "signal": signal_type,
-                                    "dna_score": dna_score,
-                                    "rsi": rsi,
-                                    "rvol": rvol,
-                                    "price": price,
-                                    "adx": adx,
-                                    "macd_diff": macd_diff,
-                                    "is_extended": is_extended,
-                                    "note": (
-                                        f"squeeze_pct={squeeze['squeeze_percentile']:.2f} "
-                                        f"squeeze_ratio={squeeze['squeeze_ratio']:.4f} "
-                                        "MA20 상향돌파"
-                                    ),
-                                }
-                            )
-                            .execute
-                        )
-                    except Exception as e:
-                        print(f"⚠️ [VCP Squeeze Shadow] {ticker} 로그 실패: {e}")
             except Exception as e:
                 print(f"⚠️ [Scan] {ticker} analysis error: {e}")
                 continue
