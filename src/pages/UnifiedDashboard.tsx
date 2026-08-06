@@ -95,7 +95,7 @@ export default function UnifiedDashboard() {
         
         {/* ════════ TOP: GLOBAL METRICS ════════ */}
 
-        <div className="sfdc-card flex flex-col xl:flex-row xl:items-center gap-6 p-6 w-full bg-white mb-8">
+        <div className="sfdc-card flex flex-col lg:flex-row lg:items-center gap-6 p-6 w-full bg-white mb-8">
           <div className="flex-shrink-0">
             <DashboardControls
               isArmed={isArmed}
@@ -105,9 +105,9 @@ export default function UnifiedDashboard() {
             />
           </div>
 
-          <div className="hidden xl:block h-12 w-[1px] bg-slate-100 flex-shrink-0" />
+          <div className="hidden lg:block h-12 w-[1px] bg-slate-100 flex-shrink-0" />
 
-          <div className="w-full xl:w-auto flex-1">
+          <div className="w-full lg:w-auto flex-1">
             <MetricsGrid
               displayedAccount={displayedAccount}
               totalPnl={totalPnl}
@@ -147,10 +147,10 @@ export default function UnifiedDashboard() {
         )}
 
         {/* ════════ MIDDLE: 3-COLUMN BENTO BOX LAYOUT ════════ */}
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
           {/* ── LEFT COLUMN: Alpha Discovery & Status (Span 3) ── */}
-          <div className="xl:col-span-3 flex flex-col gap-5 min-w-0">
+          <div className="lg:col-span-5 xl:col-span-3 flex flex-col gap-5 min-w-0">
 
             <div className="sfdc-card">
               <div className="sfdc-card-header">
@@ -232,7 +232,7 @@ export default function UnifiedDashboard() {
           </div>
 
           {/* ── CENTER COLUMN: Portfolio Chart & Active Positions (Span 6) ── */}
-          <div className="xl:col-span-6 flex flex-col gap-5 min-w-0">
+          <div className="lg:col-span-7 xl:col-span-6 flex flex-col gap-5 min-w-0">
             
             <div className="sfdc-card flex flex-col h-[320px]">
               <div className="sfdc-card-header flex justify-between items-center pb-3 border-b-0">
@@ -332,7 +332,7 @@ export default function UnifiedDashboard() {
               </div>
             </div>
 
-            <div className="sfdc-card flex-1 flex flex-col min-h-[300px]">
+            <div className="sfdc-card flex-1 flex flex-col min-h-[300px] min-w-0">
               <div className="sfdc-card-header">
                 <div className="flex items-center gap-3">
                   <h2 className="text-sm font-black flex items-center gap-2">
@@ -343,16 +343,16 @@ export default function UnifiedDashboard() {
                   </span>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto bg-white">
+              <div className="flex-1 overflow-x-auto overflow-y-auto bg-white min-w-0">
                 {/* Desktop Table View */}
-                <table className="hidden md:table w-full text-left border-collapse">
+                <table className="hidden xl:table w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-slate-100 text-xs font-mono font-extrabold text-slate-600 uppercase bg-slate-50/80 backdrop-blur-md sticky top-0 shadow-sm z-10">
                       <th className="py-3 px-4">종목</th>
-                      <th className="py-3 px-2 text-right hidden sm:table-cell">수량</th>
+                      <th className="py-3 px-2 text-right hidden 2xl:table-cell">수량</th>
                       <th className="py-3 px-2 text-right">진입가</th>
                       <th className="py-3 px-2 text-right">현재가</th>
-                      <th className="py-3 px-2 text-right hidden md:table-cell">TS</th>
+                      <th className="py-3 px-2 text-right hidden 2xl:table-cell">TS</th>
                       <th className="py-3 px-3 text-right">평가 손익</th>
                       <th className="py-3 pl-3 pr-6 text-center">액션</th>
                     </tr>
@@ -365,12 +365,17 @@ export default function UnifiedDashboard() {
                         const hasPnl = pos.unrealized_pl != null;
                         const isProfit = hasPnl && (pos.unrealized_pl ?? 0) >= 0;
                         const pnlPct = hasPnl ? (pos.unrealized_plpc ?? 0) : 0;
-                        const isHighTension = Math.abs(pnlPct) >= 5; // 5% 이상 변동 시 텐션
+                        const tsThreshold = pos.ts_threshold ?? (pos.current_price ?? 0);
+                        const isBreached = pos.current_price != null && pos.current_price < tsThreshold;
+                        
+                        // 하락 변동성이 크거나(5% 이상) 스탑을 이탈한 경우 텐션 부여
+                        const isHighTension = Math.abs(pnlPct) >= 5 || isBreached; 
                         const dec = pos.isPenny ? 4 : 2;
+                        
                         return (
-                          <tr key={pos.ticker} className={clsx("transition-colors bg-white", isHighTension ? (isProfit ? "bg-emerald-50/30 hover:bg-emerald-50/50 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 hover:bg-rose-50/50 animate-[pulse_3s_ease-in-out_infinite]") : "hover:bg-slate-50")}>
+                          <tr key={pos.ticker} className={clsx("transition-colors bg-white", isBreached ? "bg-rose-100/40 hover:bg-rose-100/70 border-l-4 border-rose-600 animate-[pulse_1.5s_ease-in-out_infinite]" : isHighTension ? (isProfit ? "bg-emerald-50/30 hover:bg-emerald-50/50 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 hover:bg-rose-50/50 animate-[pulse_3s_ease-in-out_infinite]") : "hover:bg-slate-50")}>
                             <td className="py-3.5 px-4 relative">
-                              {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
+                              {isHighTension && !isBreached && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
                               <button 
                                 onClick={() => handleCompanyClick(pos.ticker)}
                                 className="text-base font-black text-slate-900 hover:text-black hover:underline block tracking-tight text-left transition-colors"
@@ -381,12 +386,12 @@ export default function UnifiedDashboard() {
                                 <span className="text-[10px] font-bold text-slate-500">{pos.isPenny ? 'Penny' : 'Standard'}</span>
                               </div>
                             </td>
-                            <td className="py-3.5 px-2 text-right font-mono text-slate-900 text-sm font-extrabold hidden sm:table-cell">{Number(pos.units).toFixed(2)}</td>
+                            <td className="py-3.5 px-2 text-right font-mono text-slate-900 text-sm font-extrabold hidden 2xl:table-cell">{Number(pos.units).toFixed(2)}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-slate-900 text-sm font-extrabold">${Number(pos.entry_price).toFixed(dec)}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-black text-sm font-black">
                               ${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}
                             </td>
-                            <td className="py-3.5 px-2 text-right font-mono text-slate-700 text-sm font-bold hidden md:table-cell">
+                            <td className="py-3.5 px-2 text-right font-mono text-slate-700 text-sm font-bold hidden 2xl:table-cell">
                               ${pos.trailing_stop ? Number(pos.trailing_stop).toFixed(dec) : '-'}
                             </td>
                             <td className={clsx("py-3.5 px-3 text-right font-mono text-sm font-extrabold", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
@@ -395,7 +400,7 @@ export default function UnifiedDashboard() {
                             </td>
                             <td className="py-3.5 pl-3 pr-6 align-middle">
                               <div className="flex flex-col items-center gap-1.5 w-full max-w-[140px] mx-auto">
-                                <PartialSellControl onSell={(pct) => handleClosePosition(pos.ticker, pct)} />
+                                <PartialSellControl onSell={(pct) => handleClosePosition(pos.ticker, pct)} isBreached={isBreached} />
                                 <div className="w-full">
                                   <PositionHealthBar 
                                     currentPrice={pos.current_price} 
@@ -413,8 +418,8 @@ export default function UnifiedDashboard() {
                   </tbody>
                 </table>
 
-                {/* Mobile Card View Fallback */}
-                <div className="flex flex-col md:hidden divide-y divide-slate-50">
+                {/* Mobile/Tablet Card View Fallback */}
+                <div className="flex flex-col xl:hidden divide-y divide-slate-50">
                   {livePositions.length === 0 ? (
                     <div className="py-12 text-center text-slate-600 text-sm font-bold bg-white">보유 포지션 없음</div>
                   ) : (
@@ -422,11 +427,14 @@ export default function UnifiedDashboard() {
                       const hasPnl = pos.unrealized_pl != null;
                       const isProfit = hasPnl && (pos.unrealized_pl ?? 0) >= 0;
                       const pnlPct = hasPnl ? (pos.unrealized_plpc ?? 0) : 0;
-                      const isHighTension = Math.abs(pnlPct) >= 5;
+                      const tsThreshold = pos.ts_threshold ?? (pos.current_price ?? 0);
+                      const isBreached = pos.current_price != null && pos.current_price < tsThreshold;
+                      const isHighTension = Math.abs(pnlPct) >= 5 || isBreached;
                       const dec = pos.isPenny ? 4 : 2;
+                      
                       return (
-                        <div key={pos.ticker} className={clsx("p-5 bg-white relative transition-colors", isHighTension ? (isProfit ? "bg-emerald-50/30 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 animate-[pulse_3s_ease-in-out_infinite]") : "")}>
-                          {isHighTension && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
+                        <div key={pos.ticker} className={clsx("p-5 bg-white relative transition-colors", isBreached ? "bg-rose-100/40 border-l-4 border-rose-600 animate-[pulse_1.5s_ease-in-out_infinite]" : isHighTension ? (isProfit ? "bg-emerald-50/30 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 animate-[pulse_3s_ease-in-out_infinite]") : "")}>
+                          {isHighTension && !isBreached && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
                           <div className="flex justify-between items-start mb-4">
                             <div>
                               <span className="text-lg font-black text-black tracking-tight">{pos.ticker}</span>
@@ -451,7 +459,7 @@ export default function UnifiedDashboard() {
                               <span className="font-black text-black text-sm mt-0.5">${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}</span>
                             </div>
                           </div>
-                          <PartialSellControl onSell={(pct) => handleClosePosition(pos.ticker, pct)} />
+                          <PartialSellControl onSell={(pct) => handleClosePosition(pos.ticker, pct)} isBreached={isBreached} />
                           <div className="mt-4 px-1">
                             <PositionHealthBar 
                               currentPrice={pos.current_price} 
@@ -470,66 +478,78 @@ export default function UnifiedDashboard() {
           </div>
 
           {/* ── RIGHT COLUMN: Risk & Analytics & Logs (Span 3) ── */}
-          <div className="xl:col-span-3 flex flex-col gap-5 min-w-0">
-            <RiskAnalyticsPanel 
-              history={slicedHistory} 
-              portfolioHistory={slicedPortfolioHistory} 
-              totalEquity={displayedAccount.total_assets}
-              availableCash={displayedAccount.cash_available}
-            />
-            <PositionAnalyticsPanel positions={livePositions} totalEquity={displayedAccount.total_assets} />
+          <div className="lg:col-span-12 xl:col-span-3 grid grid-cols-1 md:grid-cols-2 xl:flex xl:flex-col gap-5 min-w-0">
+            <div className="flex flex-col gap-5">
+              <RiskAnalyticsPanel 
+                history={slicedHistory} 
+                portfolioHistory={slicedPortfolioHistory} 
+                totalEquity={displayedAccount.total_assets}
+                availableCash={displayedAccount.cash_available}
+              />
+              <PositionAnalyticsPanel positions={livePositions} totalEquity={displayedAccount.total_assets} />
+            </div>
 
-            <div className="sfdc-card flex-1 flex flex-col min-h-[450px] max-h-[600px]">
-              <div className="sfdc-card-header">
-                <h2 className="text-sm font-black flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-slate-900" /> Recent Exits
-                </h2>
+            <div className="sfdc-card flex flex-col h-[500px]">
+              <div className="sfdc-card-header pb-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-black flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-slate-900" /> Recent Exits
+                  </h2>
+                </div>
               </div>
-              <div className="p-3 flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-white/50">
+              <div className="p-4 flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-slate-50/50">
                 {liveHistory.length === 0 ? (
-                  <div className="text-center py-10 text-slate-600 text-xs font-bold">기록 없음</div>
+                  <div className="text-center py-10 text-slate-500 text-sm font-bold border border-dashed border-slate-200 rounded-xl m-2">최근 청산 내역이 없습니다</div>
                 ) : (
-                  <div className="space-y-2 w-full">
+                  <div className="space-y-3 w-full">
                     {liveHistory.slice(0, 30).map((trade: PaperHistory, idx: number) => {
                       const isWin = Number(trade.profit_amt) >= 0;
+                      const reasonText = trade.exit_reason || 'MANUAL EXIT';
+                      
                       return (
                         <div
                           key={idx}
                           className={clsx(
-                            "p-2.5 rounded-lg flex justify-between items-center border transition-colors",
-                            isWin ? "bg-emerald-50/40 border-emerald-100 hover:bg-emerald-50/80" : "bg-rose-50/40 border-rose-100 hover:bg-rose-50/80"
+                            "group relative bg-white rounded-lg p-2.5 border transition-all overflow-hidden",
+                            isWin 
+                              ? "border-slate-200 hover:border-emerald-300 shadow-sm hover:shadow-md" 
+                              : "border-slate-200 hover:border-rose-300 shadow-sm hover:shadow-md"
                           )}
                         >
-                          <div>
-                            <div className="flex items-baseline gap-2">
-                              <span className="text-sm font-black text-slate-900 tracking-tight">{trade.ticker}</span>
-                              <span className="text-[10px] font-bold text-slate-500 font-mono">
-                                {trade.created_at ? new Date(trade.created_at).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }) : '-'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2 mt-1">
-                              {trade.exit_reason && (
-                                <span className="text-[9px] font-extrabold uppercase tracking-widest text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">
-                                  {trade.exit_reason}
+                          {/* 좌측 상태 바 (Accent Bar) */}
+                          <div className={clsx("absolute left-0 top-0 bottom-0 w-1 transition-colors", isWin ? "bg-emerald-500" : "bg-rose-500")} />
+
+                          <div className="flex justify-between items-center pl-1.5">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-black text-slate-900 tracking-tight">{trade.ticker}</span>
+                                <span className={clsx(
+                                  "text-[8.5px] font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded border",
+                                  isWin ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-rose-50 text-rose-700 border-rose-100"
+                                )}>
+                                  {reasonText}
                                 </span>
-                              )}
-                              <div className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-slate-500">
-                                <span title="Entry Price">E: ${trade.entry_price < 1 ? Number(trade.entry_price).toFixed(4) : Number(trade.entry_price).toFixed(2)}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] font-mono font-semibold text-slate-500">
+                                <span className="text-slate-400">E:</span>
+                                <span>${trade.entry_price < 1 ? Number(trade.entry_price).toFixed(4) : Number(trade.entry_price).toFixed(2)}</span>
                                 <span className="text-slate-300">→</span>
-                                <span title="Exit Price">X: ${trade.exit_price < 1 ? Number(trade.exit_price).toFixed(4) : Number(trade.exit_price).toFixed(2)}</span>
+                                <span className="text-slate-400">X:</span>
+                                <span>${trade.exit_price < 1 ? Number(trade.exit_price).toFixed(4) : Number(trade.exit_price).toFixed(2)}</span>
                               </div>
                             </div>
-                          </div>
-                          <div className="text-right flex flex-col items-end justify-center min-w-[70px]">
-                            <span className={clsx("font-mono text-sm font-black tracking-tight", isWin ? "text-emerald-700" : "text-rose-700")}>
-                              {isWin ? '+' : '-'}${Math.abs(Number(trade.profit_amt)).toFixed(2)}
-                            </span>
-                            <span className={clsx(
-                              "font-mono text-[10px] font-extrabold mt-0.5",
-                              isWin ? "text-emerald-600" : "text-rose-600"
-                            )}>
-                              {isWin ? '+' : ''}{Number(trade.pnl_pct).toFixed(2)}%
-                            </span>
+
+                            <div className="text-right flex flex-col items-end min-w-[70px]">
+                              <span className={clsx("font-mono text-sm font-black tracking-tight", isWin ? "text-emerald-600" : "text-rose-600")}>
+                                {isWin ? '+' : '-'}${Math.abs(Number(trade.profit_amt)).toFixed(2)}
+                              </span>
+                              <span className={clsx(
+                                "font-mono text-[10px] font-extrabold mt-0.5",
+                                isWin ? "text-emerald-500" : "text-rose-500"
+                              )}>
+                                {isWin ? '▲' : '▼'} {Math.abs(Number(trade.pnl_pct)).toFixed(2)}%
+                              </span>
+                            </div>
                           </div>
                         </div>
                       );

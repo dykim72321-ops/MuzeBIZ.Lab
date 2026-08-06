@@ -74,15 +74,8 @@ SCAN_MIN_DOLLAR_VOLUME = 5_000_000
 # 보류하여 데이터 공백(TS 누락)을 원천 차단하는 하이브리드 안전망 아키텍처 적용.
 SCAN_INTERVAL_SECONDS = 30 * 60
 
-# 하위 호환 — Paper Engine 내부 페니 상태머신 파라미터 (변경 금지)
+# yfinance 배치 다운로드 기간 (DNA 스코어링용 2개월 일봉)
 PENNY_DATA_LOOKBACK = "2mo"
-PENNY_TS_INIT_PCT = 0.90
-PENNY_BREAKEVEN_TRIGGER = 1.10
-PENNY_SCALE_OUT_RSI = 65
-PENNY_SCALE_OUT_PROFIT = 0.10
-PENNY_SCALE_OUT_RATIO = 0.50
-PENNY_TIGHT_TS_PCT = 0.95
-PENNY_RVOL_MIN = 1.2
 
 
 async def run_quant_scan_internal(
@@ -477,30 +470,27 @@ async def run_quant_scan_internal(
                 signal_type = "HOLD"
                 strength = "NORMAL"
 
-                # quant_engine.py calculate_advanced_signals()의 tier1/tier2/tier_penny와
-                # 정합시킨 컷오프 — 스캔 단계 라벨(Discord 알림·daily_discovery 표시)이
-                # 실시간 경로의 실제 매수 게이트(paper_engine.py dna_gate)와 어긋나면
-                # 관심종목으로는 등록됐지만 실제로는 절대 매수되지 않는 종목이 생긴다.
-                # (2026-07-17: 페니주 쓰레기 신호 차단을 위해 65 -> 80으로 상향된
-                # paper_engine.py dna_gate(penny)/quant_engine.py tier_penny와 동일하게 정합)
-                is_penny_item = price <= 1.0
-                if is_penny_item:
-                    if dna_score >= 80.0:
-                        signal_type = "BUY"
-                        strength = "STRONG"
-                    elif dna_score <= 40.0:
-                        signal_type = "SELL"
-                        strength = "STRONG"
-                else:
-                    if dna_score >= 80.0 and rvol > 1.0:
-                        signal_type = "BUY"
-                        strength = "STRONG"
-                    elif dna_score >= 75.0 and rvol > 1.5:
-                        signal_type = "BUY"
-                        strength = "NORMAL"
-                    elif dna_score <= 40.0:
-                        signal_type = "SELL"
-                        strength = "STRONG"
+                # quant_engine.py calculate_advanced_signals()의 tier1/tier2와 정합시킨
+                # 컷오프 — 스캔 단계 라벨(Discord 알림·daily_discovery 표시)이 실시간
+                # 경로의 실제 매수 게이트(paper_engine.py dna_gate=75)와 어긋나면 관심종목
+                # 으로는 등록됐지만 실제로는 절대 매수되지 않는 종목이 생긴다.
+                # 2026-07-28부로 $1 이하 페니는 스캔 대상에서 완전히 제외됐으므로(상단
+                # SCAN_MIN_PRICE 참고) tier_penny(DNA≥65~80) 분기는 더 이상 두지 않는다
+                # — 예전엔 이 분기가 남아있어, 상단의 Alpaca 스냅샷 가격 필터를 어떻게든
+                # 통과한 sub-$1 종목(예: PRSO, 저유동성 탓에 스냅샷 daily_bar와 yfinance
+                # 실가가 어긋난 경우)이 여기서 "penny" 취급을 받아 STRONG BUY로 등록되는
+                # 구멍이 있었다(2026-08-05 실사고: PRSO $0.70에 매수 체결). 모든 종목을
+                # 동일한(정상가) 기준으로만 채점한다 — sub-$1/50 초과 종목은 아래
+                # 등록 단계의 하드 가격 게이트에서 최종적으로 걸러진다.
+                if dna_score >= 80.0 and rvol > 1.0:
+                    signal_type = "BUY"
+                    strength = "STRONG"
+                elif dna_score >= 75.0 and rvol > 1.5:
+                    signal_type = "BUY"
+                    strength = "NORMAL"
+                elif dna_score <= 40.0:
+                    signal_type = "SELL"
+                    strength = "STRONG"
 
                 results.append(
                     {
@@ -540,10 +530,21 @@ async def run_quant_scan_internal(
     auto_registered: List[str] = []
     if supabase and results:
         for item in results[:top_n]:
-            # paper_engine.py dna_gate(페니 80 / 일반 75)와 정합 — 이보다 낮은 DNA로
-            # watchlist에 등록해봤자 실시간 경로의 실제 매수 게이트를 절대 통과할 수 없다.
-            min_dna = 80.0 if item.get("price", 0) <= 1.0 else 75.0
-            if item.get("dna_score", 0) < min_dna:
+            # 하드 가격 게이트 — 상단의 Alpaca 스냅샷 기반 후보 필터와 별개로, 여기서
+            # DNA 스코어링에 실제로 쓰인 yfinance 가격 기준으로 한 번 더 검증한다.
+            # 저유동성 종목은 두 가격 소스가 어긋날 수 있어(2026-08-05 PRSO 실사고:
+            # 상단 필터는 통과했지만 yfinance 실가는 $0.70) 상단 필터만 믿으면 sub-$1/
+            # $50 초과 종목이 watchlist까지 새어 들어갈 수 있다.
+            price_val = item.get("price", 0)
+            if not (SCAN_MIN_PRICE < price_val <= max_price):
+                print(
+                    f"⛔ [Scan] {item['ticker']} 등록 차단 — 가격 ${price_val:.4f}이 "
+                    f"허용 범위(${SCAN_MIN_PRICE}~${max_price}) 밖"
+                )
+                continue
+            # paper_engine.py dna_gate(75)와 정합 — 이보다 낮은 DNA로 watchlist에
+            # 등록해봤자 실시간 경로의 실제 매수 게이트를 절대 통과할 수 없다.
+            if item.get("dna_score", 0) < 75.0:
                 continue
             try:
                 payload = {

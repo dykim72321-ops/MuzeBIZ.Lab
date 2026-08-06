@@ -314,16 +314,15 @@ export default function ReportsPage() {
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="text-xs font-bold font-mono text-slate-500 uppercase tracking-wider border-b border-slate-200/80 bg-slate-50/80 whitespace-nowrap">
-                          <th className="py-3.5 px-4 text-left w-[12%]">기간</th>
-                          <th className="py-3.5 px-4 text-right w-[10%]">거래건수</th>
-                          <th className="py-3.5 px-4 text-right w-[14%]">총 수익/손실</th>
-                          <th className="py-3.5 px-4 text-right w-[12%]">순이익</th>
-                          <th className="py-3.5 px-4 text-right w-[12%]">평균 손익</th>
-                          <th className="py-3.5 px-4 text-right w-[18%]" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률)">
+                          <th className="py-3.5 px-4 text-left w-[14%]">기간</th>
+                          <th className="py-3.5 px-4 text-right w-[12%]">거래건수</th>
+                          <th className="py-3.5 px-4 text-right w-[16%]">순이익</th>
+                          <th className="py-3.5 px-4 text-right w-[14%]">평균 손익</th>
+                          <th className="py-3.5 px-4 text-right w-[20%]" title="체결 건수 승률 (괄호: Scale-Out 병합 포지션 승률)">
                             승률(포지션)
                           </th>
                           <th className="py-3.5 px-4 text-right w-[10%]">PF</th>
-                          <th className="py-3.5 px-4 text-right w-[12%]">MDD(계좌)</th>
+                          <th className="py-3.5 px-4 text-right w-[14%]">MDD(계좌)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -351,15 +350,7 @@ export default function ReportsPage() {
                                 <span className="text-xs font-medium text-slate-400 ml-1">({posTrades})</span>
                               </td>
 
-                              {/* 3. 총 수익/손실 (Gross) */}
-                              <td className="py-4 px-4 text-right font-mono text-xs">
-                                <div className="flex flex-col items-end">
-                                  <span className="text-emerald-600 font-bold">+${row.gross_profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                  <span className="text-rose-600 font-bold">-${row.gross_loss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                              </td>
-
-                              {/* 4. 순이익 (Net Profit) */}
+                              {/* 3. 순이익 (Net Profit) - Alpaca 실측값 우선 */}
                               <td className="py-4 px-4 text-right">
                                 <span className={clsx(
                                   "text-base font-black font-mono tracking-tight",
@@ -369,14 +360,14 @@ export default function ReportsPage() {
                                 </span>
                               </td>
 
-                              {/* 5. 평균 손익 (Avg PnL) */}
+                              {/* 4. 평균 손익 (Avg PnL) */}
                               <td className="py-4 px-4 text-right font-mono">
                                 <span className={clsx("text-sm font-bold", avgPnl >= 0 ? "text-emerald-600" : "text-rose-600")}>
                                   {avgPnl >= 0 ? '+' : '-'}${Math.abs(avgPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </td>
 
-                              {/* 6. 체결승률(포지션) (Win Rate) */}
+                              {/* 5. 체결승률(포지션) (Win Rate) */}
                               <td className="py-4 px-4 text-right font-mono">
                                 <span className={clsx("text-sm font-bold", row.win_rate >= 50 ? "text-slate-900" : "text-rose-600")}>
                                   {row.win_rate.toFixed(1)}%
@@ -386,14 +377,14 @@ export default function ReportsPage() {
                                 </span>
                               </td>
 
-                              {/* 7. PF (Profit Factor) */}
+                              {/* 6. PF (Profit Factor) */}
                               <td className="py-4 px-4 text-right font-mono">
                                 <span className={clsx("text-sm font-bold", row.profit_factor >= 1.0 ? "text-slate-900" : "text-slate-600")}>
                                   {row.profit_factor >= 99.0 ? '99.0+' : row.profit_factor.toFixed(2)}
                                 </span>
                               </td>
 
-                              {/* 8. 기간(계좌) MDD */}
+                              {/* 7. 기간(계좌) MDD */}
                               <td className="py-4 px-4 text-right font-mono">
                                 <span className="text-sm font-bold text-rose-600">
                                   {periodMdd.toFixed(1)}%

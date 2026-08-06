@@ -58,11 +58,11 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
         <PieChart className="w-4 h-4 text-cyan-600" />
       </div>
 
-      <div className="p-4 space-y-4">
-        {/* Weight Bar Chart */}
-        <div>
-          <span className="text-[10px] font-black text-blue-950 uppercase tracking-widest block mb-2">포트폴리오 비중 (%)</span>
-          <div className="h-44 w-full relative">
+      <div className="p-5 flex flex-col gap-6">
+        {/* 상단: 도넛 차트 & 범례 */}
+        <div className="flex flex-col items-center gap-6 w-full">
+          {/* 차트 영역 */}
+          <div className="w-full h-48 relative flex-shrink-0">
             <ResponsiveContainer width="100%" height="100%">
               <RechartsPieChart>
                 <Pie
@@ -71,9 +71,9 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
                   nameKey="ticker"
                   cx="50%"
                   cy="50%"
-                  innerRadius={50}
-                  outerRadius={75}
-                  paddingAngle={2}
+                  innerRadius={65}
+                  outerRadius={85}
+                  paddingAngle={3}
                   stroke="none"
                 >
                   {weightData.map((_, index) => (
@@ -81,44 +81,61 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: '#ffffff', border: '2px solid #bfdbfe', borderRadius: '4px', fontSize: '11px', color: '#000000', fontWeight: 'bold' }}
+                  contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px', color: '#0f172a', fontWeight: 'bold', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
                   formatter={(v: unknown, name: unknown) => [`${Number(v ?? 0).toFixed(2)}%`, String(name)]}
                 />
               </RechartsPieChart>
             </ResponsiveContainer>
+            {/* 차트 중앙 텍스트 */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-[10px] font-extrabold text-slate-400 tracking-widest uppercase">Positions</span>
+              <span className="text-xl font-black text-slate-800">{positions.length}</span>
+            </div>
           </div>
 
-          {/* Custom Scrollable Legend */}
-          <div className="grid grid-cols-3 gap-x-2 gap-y-2 mt-4 max-h-24 overflow-y-auto pr-1 custom-scrollbar">
+          {/* 범례 (Legend) - 스크롤 없이 가로 폭을 넓게 써서 하단에 전부 표시 */}
+          <div className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-3 gap-x-2 gap-y-2">
             {weightData.map((entry, index) => (
-              <div key={entry.ticker} className="flex items-center gap-1.5 overflow-hidden">
-                <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                <span className="text-[10px] font-bold text-blue-950 truncate" title={`${entry.ticker} (${entry.weight}%)`}>
-                  {entry.ticker} <span className="text-blue-700">{entry.weight}%</span>
+              <div key={entry.ticker} className="flex items-center justify-between gap-1.5 bg-slate-50/50 px-2 py-1.5 rounded-lg border border-slate-100 hover:border-slate-200 transition-colors">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="w-2 h-2 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                  <span className="text-[11px] font-black text-slate-800 truncate" title={entry.ticker}>
+                    {entry.ticker}
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold text-slate-500 font-mono shrink-0">
+                  {entry.weight}%
                 </span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* P&L Summary */}
-        <div className="pt-3 border-t-2 border-blue-100 grid grid-cols-2 gap-3">
-          <div className="bg-emerald-50 border-2 border-emerald-300 rounded-md p-3">
-            <span className="text-[9px] font-black text-emerald-800 uppercase tracking-widest block mb-1">수익 포지션</span>
-            <span className="text-base font-black text-emerald-800 font-mono block">{pnlSummary.profitCount}개</span>
-            <span className="text-xs font-black text-emerald-700 font-mono">+${pnlSummary.totalProfit.toFixed(2)}</span>
+        {/* 하단: P&L Summary (디자인 고급화) */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl p-4 shadow-sm border border-emerald-100 relative overflow-hidden">
+            <div className="absolute right-0 top-0 w-16 h-16 bg-emerald-200/30 rounded-bl-full -mr-4 -mt-4" />
+            <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest block mb-2 opacity-80">수익 포지션</span>
+            <div className="flex items-end justify-between">
+              <span className="text-xl font-black text-emerald-900 font-mono">{pnlSummary.profitCount}개</span>
+              <span className="text-sm font-black text-emerald-600 font-mono">+{pnlSummary.totalProfit.toFixed(2)}$</span>
+            </div>
           </div>
+          
           <div className={clsx(
-            'border-2 rounded-md p-3',
-            pnlSummary.lossCount > 0 ? 'bg-rose-50 border-rose-300' : 'bg-blue-50 border-blue-200'
+            'rounded-xl p-4 shadow-sm border relative overflow-hidden',
+            pnlSummary.lossCount > 0 ? 'bg-gradient-to-br from-rose-50 to-rose-100/50 border-rose-100' : 'bg-gradient-to-br from-slate-50 to-slate-100/50 border-slate-100'
           )}>
-            <span className={clsx('text-[9px] font-black uppercase tracking-widest block mb-1', pnlSummary.lossCount > 0 ? 'text-rose-800' : 'text-blue-950')}>
+            <div className={clsx("absolute right-0 top-0 w-16 h-16 rounded-bl-full -mr-4 -mt-4", pnlSummary.lossCount > 0 ? "bg-rose-200/30" : "bg-slate-200/30")} />
+            <span className={clsx('text-[10px] font-black uppercase tracking-widest block mb-2 opacity-80', pnlSummary.lossCount > 0 ? 'text-rose-700' : 'text-slate-600')}>
               손실 포지션
             </span>
-            <span className={clsx('text-base font-black font-mono block', pnlSummary.lossCount > 0 ? 'text-rose-800' : 'text-blue-950')}>{pnlSummary.lossCount}개</span>
-            <span className={clsx('text-xs font-black font-mono', pnlSummary.lossCount > 0 ? 'text-rose-700' : 'text-blue-900')}>
-              {pnlSummary.totalLoss !== 0 ? `$${pnlSummary.totalLoss.toFixed(2)}` : '$0.00'}
-            </span>
+            <div className="flex items-end justify-between">
+              <span className={clsx('text-xl font-black font-mono', pnlSummary.lossCount > 0 ? 'text-rose-900' : 'text-slate-800')}>{pnlSummary.lossCount}개</span>
+              <span className={clsx('text-sm font-black font-mono', pnlSummary.lossCount > 0 ? 'text-rose-600' : 'text-slate-500')}>
+                {pnlSummary.totalLoss !== 0 ? `${pnlSummary.totalLoss.toFixed(2)}$` : '0.00$'}
+              </span>
+            </div>
           </div>
         </div>
       </div>

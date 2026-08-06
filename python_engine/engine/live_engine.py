@@ -15,6 +15,7 @@ import asyncio
 import math
 import os
 import time
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from alpaca.common.exceptions import APIError
@@ -140,6 +141,7 @@ class LiveTradingManager(PaperTradingManager):
         """
         side_str = "BUY" if side == OrderSide.BUY else "SELL"
         self.last_order_fail_reason = None
+        adopted_order = None
         try:
             # 시장이 닫혀 있으면 TimeInForce.DAY 시장가 주문은 개장 전까지 체결되지 않아
             # 아래 폴링이 무조건 타임아웃 → 자동 취소로 이어진다. 제출 자체를 생략하고
@@ -211,6 +213,18 @@ class LiveTradingManager(PaperTradingManager):
                     )
                     order_qty = actual_qty
 
+                # 예전에는 이 시점에 기존 미체결 주문을 무조건 취소하고 새로 냈다 —
+                # position_ts_sweeper가 10초마다 재시도하는 구조와 맞물려, 방금 낸
+                # 시장가 주문이 체결 직전이어도 폴링 타임아웃마다 취소되고 재제출되길
+                # 반복해 "취소 확인~다음 재시도" 사이 수십 초씩 그 종목에 매도 주문이
+                # 아예 없는 무방비 공백이 반복 발생했다 (2026-08-06 FIG/ELAN 사고:
+                # 개장 직후 체결 지연 구간에서 9분간 취소·재제출만 반복하다 손실
+                # 확대, TS 이탈가 대비 각각 -8.4%p/-4.3%p 추가 손실). 시장가 주문은
+                # 취소·재제출한다고 더 나은 가격을 받는 게 아니므로, 신선한 매도
+                # 주문이 이미 떠 있으면 취소하지 않고 그대로 이어받아 체결을
+                # 기다린다 — 진짜로 오래(STALE_OPEN_ORDER_SEC 이상) 고착된 주문만
+                # 취소 대상으로 남긴다.
+                STALE_OPEN_ORDER_SEC = 60.0
                 try:
                     open_req = GetOrdersRequest(
                         status=QueryOrderStatus.OPEN, symbols=[ticker]
@@ -218,8 +232,28 @@ class LiveTradingManager(PaperTradingManager):
                     open_orders = await asyncio.to_thread(
                         self.alpaca.get_orders, filter=open_req
                     )
+                    now_utc = datetime.now(timezone.utc)
                     pending_cancel_ids = []
                     for oo in open_orders:
+                        submitted_at = getattr(oo, "submitted_at", None)
+                        age = (
+                            (
+                                now_utc - submitted_at.astimezone(timezone.utc)
+                            ).total_seconds()
+                            if submitted_at
+                            else STALE_OPEN_ORDER_SEC
+                        )
+                        if (
+                            adopted_order is None
+                            and oo.side == OrderSide.SELL
+                            and age < STALE_OPEN_ORDER_SEC
+                        ):
+                            print(
+                                f"↩️ [{ticker}] 신선한 기존 매도 주문 이어받음 "
+                                f"(order_id={oo.id}, {age:.1f}초 경과) — 재제출 없이 체결 대기"
+                            )
+                            adopted_order = oo
+                            continue
                         print(
                             f"⚠️ [{ticker}] 기존 미체결 주문이 주식을 락(Lock)하고 있어 취소 시도 (order_id={oo.id})"
                         )
@@ -265,30 +299,36 @@ class LiveTradingManager(PaperTradingManager):
                 except Exception as clear_err:
                     print(f"⚠️ [{ticker}] 기존 미체결 주문 정리 중 에러: {clear_err}")
 
-            if order_kind == "LIMIT":
-                if limit_price is None or limit_price <= 0:
-                    print(
-                        f"⛔ [{ticker}] {side_str} 지정가 주문 차단 — limit_price 누락/무효"
-                    )
-                    self.last_order_fail_reason = "MISSING_LIMIT_PRICE"
-                    return None
-                req = LimitOrderRequest(
-                    symbol=ticker,
-                    qty=order_qty,
-                    side=side,
-                    time_in_force=TimeInForce.DAY,
-                    limit_price=round(limit_price, 4),
-                )
+            if adopted_order is not None:
+                # 위에서 취소하지 않고 이어받기로 한 기존 매도 주문 — 새로 제출하지
+                # 않고 그 주문을 그대로 폴링 대상으로 삼는다. 이미 원래 제출 시점의
+                # _register_own_order() 호출로 자체 주문으로 기록돼 있다.
+                order = adopted_order
             else:
-                req = MarketOrderRequest(
-                    symbol=ticker,
-                    qty=order_qty,
-                    side=side,
-                    time_in_force=TimeInForce.DAY,
-                )
-            order = await asyncio.to_thread(self.alpaca.submit_order, req)
-            # 스트림이 이 주문 체결을 "외부 매도"로 오인해 이중 회계하지 않도록 기록
-            self._register_own_order(order.id)
+                if order_kind == "LIMIT":
+                    if limit_price is None or limit_price <= 0:
+                        print(
+                            f"⛔ [{ticker}] {side_str} 지정가 주문 차단 — limit_price 누락/무효"
+                        )
+                        self.last_order_fail_reason = "MISSING_LIMIT_PRICE"
+                        return None
+                    req = LimitOrderRequest(
+                        symbol=ticker,
+                        qty=order_qty,
+                        side=side,
+                        time_in_force=TimeInForce.DAY,
+                        limit_price=round(limit_price, 4),
+                    )
+                else:
+                    req = MarketOrderRequest(
+                        symbol=ticker,
+                        qty=order_qty,
+                        side=side,
+                        time_in_force=TimeInForce.DAY,
+                    )
+                order = await asyncio.to_thread(self.alpaca.submit_order, req)
+                # 스트림이 이 주문 체결을 "외부 매도"로 오인해 이중 회계하지 않도록 기록
+                self._register_own_order(order.id)
 
             poll_timeout = FILL_POLL_TIMEOUT_SEC
             elapsed = 0.0
@@ -302,6 +342,34 @@ class LiveTradingManager(PaperTradingManager):
                 order = await asyncio.to_thread(self.alpaca.get_order_by_id, order.id)
 
             if order.status not in _FILLED_STATUSES:
+                # 시장가 매도 주문은 폴링 타임아웃(5초)이 지났다고 곧바로 취소하지
+                # 않는다 — 취소해도 재제출한 새 주문이 더 나은 가격/속도를 받는 게
+                # 아니라 호가창에서의 대기 시간만 리셋될 뿐이고(2026-08-06 FIG/ELAN
+                # 사고 원인), 다음 사이클이 위의 "신선한 기존 주문 이어받기" 로직으로
+                # 이 주문을 그대로 다시 기다린다. 진짜로 STALE_OPEN_ORDER_SEC 이상
+                # 안 풀린 경우에만 고착으로 간주해 취소한다. LIMIT/BUY 주문은 기존
+                # 동작(타임아웃 즉시 취소) 그대로 유지 — LIMIT은 무기한 대기가
+                # 의도와 다르고, BUY는 애초에 이어받기 대상이 아니다.
+                order_age = STALE_OPEN_ORDER_SEC if side == OrderSide.SELL else 0.0
+                if side == OrderSide.SELL and order_kind != "LIMIT":
+                    order_submitted_at = getattr(order, "submitted_at", None)
+                    order_age = (
+                        (
+                            datetime.now(timezone.utc)
+                            - order_submitted_at.astimezone(timezone.utc)
+                        ).total_seconds()
+                        if order_submitted_at
+                        else STALE_OPEN_ORDER_SEC
+                    )
+                    if order_age < STALE_OPEN_ORDER_SEC:
+                        print(
+                            f"⏳ [{ticker}] {side_str} 미체결이지만 아직 신선함 "
+                            f"({order_age:.1f}초 경과, order_id={order.id}) — 취소하지 "
+                            f"않고 다음 사이클에 이어받음"
+                        )
+                        self.last_order_fail_reason = "PENDING_FRESH"
+                        return None
+
                 # 타임아웃(부분체결 포함) 또는 사망 상태 — 잔여 미체결분이 나중에
                 # 조용히 체결되어 DB에 안 잡히는 유령 실보유가 되지 않도록 먼저
                 # 취소한다. 취소 확정 후 재조회한 filled_qty가 곧 이 주문의 최종
