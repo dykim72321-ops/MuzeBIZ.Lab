@@ -222,14 +222,12 @@ async def compute_improvement_status(supabase) -> dict:
         if not sub_trades:
             return 0.0, 0.0, 0.0, 0
 
-        # 포지션 그룹핑 (Scale-Out 이중 렌더링 방지)
+        # 포지션 그룹핑 (Scale-Out 이중 렌더링 방지) — pos_wr뿐 아니라 Expectancy/Sortino도
+        # 반드시 이 그룹 단위(포지션의 합산 손익)로 계산해야 한다. 원본 청산 행(Scale-Out
+        # 부분매도 + 최종 청산) 단위로 계산하면, 부분익절 후 결국 손실로 마감한 포지션 1건이
+        # "승 1건 + 패 1건"으로 이중 집계되어 pos_wr과 다른 표본 단위의 Expectancy가 나오고,
+        # 이 값이 자동 롤백 킬스위치(expectancy<=0)에 그대로 쓰여 오판정을 유발할 수 있다.
         grouped = {}
-        total_profit = 0.0
-        total_loss = 0.0
-        wins = 0
-        losses = 0
-        loss_amts = []
-
         for t in sub_trades:
             ticker = t.get("ticker", "unknown")
             entry_price = float(t.get("entry_price") or 0.0)
@@ -239,26 +237,23 @@ async def compute_improvement_status(supabase) -> dict:
             bucket = grouped.setdefault(key, {"total_pnl": 0.0})
             bucket["total_pnl"] += profit
 
-            if profit > 0:
-                wins += 1
-                total_profit += profit
-            elif profit < 0:
-                losses += 1
-                total_loss += abs(profit)
-                loss_amts.append(abs(profit))
-
         pos_trades = len(grouped)
-        pos_wins = sum(1 for b in grouped.values() if b["total_pnl"] > 0)
-        pos_wr = (pos_wins / pos_trades * 100.0) if pos_trades > 0 else 0.0
+        pos_pnls = [b["total_pnl"] for b in grouped.values()]
+        wins = sum(1 for pnl in pos_pnls if pnl > 0)
+        losses = sum(1 for pnl in pos_pnls if pnl < 0)
+        pos_wr = (wins / pos_trades * 100.0) if pos_trades > 0 else 0.0
 
-        n_all = len(sub_trades)
-        prob_win = wins / n_all if n_all > 0 else 0.0
+        total_profit = sum(pnl for pnl in pos_pnls if pnl > 0)
+        total_loss = sum(-pnl for pnl in pos_pnls if pnl < 0)
+        loss_amts = [-pnl for pnl in pos_pnls if pnl < 0]
+
+        prob_win = wins / pos_trades if pos_trades > 0 else 0.0
         avg_w = total_profit / wins if wins > 0 else 0.0
         avg_l = total_loss / losses if losses > 0 else 0.0
         expectancy = (prob_win * avg_w) - ((1.0 - prob_win) * avg_l)
 
         net_pnl = total_profit - total_loss
-        avg_pnl = net_pnl / n_all if n_all > 0 else 0.0
+        avg_pnl = net_pnl / pos_trades if pos_trades > 0 else 0.0
         downside_std = float(np.std(loss_amts)) if loss_amts else 0.0
         sortino = (
             (avg_pnl / downside_std)
@@ -869,7 +864,7 @@ async def evaluate_checklist():
     print("🔄 [Checklist Eval] 자동 검증을 시작합니다...")
     res = await asyncio.to_thread(
         supabase.table("paper_history")
-        .select("pnl_pct,profit_amt,closed_at,ticker,exit_reason")
+        .select("pnl_pct,profit_amt,closed_at,ticker,exit_reason,entry_price")
         .order("closed_at", desc=False)
         .execute
     )
@@ -884,7 +879,10 @@ async def evaluate_checklist():
         )
     days_passed = (now_utc - first_trade_dt).days if first_trade_dt else 0
     total_trades = stats.get("total_trades", 0)
-    win_rate = stats.get("win_rate", 0)
+    # Scale-Out 50% 부분매도가 승리 체결 행을 따로 만들어 체결 단위 win_rate를 부풀릴 수
+    # 있으므로, 실계좌 전환 게이트는 포지션(ticker+entry_price 그룹) 단위 승률을 쓴다
+    # — ReportsPage.tsx/spread_gate_readout.py가 이미 pos_win_rate를 정확한 지표로 채택.
+    win_rate = stats.get("pos_win_rate", 0)
     profit_factor = stats.get("profit_factor", 0)
     mdd = stats.get("mdd", 0)
 
@@ -946,8 +944,10 @@ async def evaluate_checklist():
         "Discord Webhook 설정됨" if alerting_verified else "Discord Webhook 누락"
     )
 
-    is_armed = sys_settings.get("is_armed", False)
-    kill_switch_note = "현재 ARMED 상태" if is_armed else "DISARMED 상태"
+    # kill_switch_verified("비상 정지 ARM/DISARM·전량 청산 절차 리허설 완료")는 ARMED/DISARMED
+    # 현재 상태만으로는 리허설을 실제로 수행했는지 알 수 없어 자동 판정 대상에서 제외한다 —
+    # 상수 True로 항상 통과 처리하면 리허설을 한 번도 안 해도 영구히 체크된 것으로 보인다.
+    # is_automated=false로 전환해(마이그레이션 참고) 사용자가 직접 리허설 후 수동 체크하도록 한다.
 
     # (item_key, 통과 여부, 안내 문구)
     conditions = [
@@ -1000,11 +1000,6 @@ async def evaluate_checklist():
             "live_account_funded",
             live_account_funded,
             live_account_note,
-        ),
-        (
-            "kill_switch_verified",
-            True,
-            kill_switch_note,
         ),
     ]
 
