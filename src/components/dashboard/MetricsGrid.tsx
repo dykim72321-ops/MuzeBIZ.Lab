@@ -34,8 +34,8 @@ const CompactGauge = React.memo(function CompactGauge({
   const strokeDashoffset = 100 - pct;
 
   return (
-    <div className="flex items-center gap-3.5" title={tooltip ?? subtitle}>
-      <div className="relative w-14 h-14 sm:w-16 sm:h-16 flex-shrink-0">
+    <div className="flex flex-col items-center justify-center gap-1.5" title={tooltip ?? subtitle}>
+      <div className="relative w-12 h-12 flex-shrink-0">
         <svg className="w-full h-full transform -rotate-90 drop-shadow-sm" viewBox="0 0 36 36">
           <circle cx="18" cy="18" r="16" fill="none" className="stroke-slate-200" strokeWidth="4" />
           <circle
@@ -45,15 +45,15 @@ const CompactGauge = React.memo(function CompactGauge({
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-xs sm:text-sm font-black text-slate-900 tabular-nums">{Math.round(pct)}%</span>
+          <span className="text-[11px] font-black text-slate-900 tabular-nums">{Math.round(pct)}%</span>
         </div>
       </div>
-      <div className="flex flex-col justify-center overflow-hidden">
-        <span className="text-xs font-black text-slate-900 uppercase tracking-widest font-mono w-full block whitespace-nowrap text-ellipsis">
+      <div className="flex flex-col items-center justify-center min-w-0 w-full overflow-hidden text-center">
+        <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight font-mono block truncate w-full" title={title}>
           {title}
         </span>
         {subtitle && (
-          <span className="text-[10px] font-extrabold text-slate-500 block font-mono mt-0.5 leading-tight whitespace-nowrap text-ellipsis">{subtitle}</span>
+          <span className="text-[10px] font-extrabold text-slate-500 block font-mono leading-tight truncate w-full" title={subtitle}>{subtitle}</span>
         )}
       </div>
     </div>
@@ -202,23 +202,23 @@ export const MetricsGrid = React.memo(function MetricsGrid({
       </div>
 
       {/* 4. Mini Gauges (Win Rate & Concentration) */}
-      <div className="col-span-2 sm:col-span-1 xl:col-span-1 bg-white border border-slate-100 rounded-2xl p-4 flex items-center justify-around shadow-sm hover:shadow-md hover:border-slate-200 transition-all min-w-0">
-        <div className="flex-1 min-w-0 pr-2">
+      <div className="col-span-2 sm:col-span-1 xl:col-span-1 bg-white border border-slate-100 rounded-2xl p-4 flex items-center justify-center gap-2 shadow-sm hover:shadow-md hover:border-slate-200 transition-all min-w-0">
+        <div className="flex-1 min-w-0 flex justify-center">
           <CompactGauge
             title="Win Rate"
             value={hasTradeData ? displayedWinRate : 0}
             dialColor="#2563eb"
-            subtitle={hasTradeData ? `${displayedTotalTrades}건 기준` : '거래 없음'}
+            subtitle={hasTradeData ? `${displayedTotalTrades}건` : '거래 없음'}
             tooltip="Alpaca 실체결(closed-trades) FIFO 매칭 기준 — 성과 리포트 페이지의 승률(엔진 exit_reason 로그 기준)과는 산출 방식이 달라 수치가 다를 수 있습니다."
           />
         </div>
-        <div className="w-[1px] h-12 bg-slate-100 mx-2 flex-shrink-0" />
-        <div className="flex-1 min-w-0 pl-2">
+        <div className="w-[1px] h-10 bg-slate-100 mx-1 flex-shrink-0" />
+        <div className="flex-1 min-w-0 flex justify-center">
           <CompactGauge
             title="Concentr"
             value={concentrationPct}
             dialColor={concDialColor}
-            subtitle={`$${investedCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })} 투입`}
+            subtitle={`$${investedCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           />
         </div>
       </div>

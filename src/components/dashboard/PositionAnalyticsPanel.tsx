@@ -93,17 +93,17 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
             </div>
           </div>
 
-          {/* 범례 (Legend) - 스크롤 없이 가로 폭을 넓게 써서 하단에 전부 표시 */}
-          <div className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-3 gap-x-2 gap-y-2">
+          {/* 범례 (Legend) - 2열로 배치하여 티커와 비중 텍스트가 잘리지 않도록 함 */}
+          <div className="w-full grid grid-cols-2 gap-x-2 gap-y-2">
             {weightData.map((entry, index) => (
-              <div key={entry.ticker} className="flex items-center justify-between gap-1.5 bg-slate-50/50 px-2 py-1.5 rounded-lg border border-slate-100 hover:border-slate-200 transition-colors">
-                <div className="flex items-center gap-1.5 min-w-0">
+              <div key={entry.ticker} className="flex items-center justify-between gap-1 bg-slate-50/60 px-2 py-1.5 rounded-lg border border-slate-100 hover:border-slate-200 transition-colors min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
                   <div className="w-2 h-2 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
                   <span className="text-[11px] font-black text-slate-800 truncate" title={entry.ticker}>
                     {entry.ticker}
                   </span>
                 </div>
-                <span className="text-[10px] font-bold text-slate-500 font-mono shrink-0">
+                <span className="text-[10px] font-bold text-slate-500 font-mono shrink-0 ml-1">
                   {entry.weight}%
                 </span>
               </div>
@@ -111,28 +111,28 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
           </div>
         </div>
 
-        {/* 하단: P&L Summary (디자인 고급화) */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl p-4 shadow-sm border border-emerald-100 relative overflow-hidden">
+        {/* 하단: P&L Summary */}
+        <div className="flex flex-col gap-3">
+          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl p-3.5 shadow-sm border border-emerald-100 relative overflow-hidden">
             <div className="absolute right-0 top-0 w-16 h-16 bg-emerald-200/30 rounded-bl-full -mr-4 -mt-4" />
-            <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest block mb-2 opacity-80">수익 포지션</span>
-            <div className="flex items-end justify-between">
-              <span className="text-xl font-black text-emerald-900 font-mono">{pnlSummary.profitCount}개</span>
-              <span className="text-sm font-black text-emerald-600 font-mono">+{pnlSummary.totalProfit.toFixed(2)}$</span>
+            <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest block mb-1 opacity-80 whitespace-nowrap">수익 포지션</span>
+            <div className="flex items-baseline justify-between gap-1 flex-wrap">
+              <span className="text-lg sm:text-xl font-black text-emerald-900 font-mono whitespace-nowrap">{pnlSummary.profitCount}개</span>
+              <span className="text-xs sm:text-sm font-black text-emerald-600 font-mono whitespace-nowrap">+{pnlSummary.totalProfit.toFixed(2)}$</span>
             </div>
           </div>
           
           <div className={clsx(
-            'rounded-xl p-4 shadow-sm border relative overflow-hidden',
+            'rounded-xl p-3.5 shadow-sm border relative overflow-hidden',
             pnlSummary.lossCount > 0 ? 'bg-gradient-to-br from-rose-50 to-rose-100/50 border-rose-100' : 'bg-gradient-to-br from-slate-50 to-slate-100/50 border-slate-100'
           )}>
             <div className={clsx("absolute right-0 top-0 w-16 h-16 rounded-bl-full -mr-4 -mt-4", pnlSummary.lossCount > 0 ? "bg-rose-200/30" : "bg-slate-200/30")} />
-            <span className={clsx('text-[10px] font-black uppercase tracking-widest block mb-2 opacity-80', pnlSummary.lossCount > 0 ? 'text-rose-700' : 'text-slate-600')}>
+            <span className={clsx('text-[10px] font-black uppercase tracking-widest block mb-1 opacity-80 whitespace-nowrap', pnlSummary.lossCount > 0 ? 'text-rose-700' : 'text-slate-600')}>
               손실 포지션
             </span>
-            <div className="flex items-end justify-between">
-              <span className={clsx('text-xl font-black font-mono', pnlSummary.lossCount > 0 ? 'text-rose-900' : 'text-slate-800')}>{pnlSummary.lossCount}개</span>
-              <span className={clsx('text-sm font-black font-mono', pnlSummary.lossCount > 0 ? 'text-rose-600' : 'text-slate-500')}>
+            <div className="flex items-baseline justify-between gap-1 flex-wrap">
+              <span className={clsx('text-lg sm:text-xl font-black font-mono whitespace-nowrap', pnlSummary.lossCount > 0 ? 'text-rose-900' : 'text-slate-800')}>{pnlSummary.lossCount}개</span>
+              <span className={clsx('text-xs sm:text-sm font-black font-mono whitespace-nowrap', pnlSummary.lossCount > 0 ? 'text-rose-600' : 'text-slate-500')}>
                 {pnlSummary.totalLoss !== 0 ? `${pnlSummary.totalLoss.toFixed(2)}$` : '0.00$'}
               </span>
             </div>

@@ -199,7 +199,12 @@ async def compute_improvement_status(supabase) -> dict:
                 "z_score_20,ma20_deviation_pct,breakout_deviation_pct,ts"
             )
             .gte("ts", IMPROVEMENT_CUTOFFS["penny_gate_80"])
-            .order("ts", desc=False)
+            .order(
+                "ts", desc=True
+            )  # PostgREST가 limit(2000) 요청도 1000행으로 제한하므로,
+            # 오름차순이면 테이블이 자라날수록 최신 데이터가 통째로 잘려나간다 —
+            # z_score_20/ma20_deviation_pct/breakout_deviation_pct(2026-08-05 도입)가
+            # 표본 0건에 영구히 머물렀던 원인. 내림차순으로 최신 1000행을 보장한다.
             .limit(2000)
             .execute
         ),
