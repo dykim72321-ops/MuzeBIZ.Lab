@@ -110,31 +110,6 @@ export interface StrategyReportsResponse {
   alpaca_data_stale?: boolean;
 }
 
-export interface BacktestRunParams {
-  tickers?: string[];
-  start_date?: string;
-  end_date?: string;
-  gamma?: number;
-  delta?: number;
-  lambda_val?: number;
-  deviation_threshold?: number;
-  target_atr?: number;
-}
-
-export interface BacktestResult {
-  total_trades: number;
-  win_rate: number;
-  avg_pnl: number;
-  avg_win: number;
-  avg_loss: number;
-  profit_factor: number;
-  mdd: number;
-  recovery_days: number;
-  avg_days: number;
-  equity_curve?: { trade: number; value: number }[];
-  is_empty?: boolean;
-}
-
 export type MacdStatus = 'golden' | 'dead' | 'rising' | 'falling';
 
 export interface SimulateRequest {
@@ -379,21 +354,6 @@ export async function testWebhook(): Promise<WebhookTestResponse> {
 }
 
 /**
- * RSI 역추세 전략 백테스팅 실행
- */
-export async function fetchBacktestData(
-  ticker: string,
-  period: string = '1y',
-): Promise<BacktestResult | null> {
-  try {
-    return await apiClient.post<BacktestResult>('/api/backtest', { ticker, period });
-  } catch (error) {
-    console.error(`[PythonAPI] Backtest error for ${ticker}:`, error);
-    return null;
-  }
-}
-
-/**
  * 전략 통계 데이터 조회
  */
 export async function fetchStrategyStats(): Promise<StrategyStats | null> {
@@ -517,10 +477,6 @@ export async function fetchPennyScanStatus(): Promise<PennyScanStatusResponse | 
     console.error('[PythonAPI] Penny scan status error:', error);
     return null;
   }
-}
-
-export async function runBacktest(params: BacktestRunParams): Promise<BacktestResult> {
-  return apiClient.broker.post<BacktestResult>('/api/backtest/run', params);
 }
 
 export async function fetchSimulate(params: SimulateRequest): Promise<SimulateResponse | null> {

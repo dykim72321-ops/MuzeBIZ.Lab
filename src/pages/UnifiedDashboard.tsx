@@ -13,9 +13,7 @@ import {
 } from 'lucide-react';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { CommandSettings } from '../components/dashboard/CommandSettings';
-import { BacktestPanel } from '../components/dashboard/BacktestPanel';
 import { StockTerminalModal } from '../components/dashboard/StockTerminalModal';
-import { TensionGauge } from '../components/dashboard/TensionGauge';
 import { PositionHealthBar } from '../components/dashboard/PositionHealthBar';
 import { PartialSellControl } from '../components/dashboard/PartialSellControl';
 import { DashboardControls } from '../components/dashboard/HeaderCommandBar';
@@ -29,6 +27,40 @@ import type { PaperPosition, PaperHistory } from '../types/dashboard';
 import { useState } from 'react';
 
 const PENNY_ENGINE_THRESHOLD = 1.0;
+
+// 티커 아바타 배경색 — 문자열 해시 기반 고정 팔레트 (같은 티커는 항상 같은 색)
+const AVATAR_PALETTE = [
+  'bg-indigo-500', 'bg-emerald-500', 'bg-rose-500', 'bg-amber-500',
+  'bg-sky-500', 'bg-violet-500', 'bg-teal-500', 'bg-fuchsia-500',
+];
+function tickerAvatarColor(ticker: string): string {
+  let hash = 0;
+  for (let i = 0; i < ticker.length; i++) hash = (hash * 31 + ticker.charCodeAt(i)) | 0;
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+
+// paper_engine.py process_signal()의 dna_gate(75) 실매수 게이트와 정합
+const DNA_GATE_STANDARD = 75;
+// MomentumValidator.validate() — DNA≥80이면 RVOL 재검증을 스킵 (services/market_data.py)
+const MOMENTUM_SKIP_DNA = 80;
+// MomentumValidator.validate() 1차 조건: RVOL < 1.5 → 차단
+const RVOL_MIN = 1.5;
+
+function getSignalStatus(score: number, rvol?: number | null) {
+  const gatePassed = score >= DNA_GATE_STANDARD;
+  const momentumSkipped = score >= MOMENTUM_SKIP_DNA;
+  const momentumOk = momentumSkipped || (rvol != null && rvol >= RVOL_MIN);
+  if (gatePassed && momentumOk) return { label: 'STRONG BUY', barColor: 'bg-rose-500' };
+  if (gatePassed) return { label: 'VOL WAIT', barColor: 'bg-amber-400' };
+  return { label: 'STANDBY', barColor: 'bg-slate-300' };
+}
+
+function dnaTierClassName(score: number): string {
+  if (score >= MOMENTUM_SKIP_DNA) return 'text-rose-700 border-rose-200 bg-rose-50';
+  if (score >= DNA_GATE_STANDARD) return 'text-amber-700 border-amber-200 bg-amber-50';
+  return 'text-slate-600 border-slate-200 bg-slate-50';
+}
+
 
 
 export default function UnifiedDashboard() {
@@ -45,6 +77,7 @@ export default function UnifiedDashboard() {
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
   const [isCompanyLoading, setIsCompanyLoading] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
+  const [positionSortKey, setPositionSortKey] = useState<'pnl' | 'value' | 'date'>('pnl');
 
   const handleCompanyClick = async (ticker: string) => {
     setSelectedCompanyTicker(ticker);
@@ -61,8 +94,17 @@ export default function UnifiedDashboard() {
     }
   };
 
-  // 보유 포지션 수익률(PnL %) 기준 내림차순 정렬
+  // 보유 포지션 정렬 (사용자 선택 기준)
   const sortedLivePositions = [...livePositions].sort((a, b) => {
+    if (positionSortKey === 'value') {
+      const aVal = (a.current_price ?? Number(a.entry_price)) * Math.abs(Number(a.units));
+      const bVal = (b.current_price ?? Number(b.entry_price)) * Math.abs(Number(b.units));
+      return bVal - aVal;
+    }
+    if (positionSortKey === 'date') {
+      return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+    }
+    // default: pnl
     const aPnl = a.unrealized_plpc ?? -999999;
     const bPnl = b.unrealized_plpc ?? -999999;
     return bPnl - aPnl;
@@ -191,35 +233,40 @@ export default function UnifiedDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {discoveryStocks.slice(0, 20).map((stock) => {
+                    {discoveryStocks.slice(0, 20).map((stock, idx) => {
                       const isPenny = (stock.price ?? 0) <= PENNY_ENGINE_THRESHOLD && (stock.price ?? 0) > 0;
+                      const isUp = Number(stock.change_percent ?? 0) >= 0;
+                      const signal = getSignalStatus(stock.dna_score, stock.rvol);
                       return (
                       <div
                         key={stock.ticker}
                         onClick={() => handleDeepDive(stock)}
-                        className="group relative bg-white border border-slate-200 hover:border-indigo-300 rounded-lg py-3.5 px-3 cursor-pointer transition-all shadow-sm hover:shadow-md overflow-hidden"
+                        className="group relative bg-white border border-slate-200 hover:border-indigo-300 rounded-lg py-3 pl-4 pr-3 cursor-pointer transition-all shadow-sm hover:shadow-md overflow-hidden"
                       >
-                        {/* Status Indicator Bar */}
-                        <div className={clsx("absolute left-0 top-0 bottom-0 w-1 transition-colors", Number(stock.change_percent ?? 0) >= 0 ? "bg-emerald-500" : "bg-rose-500")} />
-                        
-                        <div className="flex justify-between items-center pl-2">
-                          <div className="flex flex-col">
-                            <span className="text-sm font-black text-slate-900 tracking-tight">{stock.ticker}</span>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded uppercase tracking-wider">DNA {Number(stock.dna_score).toFixed(1)}</span>
+                        <div className={clsx("absolute left-0 top-0 bottom-0 w-1", signal.barColor)} title={signal.label} />
+                        <div className="flex justify-between items-center gap-3">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <span className="w-4 shrink-0 text-right text-xs font-black text-slate-400 font-mono tabular-nums">
+                              {idx + 1}
+                            </span>
+                            <div className={clsx("w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-white text-[11px] font-black tracking-tight", tickerAvatarColor(stock.ticker))}>
+                              {stock.ticker.slice(0, 2)}
                             </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-3">
-                            <div className="w-16 opacity-80 group-hover:opacity-100 transition-opacity hidden sm:block">
-                              <TensionGauge score={stock.dna_score} rvol={stock.rvol} />
-                            </div>
-                            <div className="text-right min-w-[65px]">
-                              <span className="text-sm font-black text-slate-900 font-mono block leading-none mb-1">${Number(stock.price).toFixed(isPenny ? 4 : 2)}</span>
-                              <span className={clsx("text-[10px] font-bold font-mono block leading-none", Number(stock.change_percent ?? 0) >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                                {Number(stock.change_percent ?? 0) >= 0 ? '▲' : '▼'} {Math.abs(Number(stock.change_percent ?? 0)).toFixed(2)}%
+                            <div className="flex flex-col min-w-0 gap-1">
+                              <span className="text-sm font-black text-slate-900 tracking-tight truncate">{stock.ticker}</span>
+                              <span className={clsx("inline-flex items-center gap-1 w-fit rounded-full border px-1.5 py-0.5 text-[9px] font-black font-mono leading-none", dnaTierClassName(stock.dna_score))}>
+                                DNA&nbsp;{Number(stock.dna_score).toFixed(1)}
                               </span>
                             </div>
+                          </div>
+
+                          <div className="text-right min-w-[65px] shrink-0">
+                            <span className={clsx("text-base font-black font-mono block leading-none mb-1", isUp ? "text-emerald-600" : "text-rose-600")}>
+                              {isUp ? '▲' : '▼'} {Math.abs(Number(stock.change_percent ?? 0)).toFixed(2)}%
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-500 font-mono block leading-none">
+                              ${Number(stock.price).toFixed(isPenny ? 4 : 2)}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -342,6 +389,22 @@ export default function UnifiedDashboard() {
                     {livePositions.length}
                   </span>
                 </div>
+                <div className="flex items-center gap-1">
+                  {([['pnl', '수익률순'], ['value', '평가금액순'], ['date', '매수일순']] as const).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => setPositionSortKey(key)}
+                      className={clsx(
+                        "px-2.5 py-1 rounded-md text-[10px] font-extrabold transition-all",
+                        positionSortKey === key
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-700 border border-slate-200"
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex-1 overflow-x-auto overflow-y-auto bg-white min-w-0">
                 {/* Desktop Table View */}
@@ -349,10 +412,10 @@ export default function UnifiedDashboard() {
                   <thead>
                     <tr className="border-b border-slate-100 text-xs font-mono font-extrabold text-slate-600 uppercase bg-slate-50/80 backdrop-blur-md sticky top-0 shadow-sm z-10">
                       <th className="py-3 px-4">종목</th>
-                      <th className="py-3 px-2 text-right hidden 2xl:table-cell">수량</th>
                       <th className="py-3 px-2 text-right">진입가</th>
                       <th className="py-3 px-2 text-right">현재가</th>
                       <th className="py-3 px-2 text-right hidden 2xl:table-cell">TS</th>
+                      <th className="py-3 px-2 text-right">평가금액</th>
                       <th className="py-3 px-3 text-right">평가 손익</th>
                       <th className="py-3 pl-3 pr-6 text-center">액션</th>
                     </tr>
@@ -367,32 +430,34 @@ export default function UnifiedDashboard() {
                         const pnlPct = hasPnl ? (pos.unrealized_plpc ?? 0) : 0;
                         const tsThreshold = pos.ts_threshold ?? (pos.current_price ?? 0);
                         const isBreached = pos.current_price != null && pos.current_price < tsThreshold;
-                        
+
                         // 하락 변동성이 크거나(5% 이상) 스탑을 이탈한 경우 텐션 부여
-                        const isHighTension = Math.abs(pnlPct) >= 5 || isBreached; 
+                        const isHighTension = Math.abs(pnlPct) >= 5 || isBreached;
                         const dec = pos.isPenny ? 4 : 2;
-                        
+
                         return (
                           <tr key={pos.ticker} className={clsx("transition-colors bg-white", isBreached ? "bg-rose-100/40 hover:bg-rose-100/70 border-l-4 border-rose-600 animate-[pulse_1.5s_ease-in-out_infinite]" : isHighTension ? (isProfit ? "bg-emerald-50/30 hover:bg-emerald-50/50 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 hover:bg-rose-50/50 animate-[pulse_3s_ease-in-out_infinite]") : "hover:bg-slate-50")}>
                             <td className="py-3.5 px-4 relative">
                               {isHighTension && !isBreached && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
-                              <button 
+                              <button
                                 onClick={() => handleCompanyClick(pos.ticker)}
                                 className="text-base font-black text-slate-900 hover:text-black hover:underline block tracking-tight text-left transition-colors"
                               >
                                 {pos.ticker}
                               </button>
                               <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-[10px] font-bold text-slate-500">{pos.isPenny ? 'Penny' : 'Standard'}</span>
+                                <span className="text-[10px] font-bold text-slate-500">{Number(pos.units).toFixed(2)}주 · {pos.isPenny ? 'Penny' : 'Standard'}</span>
                               </div>
                             </td>
-                            <td className="py-3.5 px-2 text-right font-mono text-slate-900 text-sm font-extrabold hidden 2xl:table-cell">{Number(pos.units).toFixed(2)}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-slate-900 text-sm font-extrabold">${Number(pos.entry_price).toFixed(dec)}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-black text-sm font-black">
                               ${pos.current_price ? Number(pos.current_price).toFixed(dec) : '-'}
                             </td>
                             <td className="py-3.5 px-2 text-right font-mono text-slate-700 text-sm font-bold hidden 2xl:table-cell">
                               ${pos.trailing_stop ? Number(pos.trailing_stop).toFixed(dec) : '-'}
+                            </td>
+                            <td className="py-3.5 px-2 text-right font-mono text-slate-900 text-sm font-extrabold">
+                              ${pos.current_price ? (Number(pos.current_price) * Math.abs(Number(pos.units))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
                             </td>
                             <td className={clsx("py-3.5 px-3 text-right font-mono text-sm font-extrabold", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
                               <span className="block">{hasPnl ? `${isProfit ? '+' : '-'}$${Math.abs(Number(pos.unrealized_pl ?? 0)).toFixed(2)}` : '-'}</span>
@@ -423,7 +488,7 @@ export default function UnifiedDashboard() {
                   {livePositions.length === 0 ? (
                     <div className="py-12 text-center text-slate-600 text-sm font-bold bg-white">보유 포지션 없음</div>
                   ) : (
-                    livePositions.map((pos: PaperPosition) => {
+                    sortedLivePositions.map((pos: PaperPosition) => {
                       const hasPnl = pos.unrealized_pl != null;
                       const isProfit = hasPnl && (pos.unrealized_pl ?? 0) >= 0;
                       const pnlPct = hasPnl ? (pos.unrealized_plpc ?? 0) : 0;
@@ -431,21 +496,21 @@ export default function UnifiedDashboard() {
                       const isBreached = pos.current_price != null && pos.current_price < tsThreshold;
                       const isHighTension = Math.abs(pnlPct) >= 5 || isBreached;
                       const dec = pos.isPenny ? 4 : 2;
-                      
+
                       return (
                         <div key={pos.ticker} className={clsx("p-5 bg-white relative transition-colors", isBreached ? "bg-rose-100/40 border-l-4 border-rose-600 animate-[pulse_1.5s_ease-in-out_infinite]" : isHighTension ? (isProfit ? "bg-emerald-50/30 animate-[pulse_3s_ease-in-out_infinite]" : "bg-rose-50/30 animate-[pulse_3s_ease-in-out_infinite]") : "")}>
                           {isHighTension && !isBreached && <div className={clsx("absolute left-0 top-0 bottom-0 w-1", isProfit ? "bg-emerald-500" : "bg-rose-500")} />}
                           <div className="flex justify-between items-start mb-4">
                             <div>
                               <span className="text-lg font-black text-black tracking-tight">{pos.ticker}</span>
-                              <span className="text-[11px] font-bold block text-slate-600 mt-1">{pos.isPenny ? 'Penny' : 'Standard'} • {Number(pos.units).toFixed(2)} Shares</span>
+                              <span className="text-[11px] font-bold block text-slate-500 mt-0.5">{Number(pos.units).toFixed(2)}주 · 평균 ${Number(pos.entry_price).toFixed(dec)}</span>
                             </div>
                             <div className="text-right">
-                              <span className={clsx("text-sm font-mono font-extrabold block", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
-                                {hasPnl ? `${isProfit ? '+' : '-'}$${Math.abs(Number(pos.unrealized_pl ?? 0)).toFixed(2)}` : '-'}
+                              <span className="text-base font-mono font-black text-slate-900 block">
+                                ${pos.current_price ? (Number(pos.current_price) * Math.abs(Number(pos.units))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-'}
                               </span>
                               <span className={clsx("text-[11px] font-mono font-bold block mt-1", hasPnl ? (isProfit ? "text-emerald-600" : "text-rose-600") : "text-slate-600")}>
-                                {hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}%` : '-'}
+                                {hasPnl ? `${isProfit ? '+' : ''}${pnlPct.toFixed(2)}% (${isProfit ? '+' : '-'}$${Math.abs(Number(pos.unrealized_pl ?? 0)).toFixed(2)})` : '-'}
                               </span>
                             </div>
                           </div>
@@ -574,7 +639,6 @@ export default function UnifiedDashboard() {
         </div>
         <div className="p-6 pb-24 space-y-6">
           <CommandSettings />
-          <BacktestPanel />
         </div>
       </div>
 

@@ -131,20 +131,7 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, ava
       color: metrics ? (metrics.exposurePct < 80 ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
       ...getCardStyles(metrics ? (metrics.exposurePct < 70 ? 'neutral' : metrics.exposurePct > 90 ? 'critical' : 'bad') : 'neutral'),
     },
-    {
-      label: 'Consecutive Loss',
-      koLabel: '현재 연속 손실',
-      value: metrics ? `${metrics.consecutiveLosses}연패` : '—',
-      color: metrics ? (metrics.consecutiveLosses === 0 ? 'text-emerald-700' : metrics.consecutiveLosses >= 3 ? 'text-rose-700' : 'text-slate-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.consecutiveLosses === 0 ? 'good' : metrics.consecutiveLosses >= 4 ? 'critical' : metrics.consecutiveLosses >= 2 ? 'bad' : 'neutral') : 'neutral'),
-    },
-    {
-      label: 'Recent Hit Rate',
-      koLabel: '최근 10회 승률',
-      value: metrics ? `${metrics.recentHitRate.toFixed(0)}%` : '—',
-      color: metrics ? (metrics.recentHitRate >= 50 ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.recentHitRate >= 50 ? 'good' : metrics.recentHitRate < 30 ? 'critical' : 'bad') : 'neutral'),
-    },
+
     {
       label: 'Largest Loss',
       koLabel: '최대 단일 손실',

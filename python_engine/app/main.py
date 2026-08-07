@@ -166,7 +166,6 @@ else:
 # ── 라우터 등록 ──────────────────────────────────────────────────────────────
 from routers import (
     analyze,
-    backtest,
     broker,
     checklist,
     edge,
@@ -189,7 +188,6 @@ app.include_router(settings.router)
 app.include_router(analyze.router)
 app.include_router(parts.router)
 app.include_router(portfolio.router)
-app.include_router(backtest.router)
 app.include_router(edge.router)
 app.include_router(strategy.router)
 app.include_router(penny.router)

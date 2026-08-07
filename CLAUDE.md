@@ -160,7 +160,6 @@ FastAPI 앱 생성·라우터 include·시작/종료 시퀀스(`startup_event`/`
 | `penny.py` | `POST /api/penny/scan` |
 | `pulse.py` | `GET /api/pulse/status` |
 | `strategy.py` | `GET /api/strategy/stats` + `stats_cache` 공유 |
-| `backtest.py` | 백테스트 엔드포인트 |
 | `settings.py` | 전략 파라미터 조회/수정 |
 | `checklist.py` | LIVE 전환 체크리스트 |
 | `edge.py`, `parts.py`, `portfolio.py` | 기타 분석·포트폴리오 |
@@ -338,7 +337,9 @@ scale_trigger = (rsi > 52 and profit_pct >= 0.05) or profit_pct >= 0.07
 - **ARM/DISARM 토글**: `POST /api/broker/arm` → `state.py`의 `app_state.SYSTEM_ARMED` 즉시 반영, `paper_engine.py`가 매 시그널마다 참조
 - **Discord Webhook URL 입력 + Test 버튼**: `POST /api/settings/webhook`, `/api/settings/webhook/test` → `app_state.webhook` 즉시 반영 (재시작 불필요)
 
-과거 있었던 "DNA Score Threshold" 슬라이더와 "FLUSH CACHE" 버튼은 삭제됨 (2026-07-08) — 둘 다 DB 컬럼(`alert_threshold`)이나 테이블(`backtest_cache`)에 쓰기는 했지만 백엔드 어디서도 그 값을 읽지 않는 죽은 UI였다. 실제 DNA 매수 게이트(`paper_engine.py`의 `dna_gate=55/70`, `quant_engine.py`의 tier 80/75/65 임계값)와 백테스트 캐시(`routers/backtest.py`의 인메모리 `TTLCache`)는 여전히 하드코딩된 모듈 상수이며, 설정 패널을 통해 조정할 수 없다. 이 상수들을 UI에서 조정 가능하게 하려면 `system_settings`에 실제 컬럼을 추가하고 백엔드가 런타임에 읽도록 리팩터링해야 한다.
+과거 있었던 "DNA Score Threshold" 슬라이더와 "FLUSH CACHE" 버튼은 삭제됨 (2026-07-08) — 둘 다 DB 컬럼(`alert_threshold`)이나 테이블(`backtest_cache`)에 쓰기는 했지만 백엔드 어디서도 그 값을 읽지 않는 죽은 UI였다. 실제 DNA 매수 게이트(`paper_engine.py`의 `dna_gate=55/70`, `quant_engine.py`의 tier 80/75/65 임계값)는 여전히 하드코딩된 모듈 상수이며, 설정 패널을 통해 조정할 수 없다. 이 상수들을 UI에서 조정 가능하게 하려면 `system_settings`에 실제 컬럼을 추가하고 백엔드가 런타임에 읽도록 리팩터링해야 한다.
+
+과거 설정 드로어의 `CommandSettings` 바로 아래에 있던 `BacktestPanel.tsx`("DNA 전략 백테스트" UI, `POST /api/backtest/run` 호출)는 라이브 매매 전략과 무관한 죽은 기능으로 판단되어 프론트엔드 컴포넌트·`pythonApiService.ts`의 `runBacktest()`/`fetchBacktestData()`·백엔드 `routers/backtest.py`(`/api/backtest/*` 엔드포인트, `DNAValidator` 호출부) 전부 삭제됨 (2026-08-07). `engine/portfolio_backtester.py` 자체는 `scripts/optimize_dna.py`·`routers/edge.py`(`run_edge_monitor`)·`backtest_harness/`·`services/kelly_sizer.py`에서 여전히 사용 중이라 삭제하지 않았다.
 
 `/settings` 라우트와 사이드바의 "환경 설정" 메뉴는 100% 목업 데이터로 구성된 별개의 `SettingsView.tsx` 컴포넌트를 가리켰으나, 실제 설정 기능과 무관한 죽은 화면이었으므로 삭제하고 `/stock/dashboard`로 리다이렉트하도록 변경 (2026-07-08). 설정은 이제 대시보드 헤더의 "설정" 버튼(NexGuard Control 패널)에서만 접근한다.
 

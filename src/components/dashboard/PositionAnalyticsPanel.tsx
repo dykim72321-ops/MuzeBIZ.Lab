@@ -9,6 +9,7 @@ import {
   Cell,
 } from 'recharts';
 import type { PaperPosition } from '../../types/dashboard';
+import { computePositionHealth, riskGroupOf, RISK_GROUP_BOX_STYLE } from '../../utils/positionHealth';
 
 interface PositionAnalyticsPanelProps {
   positions: PaperPosition[];
@@ -25,13 +26,27 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
     return positions.map(pos => {
       const value = (pos.current_price != null ? Number(pos.current_price) : Number(pos.entry_price)) * Math.abs(Number(pos.units));
       const weight = totalEquity > 0 ? (value / totalEquity) * 100 : 0;
+      const tone = computePositionHealth(pos.current_price, pos.highest_price, pos.ts_threshold ?? (pos.current_price ?? 0), pos.entry_price).tone;
       return {
         ticker: pos.ticker,
         weight: Math.round(weight * 100) / 100,
         isPenny: pos.isPenny,
+        tone,
       };
     }).sort((a, b) => b.weight - a.weight);
   }, [positions, totalEquity]);
+
+  // 포지션별 위험도 요약 — Active Positions와 동일 기준(computePositionHealth)으로 "한눈에" 파악용
+  const riskSummary = useMemo(() => {
+    return positions.reduce(
+      (acc, pos) => {
+        const tone = computePositionHealth(pos.current_price, pos.highest_price, pos.ts_threshold ?? (pos.current_price ?? 0), pos.entry_price).tone;
+        acc[riskGroupOf(tone)] += 1;
+        return acc;
+      },
+      { safe: 0, watch: 0, danger: 0 }
+    );
+  }, [positions]);
 
   const pnlSummary = useMemo(() => {
     const profitPositions = positions.filter(p => (p.unrealized_pl ?? 0) >= 0);
@@ -56,6 +71,18 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
       <div className="sfdc-card-header">
         <h2 className="text-sm font-black text-black">Position Analytics</h2>
         <PieChart className="w-4 h-4 text-cyan-600" />
+      </div>
+
+      <div className="flex items-center gap-2 px-5 py-2.5 border-b border-slate-100 bg-slate-50/60 overflow-x-auto">
+        <span className={clsx("inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-extrabold whitespace-nowrap", riskSummary.danger > 0 ? "bg-rose-50 text-rose-700 border border-rose-100" : "bg-slate-100 text-slate-400")}>
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> 위험 {riskSummary.danger}
+        </span>
+        <span className={clsx("inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-extrabold whitespace-nowrap", riskSummary.watch > 0 ? "bg-amber-50 text-amber-700 border border-amber-100" : "bg-slate-100 text-slate-400")}>
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> 주의 {riskSummary.watch}
+        </span>
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-extrabold whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-100">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> 안전 {riskSummary.safe}
+        </span>
       </div>
 
       <div className="p-5 flex flex-col gap-6">
@@ -95,19 +122,22 @@ export const PositionAnalyticsPanel = ({ positions, totalEquity }: PositionAnaly
 
           {/* 범례 (Legend) - 2열로 배치하여 티커와 비중 텍스트가 잘리지 않도록 함 */}
           <div className="w-full grid grid-cols-2 gap-x-2 gap-y-2">
-            {weightData.map((entry, index) => (
-              <div key={entry.ticker} className="flex items-center justify-between gap-1 bg-slate-50/60 px-2 py-1.5 rounded-lg border border-slate-100 hover:border-slate-200 transition-colors min-w-0">
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  <div className="w-2 h-2 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                  <span className="text-[11px] font-black text-slate-800 truncate" title={entry.ticker}>
-                    {entry.ticker}
+            {weightData.map((entry, index) => {
+              const boxStyle = RISK_GROUP_BOX_STYLE[riskGroupOf(entry.tone)];
+              return (
+                <div key={entry.ticker} className={clsx("flex items-center justify-between gap-1 px-2 py-1.5 rounded-lg border transition-colors min-w-0", boxStyle)}>
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <div className="w-2 h-2 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                    <span className="text-[11px] font-black text-slate-800 truncate" title={entry.ticker}>
+                      {entry.ticker}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-500 font-mono shrink-0 ml-1">
+                    {entry.weight}%
                   </span>
                 </div>
-                <span className="text-[10px] font-bold text-slate-500 font-mono shrink-0 ml-1">
-                  {entry.weight}%
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
