@@ -45,15 +45,15 @@ const CompactGauge = React.memo(function CompactGauge({
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-[11px] font-black text-slate-900 tabular-nums">{Math.round(pct)}%</span>
+          <span className="text-sm font-black text-slate-900 tabular-nums">{Math.round(pct)}%</span>
         </div>
       </div>
       <div className="flex flex-col items-center justify-center min-w-0 w-full overflow-hidden text-center">
-        <span className="text-[11px] font-black text-slate-900 uppercase tracking-tight font-mono block truncate w-full" title={title}>
+        <span className="text-[13px] font-black text-slate-900 uppercase tracking-tight font-mono block truncate w-full" title={title}>
           {title}
         </span>
         {subtitle && (
-          <span className="text-[10px] font-extrabold text-slate-500 block font-mono leading-tight truncate w-full" title={subtitle}>{subtitle}</span>
+          <span className="text-xs font-extrabold text-slate-500 block font-mono leading-tight truncate w-full" title={subtitle}>{subtitle}</span>
         )}
       </div>
     </div>
