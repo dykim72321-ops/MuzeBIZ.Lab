@@ -39,14 +39,6 @@ export function computePositionHealth(
   return { tone: 'safe', label: 'SAFE', healthPct, distanceToStopPct };
 }
 
-// tone(7단계)을 위험도 요약 스트립용 3단계로 축약 — Active Positions/Position Analytics 공용
-export type PositionRiskGroup = 'safe' | 'watch' | 'danger';
-export function riskGroupOf(tone: PositionHealthTone): PositionRiskGroup {
-  if (tone === 'breached' || tone === 'critical' || tone === 'danger') return 'danger';
-  if (tone === 'watch') return 'watch';
-  return 'safe'; // safe / riskfree / waiting
-}
-
 export const POSITION_STATUS_BADGE: Record<PositionHealthTone, { label: string; dot: string; text: string }> = {
   waiting: { label: '대기중', dot: 'bg-slate-300', text: 'text-slate-500' },
   breached: { label: '스탑이탈', dot: 'bg-rose-700 animate-pulse', text: 'text-rose-700' },
@@ -55,11 +47,4 @@ export const POSITION_STATUS_BADGE: Record<PositionHealthTone, { label: string; 
   watch: { label: '주의', dot: 'bg-amber-400', text: 'text-amber-600' },
   riskfree: { label: '무위험', dot: 'bg-cyan-500', text: 'text-cyan-600' },
   safe: { label: '안전', dot: 'bg-emerald-500', text: 'text-emerald-600' },
-};
-
-// 위험도 요약 스트립(위험/주의/안전)과 동일한 색으로 종목 상자 자체를 물들일 때 사용
-export const RISK_GROUP_BOX_STYLE: Record<PositionRiskGroup, string> = {
-  danger: 'bg-rose-50 border-rose-200 hover:border-rose-300',
-  watch: 'bg-amber-50 border-amber-200 hover:border-amber-300',
-  safe: 'bg-emerald-50/60 border-emerald-100 hover:border-emerald-200',
 };

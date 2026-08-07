@@ -19,7 +19,6 @@ import { PartialSellControl } from '../components/dashboard/PartialSellControl';
 import { DashboardControls } from '../components/dashboard/HeaderCommandBar';
 import { MetricsGrid } from '../components/dashboard/MetricsGrid';
 import { RiskAnalyticsPanel } from '../components/dashboard/RiskAnalyticsPanel';
-import { PositionAnalyticsPanel } from '../components/dashboard/PositionAnalyticsPanel';
 import { CompanyInfoModal } from '../components/dashboard/CompanyInfoModal';
 import type { CompanyInfo } from '../components/dashboard/CompanyInfoModal';
 import { apiClient } from '../services/apiClient';
@@ -59,6 +58,50 @@ function dnaTierClassName(score: number): string {
   if (score >= MOMENTUM_SKIP_DNA) return 'text-rose-700 border-rose-200 bg-rose-50';
   if (score >= DNA_GATE_STANDARD) return 'text-amber-700 border-amber-200 bg-amber-50';
   return 'text-slate-600 border-slate-200 bg-slate-50';
+}
+
+// 저유동성 종목이 시장가 전량 청산 시 부분체결되면 잔여 물량이 몇 초~몇십 초 뒤
+// 별도 paper_history 행으로 다시 기록된다(engine/paper_engine.py _close_position
+// 참고) — 같은 포지션의 청산인데 매도 비율이 행마다 달라 보이는 원인. 같은
+// 티커·같은 진입가로 10분 이내에 이어진 행은 하나의 청산 이벤트로 합쳐서 보여준다.
+const PARTIAL_EXIT_MERGE_WINDOW_MS = 10 * 60 * 1000;
+
+function mergePartialExits(trades: PaperHistory[]): (PaperHistory & { legCount?: number })[] {
+  const merged: (PaperHistory & { legCount?: number })[] = [];
+  for (const trade of trades) {
+    const prev = merged[merged.length - 1];
+    const prevTime = prev ? new Date(prev.closed_at || prev.created_at || 0).getTime() : NaN;
+    const curTime = new Date(trade.closed_at || trade.created_at || 0).getTime();
+    const sameEvent =
+      prev &&
+      prev.ticker === trade.ticker &&
+      prev.entry_price === trade.entry_price &&
+      Number.isFinite(prevTime) &&
+      Number.isFinite(curTime) &&
+      Math.abs(prevTime - curTime) <= PARTIAL_EXIT_MERGE_WINDOW_MS;
+
+    if (sameEvent) {
+      const legCount = (prev.legCount ?? 1) + 1;
+      const prevProfit = Number(prev.profit_amt ?? 0);
+      const curProfit = Number(trade.profit_amt ?? 0);
+      const baseReason = (prev.exit_reason || trade.exit_reason || '')
+        .replace(/\s*\(부분체결[^)]*\)/, '')
+        .trim();
+      merged[merged.length - 1] = {
+        ...prev,
+        exit_price: trade.exit_price, // 마지막(최종) 체결가를 대표값으로 사용
+        profit_amt: prevProfit + curProfit,
+        // pnl_pct는 단가 기준 비율이라 물량 가중 없이는 정확히 합산할 수 없으므로
+        // 두 체결가의 평균 비율로 근사 표시한다 (참고용 — 정밀 계산은 profit_amt 기준)
+        pnl_pct: (Number(prev.pnl_pct ?? 0) + Number(trade.pnl_pct ?? 0)) / 2,
+        exit_reason: `${baseReason} (분할청산 ${legCount}건)`,
+        legCount,
+      };
+    } else {
+      merged.push({ ...trade, legCount: 1 });
+    }
+  }
+  return merged;
 }
 
 
@@ -194,13 +237,14 @@ export default function UnifiedDashboard() {
           {/* ── LEFT COLUMN: Alpha Discovery & Status (Span 3) ── */}
           <div className="lg:col-span-5 xl:col-span-3 flex flex-col gap-5 min-w-0">
 
-            <div className="sfdc-card">
-              <div className="sfdc-card-header">
+            <div className="sfdc-card flex-1 flex flex-col min-h-[300px]">
+              {/* Action Center Section */}
+              <div className="sfdc-card-header border-b-0 pb-3">
                 <h2 className="text-sm font-black flex items-center gap-2">
                   <Activity className="w-4 h-4 text-slate-900" /> Action Center
                 </h2>
               </div>
-              <div className="p-5 bg-white">
+              <div className="px-5 pb-4 bg-white border-b border-slate-100">
                 <button
                   onClick={handleLiveHuntingTrigger}
                   disabled={isHunting || isCooldown}
@@ -215,18 +259,16 @@ export default function UnifiedDashboard() {
                   </p>
                 )}
               </div>
-            </div>
 
-            <div className="sfdc-card flex-1 flex flex-col min-h-[300px]">
-              <div className="sfdc-card-header py-3.5 px-4 flex justify-between items-center">
+              {/* Alpha Stocks Section */}
+              <div className="py-3.5 px-4 flex justify-between items-center bg-slate-50/80">
                 <div>
-                  <h2 className="text-sm font-black flex items-center gap-2">
-                    <TestTube className="w-4 h-4 text-slate-900" /> 오늘의 알파 종목
+                  <h2 className="text-sm font-black flex items-center gap-2 text-slate-900">
+                    <TestTube className="w-4 h-4 text-indigo-600" /> 오늘의 알파 종목
                   </h2>
-                  <p className="text-[11px] text-slate-500 font-bold mt-0.5">DNA 75점 이상 엄선 (최대 20개)</p>
                 </div>
               </div>
-              <div className="p-3 pt-1 flex-1 overflow-y-auto min-h-0 bg-slate-50/50 pr-2">
+              <div className={clsx("p-3 pt-1 flex-1 overflow-y-auto min-h-0 bg-slate-50/50 pr-2 transition-opacity duration-300", isHunting ? "opacity-30 pointer-events-none" : "opacity-100")}>
                 {discoveryStocks.length === 0 ? (
                   <div className="text-center py-10 text-slate-600 font-bold text-sm">
                     발굴된 종목이 없습니다.
@@ -380,8 +422,8 @@ export default function UnifiedDashboard() {
             </div>
 
             <div className="sfdc-card flex-1 flex flex-col min-h-[300px] min-w-0">
-              <div className="sfdc-card-header">
-                <div className="flex items-center gap-3">
+              <div className="sfdc-card-header flex-wrap gap-y-2">
+                <div className="flex items-center gap-3 flex-wrap gap-y-2">
                   <h2 className="text-sm font-black flex items-center gap-2">
                     <LayoutGrid className="w-4 h-4 text-slate-900" /> Active Positions
                   </h2>
@@ -445,8 +487,8 @@ export default function UnifiedDashboard() {
                               >
                                 {pos.ticker}
                               </button>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-[10px] font-bold text-slate-500">{Number(pos.units).toFixed(2)}주 · {pos.isPenny ? 'Penny' : 'Standard'}</span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-xs font-sans font-extrabold text-teal-600">{Number(pos.units).toFixed(2)}주</span>
                               </div>
                             </td>
                             <td className="py-3.5 px-2 text-right font-mono text-slate-900 text-sm font-extrabold">${Number(pos.entry_price).toFixed(dec)}</td>
@@ -503,7 +545,9 @@ export default function UnifiedDashboard() {
                           <div className="flex justify-between items-start mb-4">
                             <div>
                               <span className="text-lg font-black text-black tracking-tight">{pos.ticker}</span>
-                              <span className="text-[11px] font-bold block text-slate-500 mt-0.5">{Number(pos.units).toFixed(2)}주 · 평균 ${Number(pos.entry_price).toFixed(dec)}</span>
+                              <span className="text-xs font-sans font-extrabold text-teal-600 block mt-1">
+                                {Number(pos.units).toFixed(2)}주 <span className="text-[11px] font-bold text-slate-500">· 평균 ${Number(pos.entry_price).toFixed(dec)}</span>
+                              </span>
                             </div>
                             <div className="text-right">
                               <span className="text-base font-mono font-black text-slate-900 block">
@@ -544,21 +588,17 @@ export default function UnifiedDashboard() {
 
           {/* ── RIGHT COLUMN: Risk & Analytics & Logs (Span 3) ── */}
           <div className="lg:col-span-12 xl:col-span-3 grid grid-cols-1 md:grid-cols-2 xl:flex xl:flex-col gap-5 min-w-0">
-            <div className="flex flex-col gap-5">
-              <RiskAnalyticsPanel 
-                history={slicedHistory} 
-                portfolioHistory={slicedPortfolioHistory} 
-                totalEquity={displayedAccount.total_assets}
-                availableCash={displayedAccount.cash_available}
-              />
-              <PositionAnalyticsPanel positions={livePositions} totalEquity={displayedAccount.total_assets} />
-            </div>
+            <RiskAnalyticsPanel
+              history={slicedHistory}
+              portfolioHistory={slicedPortfolioHistory}
+            />
 
-            <div className="sfdc-card flex flex-col h-[500px]">
+            {/* max-h가 없으면 그리드 아이템 특성상 30건이 전부 펼쳐져 열 전체가 늘어난다 — 상한을 둬야 내부 overflow-y-auto가 발동한다 */}
+            <div className="sfdc-card flex flex-col min-h-[400px] max-h-[640px] xl:flex-1">
               <div className="sfdc-card-header pb-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-black flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-slate-900" /> Recent Exits
+                    <Clock className="w-4 h-4 text-slate-900" /> Trading Journal
                   </h2>
                 </div>
               </div>
@@ -567,7 +607,7 @@ export default function UnifiedDashboard() {
                   <div className="text-center py-10 text-slate-500 text-sm font-bold border border-dashed border-slate-200 rounded-xl m-2">최근 청산 내역이 없습니다</div>
                 ) : (
                   <div className="space-y-3 w-full">
-                    {liveHistory.slice(0, 30).map((trade: PaperHistory, idx: number) => {
+                    {mergePartialExits(liveHistory).slice(0, 30).map((trade, idx: number) => {
                       const isWin = Number(trade.profit_amt) >= 0;
                       const reasonText = trade.exit_reason || 'MANUAL EXIT';
                       
@@ -595,12 +635,17 @@ export default function UnifiedDashboard() {
                                   {reasonText}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-1.5 text-[10px] font-mono font-semibold text-slate-500">
-                                <span className="text-slate-400">E:</span>
-                                <span>${trade.entry_price < 1 ? Number(trade.entry_price).toFixed(4) : Number(trade.entry_price).toFixed(2)}</span>
-                                <span className="text-slate-300">→</span>
-                                <span className="text-slate-400">X:</span>
-                                <span>${trade.exit_price < 1 ? Number(trade.exit_price).toFixed(4) : Number(trade.exit_price).toFixed(2)}</span>
+                              <div className="flex flex-col gap-0.5 mt-1">
+                                <div className="text-[10px] font-bold text-slate-400">
+                                  {new Date(trade.created_at || Date.now()).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[10px] font-mono font-semibold text-slate-500">
+                                  <span className="text-slate-400">E:</span>
+                                  <span>${trade.entry_price < 1 ? Number(trade.entry_price).toFixed(4) : Number(trade.entry_price).toFixed(2)}</span>
+                                  <span className="text-slate-300">→</span>
+                                  <span className="text-slate-400">X:</span>
+                                  <span>${trade.exit_price < 1 ? Number(trade.exit_price).toFixed(4) : Number(trade.exit_price).toFixed(2)}</span>
+                                </div>
                               </div>
                             </div>
 

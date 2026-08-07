@@ -6,8 +6,6 @@ import type { PaperHistory, PortfolioHistoryPoint } from '../../types/dashboard'
 interface RiskAnalyticsPanelProps {
   history: PaperHistory[];
   portfolioHistory?: PortfolioHistoryPoint[];
-  totalEquity: number;
-  availableCash: number;
 }
 
 function getCardStyles(status: 'good' | 'bad' | 'neutral' | 'critical') {
@@ -29,31 +27,13 @@ function getCardStyles(status: 'good' | 'bad' | 'neutral' | 'critical') {
   };
 }
 
-export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, availableCash }: RiskAnalyticsPanelProps) => {
+export const RiskAnalyticsPanel = ({ history, portfolioHistory }: RiskAnalyticsPanelProps) => {
   const metrics = useMemo(() => {
     if ((!history || history.length === 0) && (!portfolioHistory || portfolioHistory.length === 0)) return null;
 
-    // 1. Current Exposure (자본 노출도)
-    const exposurePct = totalEquity > 0 ? ((totalEquity - availableCash) / totalEquity) * 100 : 0;
-
-    // 2. Consecutive Losses (현재 연속 손실 횟수)
-    // History is usually chronological or reverse-chronological. Let's sort to be sure (newest first).
-    const sortedDesc = [...history].sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
-    let consecutiveLosses = 0;
-    for (const trade of sortedDesc) {
-      if (Number(trade.profit_amt) < 0) {
-        consecutiveLosses++;
-      } else if (Number(trade.profit_amt) > 0) {
-        break; // Stop at first win
-      }
-    }
-
-    // 3. Recent 10 Hit Rate (최근 10회 승률)
-    const recentTrades = sortedDesc.slice(0, 10);
-    const recentWins = recentTrades.filter(t => Number(t.profit_amt) > 0).length;
-    const recentHitRate = recentTrades.length > 0 ? (recentWins / recentTrades.length) * 100 : 0;
-
-    // 4. Largest Losing Trade (최대 단일 손실률)
+    // 1. Largest Losing Trade (최대 단일 손실률)
+    //    TS는 브로커 스탑이 아니라 1분봉 폴링 임계값이라 갭다운 시 명목 상한(-5%)을 초과 체결될 수 있다.
+    //    이 지표가 그 방어선이 실제로 지켜졌는지를 보여주는 유일한 화면상 신호이므로 유지한다.
     const pnlPcts = history.map(h => Number(h.pnl_pct || 0));
     const largestLoss = pnlPcts.length > 0 ? Math.min(...pnlPcts, 0) : 0; // Negative number
 
@@ -94,17 +74,14 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, ava
       cdd = peak > 0 ? Math.abs((equity - peak) / peak) * 100 : 0;
     }
 
-    return { 
-      exposurePct, 
-      consecutiveLosses, 
-      recentHitRate, 
-      largestLoss, 
+    return {
+      largestLoss,
       cdd,
       mdd,
-      avgWin: avgWin * 100, 
-      avgLoss: avgLoss * 100 
+      avgWin: avgWin * 100,
+      avgLoss: avgLoss * 100
     };
-  }, [history, portfolioHistory, totalEquity, availableCash]);
+  }, [history, portfolioHistory]);
 
   if (!metrics) {
     return (
@@ -125,14 +102,6 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, ava
       ...getCardStyles(metrics ? (metrics.cdd < 2 ? 'good' : metrics.cdd > 8 ? 'critical' : metrics.cdd > 4 ? 'bad' : 'neutral') : 'neutral'),
     },
     {
-      label: 'Current Exposure',
-      koLabel: '시장 노출도',
-      value: metrics ? `${metrics.exposurePct.toFixed(1)}%` : '—',
-      color: metrics ? (metrics.exposurePct < 80 ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
-      ...getCardStyles(metrics ? (metrics.exposurePct < 70 ? 'neutral' : metrics.exposurePct > 90 ? 'critical' : 'bad') : 'neutral'),
-    },
-
-    {
       label: 'Largest Loss',
       koLabel: '최대 단일 손실',
       value: metrics ? `${metrics.largestLoss.toFixed(2)}%` : '—',
@@ -144,6 +113,8 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, ava
       koLabel: '평균 수익/손실률',
       value: metrics ? `${metrics.avgWin.toFixed(1)}% / ${metrics.avgLoss.toFixed(1)}%` : '—',
       color: metrics ? (metrics.avgWin > Math.abs(metrics.avgLoss) ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-900',
+      // 값 문자열이 가장 길어 2칸 그리드에서 홀로 남는 자리를 전폭으로 채운다
+      wide: true,
       ...getCardStyles(metrics ? (metrics.avgWin > Math.abs(metrics.avgLoss) ? 'good' : 'bad') : 'neutral'),
     },
   ];
@@ -157,7 +128,7 @@ export const RiskAnalyticsPanel = ({ history, portfolioHistory, totalEquity, ava
 
       <div className="p-3 grid grid-cols-2 gap-2">
         {cards.map(card => (
-          <div key={card.label} className={clsx("relative rounded-md overflow-hidden border", card.borderColor)}>
+          <div key={card.label} className={clsx("relative rounded-md overflow-hidden border", card.borderColor, 'wide' in card && card.wide && "col-span-2")}>
             {/* 1. 배경 애니메이션 레이어 (투명도 조절로 깜빡임 구현, 글씨에는 영향 없음) */}
             <div className={clsx("absolute inset-0", card.bgAnimClass)}></div>
             
