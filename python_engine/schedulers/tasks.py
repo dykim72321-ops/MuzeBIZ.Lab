@@ -23,6 +23,12 @@ async def mtf_cache_scheduler():
 
     while True:
         try:
+            # 시장 레짐(SPY)은 확장 시간대에도 갱신한다 — 정규장 밖 신호에도
+            # engine_decisions.market_regime을 남길 수 있어야 시간대별 비교가
+            # 한쪽만 비는 일이 없다. 관심종목 EMA와 달리 1요청뿐이라 비용도 낮다.
+            if is_extended_market_hours():
+                await app_state.mtf_cache.update_market_regime()
+
             if is_market_hours():
                 held = list(app_state._held_tickers)
                 discovery = await asyncio.to_thread(

@@ -401,73 +401,88 @@ export async function fetchTradeSourceReconciliation(days: number = 7): Promise<
   }
 }
 
-export interface ChecklistItem {
-  item_key: string;
-  category: string;
-  label: string;
-  is_checked: boolean;
-  checked_at: string | null;
-  sort_order: number;
-  is_automated?: boolean;
-  auto_note?: string;
-}
-
 /**
- * 실계좌 전환 체크리스트 조회
+ * 통합 준비도 상태 — 데이터 신뢰도 / 전략 개선 검증 / 실계좌 전환 게이트 세 축을
+ * 하나의 item 스키마로 정규화한 값 (2026-08-08 `/api/checklist/unified` 통합).
+ *
+ * PASSED/BLOCKED는 실계좌 게이트 전용, 나머지 4개는 개선·데이터 품질 항목에서 쓰인다.
  */
-export async function fetchChecklist(): Promise<ChecklistItem[]> {
-  try {
-    return await apiClient.broker.get<ChecklistItem[]>('/api/checklist');
-  } catch (error) {
-    console.error('[PythonAPI] Checklist fetch error:', error);
-    return [];
-  }
-}
+export type UnifiedStatus =
+  | 'COLLECTING'
+  | 'ON_TRACK'
+  | 'VERIFIED'
+  | 'REGRESSED'
+  | 'PASSED'
+  | 'BLOCKED';
 
-/**
- * 실계좌 전환 체크리스트 항목 토글
- */
-export async function toggleChecklistItem(itemKey: string): Promise<ChecklistItem> {
-  return apiClient.broker.post<ChecklistItem>(`/api/checklist/${itemKey}/toggle`, {});
-}
-
-export type ImprovementStatus = 'COLLECTING' | 'ON_TRACK' | 'VERIFIED' | 'REGRESSED';
-
-export interface ImprovementMetric {
+export interface UnifiedMetric {
   label: string;
   value: string;
 }
 
-export interface ImprovementItem {
+export interface UnifiedItem {
   key: string;
   label: string;
-  adopted_at: string;
-  status: ImprovementStatus;
+  category: string;
+  status: UnifiedStatus;
   progress_pct: number;
-  metrics: ImprovementMetric[];
+  metrics: UnifiedMetric[];
   note: string;
-  /** REGRESSED가 연속 확정되어 파라미터가 자동으로 되돌려졌는지 (forward_return_logger는 항상 false) */
+  /** 개선 항목의 도입일. 게이트·품질 항목은 null */
+  adopted_at: string | null;
+  /** 사용자가 직접 토글할 수 있는 항목인지 (자동 판정 항목은 false) */
+  is_manual: boolean;
+  /** 실계좌 게이트 전용 체크 상태. 그 외 그룹은 null */
+  is_checked: boolean | null;
+  checked_at?: string | null;
+  /** REGRESSED가 연속 확정되어 파라미터가 자동으로 되돌려졌는지 */
   auto_rollback_applied: boolean;
-  /** 자동 롤백이 실제로 무엇을 바꿨는지 (auto_rollback_applied=false면 null) */
+  /** 자동 롤백이 실제로 무엇을 바꿨는지 (미적용이면 null) */
   auto_rollback_detail: string | null;
 }
 
-export interface ImprovementStatusResponse {
+export interface UnifiedGroup {
+  key: 'data_quality' | 'improvements' | 'live_gate';
+  title: string;
+  subtitle: string;
+  items: UnifiedItem[];
+}
+
+export interface UnifiedSummary {
+  gate_passed: number;
+  gate_total: number;
+  gate_blocking: string[];
+  improvement_counts: Partial<Record<UnifiedStatus, number>>;
+  improvement_rolled_back: number;
+  /** 통계적 유효 표본 — 행 수가 아니라 오염되지 않은 라벨이 쌓인 거래일 수 */
+  independent_days: number;
+  target_days: number;
+  contamination_pct: number;
+}
+
+export interface UnifiedReadinessResponse {
   generated_at: string;
-  items: ImprovementItem[];
+  summary: UnifiedSummary;
+  groups: UnifiedGroup[];
 }
 
 /**
- * 개선 항목(Forward Return 로거/ATR 스탑/Whipsaw 수정/확장도 가드 등) 검증 진행 현황
- * ※ 페니 게이트 80 항목은 2026-07-30 레거시 제거(DNA 게이트 75 통일)로 백엔드에서 삭제됨
+ * 통합 준비도 조회 — 구 fetchChecklist()/fetchImprovementStatus()를 대체한다.
  */
-export async function fetchImprovementStatus(): Promise<ImprovementStatusResponse | null> {
+export async function fetchUnifiedReadiness(): Promise<UnifiedReadinessResponse | null> {
   try {
-    return await apiClient.broker.get<ImprovementStatusResponse>('/api/checklist/improvements');
+    return await apiClient.broker.get<UnifiedReadinessResponse>('/api/checklist/unified');
   } catch (error) {
-    console.error('[PythonAPI] Improvement status error:', error);
+    console.error('[PythonAPI] Unified readiness fetch error:', error);
     return null;
   }
+}
+
+/**
+ * 수동 체크리스트 항목 토글 (is_manual=true 항목만 허용 — 자동 판정 항목은 백엔드가 403)
+ */
+export async function toggleChecklistItem(itemKey: string): Promise<void> {
+  await apiClient.broker.post(`/api/checklist/${itemKey}/toggle`, {});
 }
 
 export async function fetchPennyScanStatus(): Promise<PennyScanStatusResponse | null> {

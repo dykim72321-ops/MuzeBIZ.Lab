@@ -81,6 +81,38 @@ def is_extended_market_hours(ref_dt=None) -> bool:
     return open_min <= cur_min < close_min
 
 
+def et_time_bucket(ref_dt=None) -> str:
+    """신호 시점을 정규장 기준 ET 시간대 버킷으로 분류한다.
+
+    engine_decisions.time_bucket에 기록되어 "언제 발생한 신호인가"를 사후 분석
+    가능하게 한다(2026-08-08 도입). 경계값은 미국 주식의 관측된 일중 유동성
+    패턴을 따른다 — 개장 30분(OPEN)과 마감 30분(CLOSE)은 변동성·스프레드가
+    구조적으로 다르므로 별도 버킷으로 분리한다.
+
+    정규장(09:30~16:00 ET) 밖이거나 주말/휴장일이면 "EXTENDED"를 반환한다.
+    """
+    if ref_dt is not None:
+        now_et = ref_dt.astimezone(ZoneInfo("America/New_York"))
+    else:
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+
+    if not _is_trading_day(now_et):
+        return "EXTENDED"
+
+    cur_min = now_et.hour * 60 + now_et.minute
+    if cur_min < 9 * 60 + 30 or cur_min >= 16 * 60:
+        return "EXTENDED"
+    if cur_min < 10 * 60:
+        return "OPEN"
+    if cur_min < 11 * 60 + 30:
+        return "MORNING"
+    if cur_min < 14 * 60:
+        return "MIDDAY"
+    if cur_min < 15 * 60 + 30:
+        return "AFTERNOON"
+    return "CLOSE"
+
+
 class PartNormalizer:
     @staticmethod
     def clean_mpn(mpn: str) -> str:

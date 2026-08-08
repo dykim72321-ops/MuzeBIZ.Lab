@@ -7,6 +7,7 @@ routers/checklist.py — /api/checklist/* 엔드포인트
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Security, status
@@ -26,7 +27,22 @@ CHECKLIST_MIN_WIN_RATE = 55
 CHECKLIST_MIN_PROFIT_FACTOR = 1.3
 CHECKLIST_MAX_MDD = -15.0
 
-# ── 개선 검증 트래커 상수 (get_improvement_status에서 사용) ──────────────────
+# ── 데이터 품질 진단 상수 (compute_data_quality에서 사용) ────────────────────
+ET_TZ = ZoneInfo("America/New_York")
+# 개선 판정에 필요한 최소 "독립 거래일" 수. 행 수가 아니라 거래일로 세는 이유는
+# 같은 날 신호들이 서로 독립 표본이 아니기 때문 (2026-08-08 일자 클러스터 재분석:
+# 겉보기 1,722행이 실제로는 4거래일이었고, 그 기준으로 재검정하니 유의해 보이던
+# 관계가 전부 무너졌다).
+TARGET_INDEPENDENT_DAYS = 20
+# forward_return_logger 측정 버그가 수정된 날 (schedulers/tasks.py 참고).
+# 이 날 이전 라벨은 백필로도 복구되지 않아(2026-08-03 실측 96.1% 오염) 현재
+# 로거 건강도 판정에서는 제외한다 — 누적 오염률로만 따로 표시한다.
+LABEL_FIX_DATE = "2026-08-04"
+# 하루에 이만큼은 정상 라벨이 쌓여야 그 날을 "독립 관측일 1일"로 인정한다.
+# 오염 구간에 한두 건씩 섞여 있던 정상 행까지 세면 유효 표본이 과대 계상된다.
+MIN_CLEAN_ROWS_PER_DAY = 20
+
+# ── 개선 검증 트래커 상수 (compute_improvement_status에서 사용) ──────────────
 # 도입일: 각 개선이 실제로 코드에 반영·배포된 날 (이후 데이터만 효과 측정에 사용)
 IMPROVEMENT_ADOPTED = {
     "whipsaw_fix": "2026-07-13",  # 당일 재진입 금지 + 종목당 일일 거래 제한
@@ -166,34 +182,11 @@ def _verify_status(
     return "VERIFIED" if metric > baseline else "REGRESSED"
 
 
-@router.get("")
-async def get_checklist(api_key: str = Security(get_api_key)):
-    supabase = app_state.supabase
-    if not supabase:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DB 미연결"
-        )
-
-    res = await asyncio.to_thread(
-        supabase.table("live_transition_checklist")
-        .select("*")
-        .order("sort_order", desc=False)
-        .execute
-    )
-    return res.data or []
-
-
-@router.get("/improvements")
-async def get_improvement_status(api_key: str = Security(get_api_key)):
-    """개선 항목의 검증 진행 현황 조회 엔드포인트. 실계산은 compute_improvement_status()에 위임
-    (evaluate_improvement_rollback() 스케줄러도 동일 함수를 재사용해 판정 로직을 단일화한다).
-    ※ 페니 게이트 80 항목은 2026-07-30 레거시 제거(DNA 게이트 75 통일)로 삭제됨."""
-    supabase = app_state.supabase
-    if not supabase:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DB 미연결"
-        )
-    return await compute_improvement_status(supabase)
+# 참고: 구 `/api/checklist`(게이트 목록)·`/api/checklist/improvements`(개선 목록)
+# 두 조회 엔드포인트는 2026-08-08 `/api/checklist/unified`로 통합되면서 삭제됐다 —
+# 프론트엔드가 단일 패널로 합쳐지며 호출부가 사라져 죽은 라우트가 되기 때문.
+# 개선 판정 계산 자체(compute_improvement_status)는 evaluate_improvement_rollback()
+# 스케줄러와 통합 엔드포인트가 함께 재사용하므로 함수로 그대로 남아있다.
 
 
 def _calc_metrics_expectancy(
@@ -1032,6 +1025,282 @@ async def compute_improvement_status(supabase) -> dict:
         item["auto_rollback_detail"] = applied["action_detail"] if applied else None
 
     return {"generated_at": now_utc.isoformat(), "items": items}
+
+
+async def compute_data_quality(supabase) -> dict:
+    """engine_decisions 라벨의 신뢰도를 진단한다 (2026-08-08 도입).
+
+    배경: 개선 검증 트래커와 실계좌 게이트는 둘 다 "표본이 몇 건 쌓였는가"만
+    보고 판정해 왔는데, 2026-08-08 재분석에서 그 표본의 상당수가 애초에 신뢰할
+    수 없는 값이었음이 드러났다 —
+
+      (1) forward_return_logger 측정 버그(2026-08-04 수정)로 30분·60분 창이
+          같은 순간의 같은 가격으로 채워진 행이 8/3 이전 구간에 70~100% 존재.
+          백필로도 해소되지 않아 그 구간 라벨은 사실상 전량 폐기 대상이다.
+      (2) 같은 날 같은 시장에 노출된 종목들은 서로 독립 표본이 아니다. 겉보기
+          1,722행이 실제로는 4거래일에 불과했고, 일자 클러스터 기준으로 다시
+          검정하면 유의해 보이던 관계가 전부 무너졌다.
+
+    두 사실 모두 기존 화면 어디에도 드러나지 않아 "표본 100건 달성 → VERIFIED"
+    같은 판정이 실제 근거보다 훨씬 강해 보였다. 이 함수는 그 착시를 막기 위한
+    진단 지표를 통합 화면에 노출한다 — 판정을 바꾸지는 않고 신뢰도만 표시한다.
+    """
+    now_utc = datetime.now(timezone.utc)
+
+    # 일자별로 미리 접힌 뷰를 쓴다 — 행 단위로 조회하면 PostgREST의 1,000행 상한에
+    # 걸려(2026-08-07 버그) 하루 500~900행인 현재 적재 속도에서는 최신 2일치조차
+    # 못 덮는다. 뷰는 한 달치도 30행이라 상한과 무관하다.
+    res = await asyncio.to_thread(
+        supabase.table("engine_decisions_daily_quality")
+        .select("*")
+        .order("et_date", desc=True)
+        .limit(90)
+        .execute
+    )
+    days = res.data or []
+
+    labeled_all = sum(d["labeled_rows"] for d in days)
+    contaminated_all = sum(d["contaminated_rows"] for d in days)
+    regime_rows = sum(d["regime_rows"] for d in days)
+    contamination_pct_all = (
+        (contaminated_all / labeled_all * 100) if labeled_all else 0.0
+    )
+
+    # 로거 수정일 이후만으로 "현재 건강도"를 잰다 — 수정 전 행은 백필로도 복구되지
+    # 않은 영구 잔재라(2026-08-03 실측 96.1% 오염) 누적 평균에 섞으면 지금 로거가
+    # 정상인데도 계속 경고가 뜬다.
+    fixed = [d for d in days if d["et_date"] >= LABEL_FIX_DATE]
+    labeled_fixed = sum(d["labeled_rows"] for d in fixed)
+    contaminated_fixed = sum(d["contaminated_rows"] for d in fixed)
+    contamination_pct = (
+        (contaminated_fixed / labeled_fixed * 100) if labeled_fixed else 0.0
+    )
+
+    # 독립 거래일 = 쓸 만한 양의 정상 라벨이 쌓인 날의 수. 같은 날 신호들은 서로
+    # 독립 표본이 아니므로 통계적 유효 표본은 행 수가 아니라 이 값에 가깝다.
+    # 정상 라벨이 한두 건뿐인 날(오염 구간의 잔여분)까지 세면 유효 표본이 과대
+    # 계상되므로 하루 최소 건수 기준을 둔다.
+    usable_days = [
+        d
+        for d in days
+        if (d["labeled_rows"] - d["contaminated_rows"]) >= MIN_CLEAN_ROWS_PER_DAY
+    ]
+    clean_rows = sum(d["labeled_rows"] - d["contaminated_rows"] for d in usable_days)
+
+    return {
+        "generated_at": now_utc.isoformat(),
+        "sample_n": clean_rows,
+        "sample_n_raw": labeled_all,
+        "contamination_pct": round(contamination_pct, 1),
+        "contamination_pct_all": round(contamination_pct_all, 1),
+        "independent_days": len(usable_days),
+        "target_days": TARGET_INDEPENDENT_DAYS,
+        "regime_logged_rows": regime_rows,
+    }
+
+
+def _data_quality_items(dq: dict) -> list:
+    """데이터 품질 진단을 통합 화면의 항목 형태로 변환."""
+    sample_n = dq["sample_n"]
+    contam = dq["contamination_pct"]
+    days = dq["independent_days"]
+    target_days = dq["target_days"]
+
+    # 오염률: 측정 버그 수정 후 정상 범위는 한 자릿수(실측 2.5~5.6%). 두 자릿수면
+    # 로거가 다시 밀리고 있다는 신호이므로 경고한다.
+    if sample_n < 50:
+        contam_status = "COLLECTING"
+    elif contam >= 10:
+        contam_status = "REGRESSED"
+    else:
+        contam_status = "VERIFIED"
+
+    return [
+        {
+            "key": "label_contamination",
+            "label": "Forward Return 라벨 무결성",
+            "category": "데이터 품질",
+            "status": contam_status,
+            "progress_pct": max(0, min(100, round(100 - contam))),
+            "metrics": [
+                {"label": f"오염률 ({LABEL_FIX_DATE} 이후)", "value": f"{contam:.1f}%"},
+                {
+                    "label": "누적 오염률(전 기간)",
+                    "value": f"{dq['contamination_pct_all']:.1f}%",
+                },
+                {
+                    "label": "사용 가능 표본",
+                    "value": f"{sample_n:,}건 / 전체 {dq['sample_n_raw']:,}건",
+                },
+            ],
+            "note": (
+                "30분·60분 창이 동일 값이면 폴링 지연으로 같은 가격이 두 번 쓰인 것이라 "
+                f"그 행의 수익률 라벨은 신뢰할 수 없다. {LABEL_FIX_DATE} 측정 버그 수정 후 "
+                "정상 범위는 한 자릿수(실측 2.5~5.6%)이며, 10% 이상이면 로거 지연을 "
+                "점검해야 한다. 수정 이전 행은 백필로도 복구되지 않아 분석에서 제외 대상이다."
+            ),
+            "adopted_at": None,
+            "is_manual": False,
+            "is_checked": None,
+            "auto_rollback_applied": False,
+            "auto_rollback_detail": None,
+        },
+        {
+            "key": "independent_days",
+            "label": "독립 관측일수 (일자 클러스터)",
+            "category": "데이터 품질",
+            "status": "VERIFIED" if days >= target_days else "COLLECTING",
+            "progress_pct": (
+                min(100, round(days / target_days * 100)) if target_days else 0
+            ),
+            "metrics": [
+                {"label": "독립 거래일", "value": f"{days}일 / 목표 {target_days}일"},
+                {"label": "정상 라벨 표본", "value": f"{sample_n:,}행"},
+            ],
+            "note": (
+                "같은 날 신호들은 같은 시장에 노출돼 서로 독립이 아니다 — 통계적 유효 표본은 "
+                "행 수가 아니라 거래일 수에 가깝다. 이 값이 목표에 못 미치면 아래 개선 항목들의 "
+                "VERIFIED/REGRESSED 판정도 근거가 얕다고 보아야 한다."
+            ),
+            "adopted_at": None,
+            "is_manual": False,
+            "is_checked": None,
+            "auto_rollback_applied": False,
+            "auto_rollback_detail": None,
+        },
+        {
+            "key": "regime_logging",
+            "label": "시간대·시장 레짐 관찰 축 적재",
+            "category": "데이터 품질",
+            "status": "COLLECTING" if dq["regime_logged_rows"] < 500 else "VERIFIED",
+            "progress_pct": min(100, round(dq["regime_logged_rows"] / 500 * 100)),
+            "metrics": [
+                {"label": "적재 행수", "value": f"{dq['regime_logged_rows']:,}건"},
+            ],
+            "note": (
+                "2026-08-08 도입한 관찰 전용 축(time_bucket/market_regime). 매매 게이트에는 "
+                "반영하지 않는다 — 4거래일치 데이터로 로직을 바꾸는 것은 rsi_falling_knife_fix"
+                "(도입 3일 만에 자동 롤백)와 동일한 실패 패턴이다."
+            ),
+            "adopted_at": "2026-08-08",
+            "is_manual": False,
+            "is_checked": None,
+            "auto_rollback_applied": False,
+            "auto_rollback_detail": None,
+        },
+    ]
+
+
+@router.get("/unified")
+async def get_unified_status(api_key: str = Security(get_api_key)):
+    """실계좌 전환 게이트 + 전략 개선 검증 + 데이터 품질을 한 스키마로 통합 반환.
+
+    기존에는 `/api/checklist`(게이트)와 `/api/checklist/improvements`(개선)가 서로
+    다른 스키마로 분리돼 있어 화면도 둘로 나뉘었고, "개선이 REGRESSED인데 게이트는
+    왜 그대로인가", "표본이 부족한데 판정은 왜 났는가" 같은 교차 질문에 답할 수
+    없었다. 세 축을 같은 item 스키마로 정규화해 한 화면에서 함께 읽도록 한다.
+    """
+    supabase = app_state.supabase
+    if not supabase:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DB 미연결"
+        )
+
+    checklist_res, improvements, dq = await asyncio.gather(
+        asyncio.to_thread(
+            supabase.table("live_transition_checklist")
+            .select("*")
+            .order("sort_order", desc=False)
+            .execute
+        ),
+        compute_improvement_status(supabase),
+        compute_data_quality(supabase),
+    )
+
+    # ── 게이트 항목 정규화 ──────────────────────────────────────────────────
+    gate_items = []
+    for row in checklist_res.data or []:
+        gate_items.append(
+            {
+                "key": row["item_key"],
+                "label": row["label"],
+                "category": row.get("category") or "기타",
+                "status": "PASSED" if row.get("is_checked") else "BLOCKED",
+                "progress_pct": 100 if row.get("is_checked") else 0,
+                "metrics": (
+                    [{"label": "자동 판정", "value": row["auto_note"]}]
+                    if row.get("auto_note")
+                    else []
+                ),
+                "note": row.get("auto_note") or "",
+                "adopted_at": None,
+                # is_automated가 False인 항목만 사용자가 직접 토글할 수 있다
+                # (kill_switch_verified 리허설 등).
+                "is_manual": not row.get("is_automated", True),
+                "is_checked": bool(row.get("is_checked")),
+                "checked_at": row.get("checked_at"),
+                "auto_rollback_applied": False,
+                "auto_rollback_detail": None,
+            }
+        )
+
+    # ── 개선 항목 정규화 (스키마 정렬만, 판정 로직은 그대로 재사용) ─────────
+    improvement_items = []
+    for it in improvements.get("items", []):
+        improvement_items.append(
+            {
+                **it,
+                "category": "전략 개선 검증",
+                "is_manual": False,
+                "is_checked": None,
+                "checked_at": None,
+            }
+        )
+
+    quality_items = _data_quality_items(dq)
+
+    passed = sum(1 for i in gate_items if i["status"] == "PASSED")
+    status_counts: dict = defaultdict(int)
+    for it in improvement_items:
+        status_counts[it["status"]] += 1
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "gate_passed": passed,
+            "gate_total": len(gate_items),
+            "gate_blocking": [
+                i["label"] for i in gate_items if i["status"] == "BLOCKED"
+            ],
+            "improvement_counts": dict(status_counts),
+            "improvement_rolled_back": sum(
+                1 for i in improvement_items if i.get("auto_rollback_applied")
+            ),
+            "independent_days": dq["independent_days"],
+            "target_days": dq["target_days"],
+            "contamination_pct": dq["contamination_pct"],
+        },
+        "groups": [
+            {
+                "key": "data_quality",
+                "title": "데이터 신뢰도",
+                "subtitle": "아래 두 그룹의 판정을 얼마나 믿을 수 있는지",
+                "items": quality_items,
+            },
+            {
+                "key": "improvements",
+                "title": "전략 개선 검증",
+                "subtitle": "채택된 개선이 실제로 성과를 냈는지 (REGRESSED 연속 시 자동 롤백)",
+                "items": improvement_items,
+            },
+            {
+                "key": "live_gate",
+                "title": "실계좌 전환 게이트",
+                "subtitle": "LIVE 전환 전 반드시 통과해야 하는 조건",
+                "items": gate_items,
+            },
+        ],
+    }
 
 
 @router.post("/{item_key}/toggle")

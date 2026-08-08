@@ -20,8 +20,7 @@ import {
   type StrategyReportBucket,
   type TradeSourceReconciliation,
 } from '../services/pythonApiService';
-import { LiveTransitionChecklist } from '../components/dashboard/LiveTransitionChecklist';
-import { ImprovementTracker } from '../components/dashboard/ImprovementTracker';
+import { UnifiedReadinessPanel } from '../components/dashboard/UnifiedReadinessPanel';
 
 type TimeRange = 'day' | 'week' | 'month';
 
@@ -414,10 +413,7 @@ export default function ReportsPage() {
               </div>
             )}
 
-            {/* 3. 전략 개선 검증 트래커 (100% 가로 전체 폭 넓이 확장 — 항상 표시) */}
-            <ImprovementTracker />
-
-            {/* 4. 실계좌 전환 체크리스트 (100% 가로 전체 폭 넓이 확장 — 항상 표시) */}
+            {/* 3. 데이터 소스 괴리 경고 (엔진 로그 vs Alpaca 실체결 불일치 시에만) */}
             {reconciliation?.available && reconciliation.diverged && (
               <div className="sfdc-card p-5 border-2 border-amber-300 bg-amber-50/60 flex flex-col gap-2">
                 <div className="flex items-center gap-2 text-amber-700">
@@ -431,7 +427,8 @@ export default function ReportsPage() {
                 </p>
               </div>
             )}
-            <LiveTransitionChecklist />
+            {/* 4. 통합 준비도 (데이터 신뢰도 + 전략 개선 검증 + 실계좌 게이트) */}
+            <UnifiedReadinessPanel />
 
           </div>
         )}

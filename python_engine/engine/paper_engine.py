@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from services.quant_engine import SPIKE_GUARD_PCT_NORMAL
-from utils.utils import is_backfilled_phantom_trade
+from utils.utils import et_time_bucket, is_backfilled_phantom_trade
 
 _NY_TZ = ZoneInfo(
     "America/New_York"
@@ -427,8 +427,23 @@ class PaperTradingManager:
 
         efficiency_ratio(smoothed_er)는 DNA_Score 무용론 확정(2026-07-31, 4중 검증)
         이후 대안 피처 후보 검증용으로 추가됐다 — trailing stop 레짐 판정에 이미
-        쓰이던 값을 재사용만 하는 것이라 매매 로직에는 아무 영향이 없다."""
+        쓰이던 값을 재사용만 하는 것이라 매매 로직에는 아무 영향이 없다.
+
+        time_bucket/market_regime(2026-08-08)은 호출부가 넘기지 않고 여기서 직접
+        산출한다 — 신호 시점의 시각과 전역 시장 상태만으로 결정되는 값이라 호출
+        경로(전체 DNA 경로/HOLD 경량 경로/스위퍼)마다 따로 전달할 이유가 없고,
+        한 곳에서 채워야 경로별 누락이 생기지 않는다. 시장 레짐 캐시가 없거나
+        낡았으면(None) 컬럼은 NULL로 남으며 매매 판단에는 일절 쓰이지 않는다."""
         try:
+            market_regime = None
+            try:
+                from app.state import app_state  # 순환 import 회피 (지연 import)
+
+                if app_state.mtf_cache:
+                    market_regime = app_state.mtf_cache.get_market_regime()
+            except Exception:
+                market_regime = None  # 레짐 조회 실패가 결정 로깅 자체를 막지 않도록
+
             row = {
                 "ticker": ticker,
                 "gate": gate,
@@ -449,6 +464,8 @@ class PaperTradingManager:
                 "z_score_20": z_score_20,
                 "ma20_deviation_pct": ma20_deviation_pct,
                 "breakout_deviation_pct": breakout_deviation_pct,
+                "time_bucket": et_time_bucket(),
+                "market_regime": market_regime,
             }
             await asyncio.to_thread(
                 self.supabase.table("engine_decisions").insert(row).execute

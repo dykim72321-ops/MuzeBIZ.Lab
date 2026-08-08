@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -278,11 +279,24 @@ class TickerDataState:
 # ── MTF Cache ────────────────────────────────────────────────────────────────
 
 
+MARKET_REGIME_SYMBOL = "SPY"  # 시장 레짐 판정 기준 지수 ETF
+# 레짐 캐시가 이 시간보다 오래되면 None을 반환한다 — 스케줄러가 15분 주기이므로
+# 한 사이클을 건너뛰어도 유효하되, 장 초반/장 마감 후 낡은 값이 신호에 붙는 것은 막는다.
+MARKET_REGIME_STALE_MINUTES = 45
+
+
 class MTFCache:
-    """15분봉 20 EMA 값을 백그라운드에서 주기적으로 캐싱하는 클래스"""
+    """15분봉 20 EMA 값을 백그라운드에서 주기적으로 캐싱하는 클래스.
+
+    2026-08-08부터 개별 종목 EMA와 별개로 시장 전체 레짐(SPY 15분봉 종가 vs
+    20 EMA)도 함께 캐싱한다 — engine_decisions.market_regime 기록용.
+    """
 
     def __init__(self):
         self.ema_15m_20: Dict[str, float] = {}
+        # ── 시장 레짐 캐시 (SPY 기준) ──
+        self.market_regime: Optional[str] = None  # "UPTREND" | "DOWNTREND"
+        self.market_regime_at: Optional[datetime] = None
         api_key = os.getenv("APCA_API_KEY_ID")
         api_secret = os.getenv("APCA_API_SECRET_KEY")
         self.alpaca_client = None
@@ -387,6 +401,65 @@ class MTFCache:
 
     def get_15m_ema(self, ticker: str) -> Optional[float]:
         return self.ema_15m_20.get(ticker)
+
+    async def update_market_regime(self):
+        """SPY 15분봉 종가 vs 20 EMA로 시장 레짐을 갱신한다 (Alpaca 1요청).
+
+        MomentumValidator가 개별 종목에 적용하는 "현재가 > 15분봉 20 EMA = 상위
+        추세 양호" 판정을 그대로 지수(SPY)에 적용한 것이라 정의가 일관된다.
+
+        개별 종목 EMA 캐시(update_cache)와 분리한 이유: SPY는 watchlist/보유
+        종목과 무관하게 항상 필요한데, 종목 목록에 섞으면 그 목록이 비는 순간
+        (관심종목 0건 등) 레짐도 함께 끊긴다. 또 종목 EMA는 EMA 값만 있으면
+        되지만 레짐은 종가까지 필요해 저장 구조가 다르다.
+        """
+        if not self.alpaca_client:
+            return
+        try:
+            from alpaca.data.requests import StockBarsRequest
+            from alpaca.data.timeframe import TimeFrameUnit
+
+            end_dt = datetime.now(timezone.utc)
+            start_dt = end_dt - timedelta(days=5)
+            req = StockBarsRequest(
+                symbol_or_symbols=[MARKET_REGIME_SYMBOL],
+                timeframe=TimeFrame(15, TimeFrameUnit.Minute),
+                start=start_dt,
+                end=end_dt,
+                feed=DataFeed.IEX,
+            )
+            bars = await asyncio.to_thread(self.alpaca_client.get_stock_bars, req)
+            if not bars or bars.df is None or bars.df.empty:
+                return
+            if MARKET_REGIME_SYMBOL not in bars.df.index:
+                return
+
+            spy_df = bars.df.loc[MARKET_REGIME_SYMBOL]
+            if len(spy_df) < 20:
+                return
+            ema_20 = ta.trend.EMAIndicator(spy_df["close"], window=20).ema_indicator()
+            if ema_20.empty or pd.isna(ema_20.iloc[-1]):
+                return
+
+            last_close = float(spy_df["close"].iloc[-1])
+            last_ema = float(ema_20.iloc[-1])
+            self.market_regime = "UPTREND" if last_close > last_ema else "DOWNTREND"
+            self.market_regime_at = datetime.now(timezone.utc)
+            print(
+                f"🧭 [MTF Cache] Market regime = {self.market_regime} "
+                f"({MARKET_REGIME_SYMBOL} {last_close:.2f} vs EMA20 {last_ema:.2f})"
+            )
+        except Exception as e:
+            print(f"⚠️ [MTF Cache] Market regime update failed: {e}")
+
+    def get_market_regime(self) -> Optional[str]:
+        """캐시된 시장 레짐. 미갱신이거나 낡았으면 None (기록 시 NULL로 남는다)."""
+        if self.market_regime is None or self.market_regime_at is None:
+            return None
+        age = datetime.now(timezone.utc) - self.market_regime_at
+        if age > timedelta(minutes=MARKET_REGIME_STALE_MINUTES):
+            return None
+        return self.market_regime
 
 
 # ── Momentum Validator ───────────────────────────────────────────────────────

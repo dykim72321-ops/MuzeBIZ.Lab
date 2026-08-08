@@ -161,7 +161,7 @@ FastAPI 앱 생성·라우터 include·시작/종료 시퀀스(`startup_event`/`
 | `pulse.py` | `GET /api/pulse/status` |
 | `strategy.py` | `GET /api/strategy/stats` + `stats_cache` 공유 |
 | `settings.py` | 전략 파라미터 조회/수정 |
-| `checklist.py` | LIVE 전환 체크리스트 |
+| `checklist.py` | 통합 준비도 — `GET /api/checklist/unified`(데이터 신뢰도 + 전략 개선 검증 + LIVE 전환 게이트) + `POST /api/checklist/{item_key}/toggle` |
 | `edge.py`, `parts.py`, `portfolio.py` | 기타 분석·포트폴리오 |
 
 ### 공유 전역 상태 (`app/state.py`)
@@ -407,6 +407,8 @@ Frontend (Vite :5173)
 | `/api/strategy/stats` | GET | 승률, PF, MDD 통계 |
 | `/api/broker/status` | GET | Alpaca 연결 상태 |
 | `/api/pulse/status` | GET | 펄스 엔진 시장 상태 |
+| `/api/checklist/unified` | GET | 통합 준비도 — 데이터 신뢰도·전략 개선 검증·LIVE 게이트 3그룹을 단일 item 스키마로 반환 (2026-08-08 통합) |
+| `/api/checklist/{item_key}/toggle` | POST | 수동 체크리스트 항목 토글 (자동 판정 항목은 403) |
 | `/ws/pulse` | WebSocket | 1분봉 실시간 스트림 |
 
 ---
@@ -480,8 +482,13 @@ VITE_ADMIN_SECRET_KEY
 ### Backend (`/python_engine/.env`)
 ```
 SUPABASE_URL
-SUPABASE_KEY                  # service role key (RLS 우회)
-SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_KEY                  # ⚠️ 현재 실제 값은 anon 키다 (2026-08-08 JWT 디코드로 확인).
+                              # 문서상 "service role key (RLS 우회)"로 적혀 있었으나 사실과 달랐음 —
+                              # RLS를 우회하지 못하므로 테이블 정책에 없는 작업은 실패한다.
+                              # 예: engine_decisions는 읽기·삽입 정책만 있어 DELETE가 조용히 무시된다
+                              # (엔진은 삽입만 하므로 현재 동작에는 영향 없음).
+                              # 관리자 권한이 필요한 작업은 `supabase db query --linked`로 수행한다.
+SUPABASE_SERVICE_ROLE_KEY     # 현재 .env에 없음 (미설정)
 APCA_API_KEY_ID
 APCA_API_SECRET_KEY
 APCA_PAPER=true               # false = 실제 자금 (주의)
@@ -492,6 +499,46 @@ DISABLE_ALPACA_STREAM=false   # true 시 WebSocket 비활성화 → REST 60초 �
 NEXAR_CLIENT_ID               # Nexar(Octopart) 부품 검색 병행 소스, 비어있으면 자동 스킵
 NEXAR_CLIENT_SECRET
 ```
+
+---
+
+## 통합 준비도 화면 (2026-08-08)
+
+`ReportsPage.tsx`의 "전략 개선 검증 트래커"(`ImprovementTracker.tsx`)와 "실계좌 전환 체크리스트"(`LiveTransitionChecklist.tsx`) 두 패널을 **`UnifiedReadinessPanel.tsx` 하나로 통합**했다. 두 컴포넌트와 각각의 조회 엔드포인트(`GET /api/checklist`, `GET /api/checklist/improvements`), 프론트 서비스 함수(`fetchChecklist`/`fetchImprovementStatus`)·타입(`ChecklistItem`/`ImprovementItem` 등)은 전부 삭제됐다. 판정 계산 함수 `compute_improvement_status()`는 `evaluate_improvement_rollback()` 스케줄러와 통합 엔드포인트가 공유하므로 그대로 남아있다.
+
+통합의 이유는 화면 정리가 아니라 **교차 질문에 답할 수 없던 구조** 때문이다 — "개선이 REGRESSED인데 게이트는 왜 그대로인가", "표본이 부족한데 판정은 왜 났는가"를 두 화면을 번갈아 봐서는 알 수 없었다.
+
+### 세 그룹 구조
+
+| 그룹 | 내용 | 상태 값 |
+|---|---|---|
+| `data_quality` | 라벨 무결성 · 독립 관측일수 · 신규 관찰 축 적재 | VERIFIED / COLLECTING / REGRESSED |
+| `improvements` | 기존 개선 검증 트래커 항목 (판정 로직 변경 없음) | VERIFIED / ON_TRACK / COLLECTING / REGRESSED |
+| `live_gate` | 기존 실계좌 전환 체크리스트 10항목 | PASSED / BLOCKED |
+
+### 데이터 신뢰도 그룹이 새로 드러내는 것
+
+2026-08-08 재분석에서 기존 화면이 **판정의 근거를 실제보다 강해 보이게** 하고 있었음이 확인됐다:
+
+1. **라벨 오염** — `forward_return_logger` 측정 버그(2026-08-04 수정)로 30분·60분 창이 같은 값으로 채워진 행이 8/3 이전 구간에 70~100% 존재한다. 백필로도 복구되지 않아 그 구간 라벨은 사실상 전량 폐기 대상인데, 기존 트래커는 이 행들을 정상 표본으로 세고 있었다. 현재 화면은 수정일 이후 오염률(실측 3.3%)과 전 기간 누적 오염률(15.8%)을 분리해 표시한다.
+2. **독립 관측일수** — 같은 날 신호들은 같은 시장에 노출돼 서로 독립 표본이 아니다. 겉보기 1,722행이 실제로는 **4거래일**이었고, 일자 클러스터로 재검정하니 유의해 보이던 관계(MIDDAY×UPTREND 초과수익 +1.04%)가 t=1.67·3일 중 1일 음수로 무너졌다. `TARGET_INDEPENDENT_DAYS=20`에 미달하면 화면 상단에 "아래 판정은 모두 잠정치" 경고 배너가 뜬다.
+
+독립 거래일 계산은 `MIN_CLEAN_ROWS_PER_DAY=20` 이상 정상 라벨이 쌓인 날만 1일로 인정한다 — 오염 구간에 한두 건씩 섞인 정상 행까지 세면 유효 표본이 과대 계상된다.
+
+### `engine_decisions_daily_quality` 뷰
+
+데이터 품질 집계는 **행 단위 조회가 아니라 일자별 집계 뷰**로 계산한다. PostgREST가 요청 limit과 무관하게 1,000행 상한을 걸기 때문에(2026-08-07 알파 팩터 0건 버그와 같은 원인), 하루 500~900행이 쌓이는 현재 속도에서는 최신 1,000행이 2일치도 못 덮어 "독립 거래일 20일" 같은 목표가 구조적으로 도달 불가능했다. 뷰는 한 달치도 30행이라 상한과 무관하다. `security_invoker=true`로 생성해 RLS를 우회하지 않는다.
+
+### 시간대 · 시장 레짐 관찰 축 (관찰 전용)
+
+`engine_decisions`에 `time_bucket`·`market_regime` 두 컬럼을 추가했다.
+
+- `time_bucket`: `utils/utils.py`의 `et_time_bucket()`이 ET 기준으로 분류 — `OPEN`(9:30-10:00) / `MORNING`(~11:30) / `MIDDAY`(~14:00) / `AFTERNOON`(~15:30) / `CLOSE`(~16:00) / `EXTENDED`(정규장 밖·휴장일)
+- `market_regime`: `MTFCache.update_market_regime()`이 SPY 15분봉 종가 > 15분봉 20 EMA면 `UPTREND` — MomentumValidator가 개별 종목에 쓰는 상위 추세 판정을 지수에 그대로 적용한 정의다. `mtf_cache_scheduler`가 확장 거래시간에도 15분마다 갱신하고(1요청), 캐시가 45분 넘게 낡으면 `None`을 반환해 컬럼이 NULL로 남는다.
+
+두 값은 `_log_decision()` 내부에서 직접 산출한다 — 호출 경로(전체 DNA 경로 / HOLD 경량 경로 / 스위퍼)마다 인자로 넘기면 경로별 누락이 생기기 때문.
+
+**이 두 축은 매매 게이트에 일절 반영하지 않는다.** 4거래일치 데이터로 로직을 바꾸는 것은 `rsi_falling_knife_fix`(도입 3일 만에 REGRESSED 자동 롤백)와 동일한 실패 패턴이라, 판정 가능한 최소 표본(≥20거래일)을 모으는 것이 유일한 목적이다.
 
 ---
 
